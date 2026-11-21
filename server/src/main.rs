@@ -5,6 +5,7 @@ mod http_api;
 mod markdown;
 mod model;
 mod ops;
+mod search;
 mod store;
 mod web_app;
 mod ydoc;
@@ -43,6 +44,10 @@ const SAVE_INTERVAL: Duration = Duration::from_secs(2);
 /// valid and the Page still readable, even when nothing is sent. Changes are
 /// checked each time they arrive.
 const ACCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(15);
+
+/// How often the search index takes in what changed. With `SAVE_INTERVAL`
+/// this bounds how soon an edit can be found.
+const SEARCH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Where the data directory is when `TURTLE_DATA` does not say: beside
 /// wherever Turtle was started.
@@ -120,6 +125,7 @@ impl App {
                 page.unsaved.store(true, Ordering::SeqCst);
                 return Err(error.into());
             }
+            self.core.page_changed(&id);
         }
         Ok(())
     }
@@ -173,6 +179,21 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // The first round rebuilds the index if it was missing.
+    let indexer = core.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(SEARCH_INTERVAL);
+        loop {
+            tick.tick().await;
+            let core = indexer.clone();
+            match tokio::task::spawn_blocking(move || core.catch_up_search()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("updating the search index failed: {error:#}"),
+                Err(error) => eprintln!("updating the search index panicked: {error}"),
+            }
+        }
+    });
+
     let router = Router::new()
         .route("/ws/{page}", get(connect))
         .route(
@@ -195,6 +216,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     app.save_changed_pages()?;
+    app.core.close_search()?;
     Ok(())
 }
 

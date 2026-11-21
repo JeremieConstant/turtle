@@ -18,6 +18,12 @@ export type Entry = {
   title: string
 }
 
+export type Fragment = {
+  /** Whether this piece is a word that matched. */
+  highlighted: boolean
+  text: string
+}
+
 export type Grant = {
   holder: GrantHolder
   /** The Member's name, or "All Members". */
@@ -81,6 +87,26 @@ export type Role = "read" | "write" | "admin"
 export type RoleAfterwards = {
   /** The Role the caller now holds on the Area; absent once they have none. */
   role?: Role | null
+}
+
+export type SearchResult = {
+  area_id: string
+  area_name: string
+  page_id: string
+  /** The titles of the Pages and Folders above the Page, from the top of
+its Area down. */
+  path: string[]
+  /** A passage of the content around the first match, in pieces; the
+highlighted pieces are the words that matched. The beginning of the
+content when only the title matched, and empty for a Page without
+content. A passage cut from a longer text begins or ends with "…". */
+  snippet: Fragment[]
+  title: string
+}
+
+export type SearchResults = {
+  /** The best match first, at most 20. */
+  results: SearchResult[]
 }
 
 export type Session = {
@@ -288,5 +314,16 @@ export type Operations = {
       area_id: string
     }
     output: Tree
+  }
+  /** Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. Pages the caller cannot read never appear. */
+  search: {
+    input: {
+      /** The Area to search in; everything the caller can read if absent. */
+      area_id?: string | null
+      /** What to look for, as typed. The last word also matches words it is
+the beginning of, so results can be shown while typing. */
+      query: string
+    }
+    output: SearchResults
   }
 }

@@ -18,6 +18,14 @@ use yrs::{
 /// The name of the fragment the editor binds to.
 const FRAGMENT: &str = "default";
 
+/// The content of a Page from its stored state.
+pub fn read_state(state: &[u8]) -> anyhow::Result<Vec<Block>> {
+    use yrs::updates::decoder::Decode;
+    let doc = Doc::new();
+    doc.transact_mut().apply_update(yrs::Update::decode_v1(state)?)?;
+    Ok(read(&doc))
+}
+
 pub fn read(doc: &Doc) -> Vec<Block> {
     let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
     let txn = doc.transact();

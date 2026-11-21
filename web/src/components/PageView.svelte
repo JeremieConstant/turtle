@@ -51,7 +51,7 @@
   })
 </script>
 
-<AppHeader>
+<AppHeader areaId={page.area.id}>
   <a class="area" href={areaLink} onclick={event => router.follow(event, areaLink)}>{page.area.name}</a>
   <span class="title">{page.title}</span>
   <People awareness={connection.awareness} />

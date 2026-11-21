@@ -119,6 +119,11 @@ impl TestServer {
         assert!(status.success(), "the server stopped with {status}");
     }
 
+    /// The data directory the server keeps everything in.
+    pub fn data_dir(&self) -> &Path {
+        self.data_dir.path()
+    }
+
     /// Stops the server and starts it again on the same data directory. The
     /// port may change.
     pub async fn restart(&mut self) {

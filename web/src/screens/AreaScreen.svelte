@@ -99,7 +99,7 @@
 {#if missing}
   <NotFoundScreen />
 {:else}
-  <AppHeader />
+  <AppHeader areaId={id} />
   <main>
     {#if loadFailed}
       <p class="muted">This Area could not be loaded. Reload the page to try again.</p>

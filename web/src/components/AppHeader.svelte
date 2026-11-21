@@ -2,8 +2,10 @@
   import type { Snippet } from 'svelte'
   import { router } from '../lib/router.svelte'
   import { session } from '../lib/session.svelte'
+  import SearchBox from './SearchBox.svelte'
 
-  const { children }: { children?: Snippet } = $props()
+  /** `areaId` is the Area being looked at, which the search covers by default. */
+  const { children, areaId }: { children?: Snippet; areaId?: string } = $props()
 
   function goHome(event: MouseEvent) {
     event.preventDefault()
@@ -23,6 +25,7 @@
 <header>
   <a class="brand" href="/" onclick={goHome}>Turtle</a>
   {@render children?.()}
+  <SearchBox {areaId} />
   {#if session.member?.workspace_admin}
     <a class="members" href="/settings/members" onclick={goToMembers}>Members</a>
   {/if}

@@ -151,3 +151,48 @@ pub fn role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlit
         .flatten();
     Ok(rank.and_then(Role::from_rank))
 }
+
+/// The node whose Grants apply to this one: the nearest at or above it that
+/// carries any, or the root of its Area when none does. `None` when the node
+/// does not exist.
+///
+/// Search stores this with each Page. In the MVP only roots carry Grants, so
+/// it never changes; once Subtrees carry their own, giving a node its first
+/// Grant or taking its last must mark the Pages beneath it as changed.
+pub fn governing_node(db: &Connection, node_id: &str) -> rusqlite::Result<Option<String>> {
+    db.query_row(
+        "WITH RECURSIVE upward (id, parent_id, depth) AS (
+             SELECT id, parent_id, 0 FROM nodes WHERE id = ?1
+             UNION ALL
+             SELECT nodes.id, nodes.parent_id, upward.depth + 1
+             FROM nodes JOIN upward ON nodes.id = upward.parent_id
+         )
+         SELECT id FROM upward
+         WHERE parent_id IS NULL
+            OR EXISTS (SELECT 1 FROM grants WHERE grants.node_id = upward.id)
+         ORDER BY depth LIMIT 1",
+        [node_id],
+        |row| row.get(0),
+    )
+    .optional()
+}
+
+/// The nodes whose Grants let the principal read: everything a node in this
+/// list governs (see `governing_node`) is readable to them, and nothing else
+/// is. `None` for a Workspace Admin, who reads everything.
+pub fn readable_through(db: &Connection, principal: &Principal) -> rusqlite::Result<Option<Vec<String>>> {
+    let member_id = match principal {
+        Principal::Anonymous => return Ok(Some(Vec::new())),
+        Principal::Member { workspace_admin: true, .. } => return Ok(None),
+        Principal::Member { id, .. } => id,
+    };
+    // Every Role includes Read, so any Grant to them or to all Members will do.
+    let mut statement = db.prepare("SELECT DISTINCT node_id FROM grants WHERE holder IN (?1, ?2)")?;
+    let nodes = statement
+        .query_map(
+            rusqlite::params![Holder::Member(member_id.clone()).stored(), Holder::AllMembers.stored()],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(Some(nodes))
+}

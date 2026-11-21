@@ -121,3 +121,38 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
     }
     out
 }
+
+/// The words of the content without any formatting, one line per paragraph,
+/// heading, list item or line of code. Search indexes this.
+pub fn plain_text(blocks: &[Block]) -> String {
+    fn inlines(content: &[Inline], out: &mut String) {
+        for inline in content {
+            match inline {
+                Inline::Text { text, .. } => out.push_str(text),
+                Inline::HardBreak => out.push('\n'),
+            }
+        }
+        out.push('\n');
+    }
+    fn blocks_into(blocks: &[Block], out: &mut String) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(content) | Block::Heading { content, .. } => inlines(content, out),
+                Block::CodeBlock { text, .. } => {
+                    out.push_str(text);
+                    out.push('\n');
+                }
+                Block::Blockquote(children) => blocks_into(children, out),
+                Block::BulletList(items) | Block::OrderedList { items, .. } => {
+                    for item in items {
+                        blocks_into(item, out);
+                    }
+                }
+                Block::HorizontalRule => {}
+            }
+        }
+    }
+    let mut out = String::new();
+    blocks_into(blocks, &mut out);
+    out.trim_end().to_string()
+}

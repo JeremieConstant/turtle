@@ -61,6 +61,7 @@ fn table() -> Vec<Row> {
         ("rename_folder", |f| json!({"id": f.folder_id, "title": "Renamed"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("get_page", |f| json!({"id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("get_tree", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
+        ("search", |f| json!({"query": "notes", "area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         ("list_grants", |f| json!({"area_id": f.area_id}), [OK, REFUSED, REFUSED, HIDDEN, OK]),
         (
             "set_grant",

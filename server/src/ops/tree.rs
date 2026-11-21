@@ -144,6 +144,9 @@ fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind) -> Op
                  (SELECT COALESCE(MAX(position), 0) + 1 FROM nodes WHERE parent_id = ?3), ?6)",
         rusqlite::params![id, area.id, parent_id, kind.stored(), title, now],
     )?;
+    if kind == Kind::Page {
+        core.page_changed(&id);
+    }
     Ok(Entry { id, kind, title, children: Vec::new() }.into())
 }
 
@@ -171,6 +174,9 @@ fn rename(core: &Core, principal: &Principal, input: RenameEntry, kind: Kind) ->
         "UPDATE nodes SET title = ?1 WHERE id = ?2",
         rusqlite::params![title, input.id],
     )?;
+    if kind == Kind::Page {
+        core.page_changed(&input.id);
+    }
     let children = beneath(&db, &found.area_id, &input.id)?;
     Ok(Entry { id: input.id, kind, title, children }.into())
 }

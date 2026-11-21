@@ -85,3 +85,9 @@ _Avoid_: Public link, external share, publish
 **Role**:
 The level of access someone holds on an Area or Subtree: Read, Write, or Admin, each including the one before it.
 _Avoid_: Permission level, access level, Berechtigung
+
+### Search
+
+**Snippet**:
+The passage of a Page's content shown with a search result, with the words that matched highlighted.
+_Avoid_: Excerpt, preview, summary

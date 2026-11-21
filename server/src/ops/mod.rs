@@ -12,6 +12,7 @@ mod every_operation;
 pub mod grants;
 pub mod members;
 pub mod permissions;
+pub mod search;
 pub mod tree;
 
 use rusqlite::Connection;
@@ -30,12 +31,15 @@ pub struct Core {
     /// Counts the changes that may have taken access away or changed a Role,
     /// so open editors check theirs again at once.
     access: tokio::sync::watch::Sender<u64>,
+    search: crate::search::Index,
 }
 
 impl Core {
+    /// Opens the database and, beside it, the search index.
     pub fn open(db_path: &Path) -> anyhow::Result<Core> {
         Ok(Core {
             db: Mutex::new(crate::store::open(db_path)?),
+            search: crate::search::Index::open(&db_path.with_file_name("search"))?,
             clock: Arc::new(|| {
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -58,6 +62,34 @@ impl Core {
     /// Notices every `access_changed` from now on.
     pub fn watch_access(&self) -> tokio::sync::watch::Receiver<u64> {
         self.access.subscribe()
+    }
+
+    /// Says that a Page's title, content or place changed, so search finds
+    /// it as it is now once the index has caught up.
+    pub fn page_changed(&self, page_id: &str) {
+        self.search.page_changed(page_id);
+    }
+
+    /// Brings the search index up to date with every change said so far,
+    /// rebuilding it from the database when it was missing.
+    pub fn catch_up_search(&self) -> anyhow::Result<()> {
+        let pending = self.search.take_pending();
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let changes = search::changes(&self.db(), &pending);
+        let applied = changes.and_then(|changes| self.search.apply(changes));
+        if applied.is_err() {
+            self.search.restore_pending(pending);
+        }
+        applied
+    }
+
+    /// Takes in the last changes before Turtle stops, so the next start can
+    /// use the index as it is instead of rebuilding it.
+    pub fn close_search(&self) -> anyhow::Result<()> {
+        self.catch_up_search()?;
+        self.search.close()
     }
 
     /// Seconds since the Unix epoch.
@@ -259,6 +291,7 @@ pub fn catalogue() -> Catalogue {
     areas::register(&mut catalogue);
     grants::register(&mut catalogue);
     tree::register(&mut catalogue);
+    search::register(&mut catalogue);
     catalogue
 }
 
@@ -364,6 +397,7 @@ mod tests {
             "rename_folder",
             "get_page",
             "get_tree",
+            "search",
         ];
         for expected in expected_names {
             assert!(names.contains(&expected), "{expected} is missing from {names:?}");

@@ -14,6 +14,8 @@
   --color-line: #e7e5e4;
   --color-accent: #0f766e;
   --color-danger: #b91c1c;
+  /* Behind the words of a search snippet that matched. */
+  --color-highlight: #fde68a;
   /* Text on top of a person's colour. */
   --color-on-person: #ffffff;
 
@@ -69,6 +71,13 @@
   --width-side: 320px;
   --width-form: 400px;
   --height-editor: 60vh;
+  --width-search: 280px;
+  --width-search-results: 480px;
+  /* A popover never reaches the edges of a narrow screen. */
+  --width-popover-max: calc(100vw - 2 * var(--space-4));
+  /* Search results lie over whatever is below the header. */
+  --layer-popover: 10;
+  --shadow-popover: 0 4px 16px rgb(0 0 0 / 0.15);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -80,5 +89,6 @@
     --color-line: #3f3a36;
     --color-accent: #5eead4;
     --color-danger: #fca5a5;
+    --color-highlight: #854d0e;
   }
 }
