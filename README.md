@@ -47,6 +47,12 @@ TURTLE_DATA=/var/lib/turtle TURTLE_PORT=8080 ./server/target/release/turtle
 
 When a newer Turtle starts on an existing data directory, it brings the database up to date by itself. To back up Turtle, stop it and copy the data directory.
 
+## Connect an Agent
+
+Every Member creates Tokens under **Tokens** in the header. A Token can be limited to reading, to chosen Areas and to an expiry date, and never has more access than its owner. Its value is shown once.
+
+An Agent connects to Turtle's built-in MCP endpoint, `/mcp` on the address Turtle is reached at (Streamable HTTP), and sends the Token as `Authorization: Bearer <token>`. It finds one tool for every operation except the few that only make sense in a browser, such as signing in and managing Tokens. The same header works for the HTTP API, `POST /api/<operation>`.
+
 ## Develop
 
 Run the server and its tests from the repository root:

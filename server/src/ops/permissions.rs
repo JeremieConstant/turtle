@@ -105,8 +105,25 @@ pub fn grants_on(db: &Connection, node_id: &str) -> anyhow::Result<Vec<(Holder, 
 }
 
 /// The Role a principal holds on a node, or `None` for no access. A node that
-/// does not exist gives no access to anyone.
+/// does not exist gives no access to anyone. A Token only ever lowers what its
+/// owner holds: to nothing outside its Areas, to Read if it is read-only.
 pub fn role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlite::Result<Option<Role>> {
+    let role = owners_role_on(db, principal, node_id)?;
+    let Some(token) = principal.token() else { return Ok(role) };
+    if let Some(areas) = &token.areas {
+        let area_id: Option<String> = db
+            .query_row("SELECT area_id FROM nodes WHERE id = ?1", [node_id], |row| row.get(0))
+            .optional()?;
+        if !area_id.is_some_and(|area_id| areas.contains(&area_id)) {
+            return Ok(None);
+        }
+    }
+    Ok(if token.read_only { role.map(|role| role.min(Role::Read)) } else { role })
+}
+
+/// The Role the Member behind a principal holds on a node, whatever Token
+/// they act through.
+fn owners_role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlite::Result<Option<Role>> {
     let (member_id, workspace_admin) = match principal {
         Principal::Anonymous => return Ok(None),
         Principal::Member {

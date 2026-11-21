@@ -1,6 +1,6 @@
 //! The HTTP API: every operation of the catalogue under its own name, with
 //! JSON input and output (ADR-0005). It adds nothing of its own beyond
-//! turning cookies into principals and errors into status codes.
+//! turning cookies and Tokens into principals and errors into status codes.
 
 use crate::ops::{self, Catalogue, Core, OpError, Principal, SessionChange};
 use axum::extract::{Path, State};
@@ -57,7 +57,9 @@ async fn call(
     // the async workers.
     let outcome = tokio::task::spawn_blocking(move || {
         let principal = principal(&api.core, &headers)?;
-        api.catalogue.call(&api.core, &principal, &operation, input)
+        api.catalogue
+            .call(&api.core, &principal, &operation, input)
+            .map_err(Refusal::Op)
     })
     .await;
 
@@ -74,18 +76,68 @@ async fn call(
             }
             response
         }
-        Ok(Err(error)) => error_response(error),
+        Ok(Err(refused)) => refused.into_response(),
         Err(error) => error_response(OpError::Internal(error.into())),
     }
 }
 
-/// Who is calling, by the session cookie the request carries. Without one,
-/// or with one that is unknown or expired, that is nobody.
-pub fn principal(core: &Core, headers: &HeaderMap) -> Result<Principal, OpError> {
+/// Why a request is refused.
+pub enum Refusal {
+    /// The request carries a Token that is unknown, expired or revoked, or
+    /// whose owner was deactivated.
+    InvalidToken,
+    Op(OpError),
+}
+
+impl Refusal {
+    pub fn into_response(self) -> Response {
+        match self {
+            Refusal::InvalidToken => unauthorized(
+                "This Token is not valid: it is unknown, has expired or was revoked. Create a new one in Turtle.",
+            ),
+            Refusal::Op(error) => error_response(error),
+        }
+    }
+}
+
+/// Who is calling. A Token in the `Authorization` header wins over the
+/// session cookie; without either, or with a session that is unknown or
+/// expired, that is nobody.
+pub fn principal(core: &Core, headers: &HeaderMap) -> Result<Principal, Refusal> {
+    if let Some(token) = bearer_token(headers) {
+        return principal_for_bearer(core, token);
+    }
     match session_secret(headers) {
-        Some(secret) => ops::accounts::principal_for_session(core, &secret),
+        Some(secret) => ops::accounts::principal_for_session(core, &secret).map_err(Refusal::Op),
         None => Ok(Principal::Anonymous),
     }
+}
+
+/// Who acts through a Token value; refused if it is not valid.
+pub fn principal_for_bearer(core: &Core, token: &str) -> Result<Principal, Refusal> {
+    match ops::tokens::principal_for_token(core, token) {
+        Ok(Some(principal)) => Ok(principal),
+        Ok(None) => Err(Refusal::InvalidToken),
+        Err(error) => Err(Refusal::Op(error)),
+    }
+}
+
+/// The Token value of an `Authorization: Bearer` header, if there is one.
+pub fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = value.trim().split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
+}
+
+/// 401 with the same body as any other refusal, telling the client to
+/// authenticate with a Token.
+pub fn unauthorized(message: &str) -> Response {
+    let body = json!({ "error": { "kind": "not_permitted", "message": message } });
+    let mut response = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+    response
+        .headers_mut()
+        .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+    response
 }
 
 fn session_secret(headers: &HeaderMap) -> Option<String> {

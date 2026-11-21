@@ -73,6 +73,26 @@ const MIGRATIONS: &[&str] = &[
          created_at INTEGER NOT NULL,
          expires_at INTEGER NOT NULL
      );",
+    // A Token is stored by a digest of its value. One limited to chosen Areas
+    // lists them in `token_areas`; `all_areas` keeps a Token whose Areas were
+    // all deleted from reaching every Area instead of none.
+    "CREATE TABLE tokens (
+         id TEXT PRIMARY KEY,
+         member_id TEXT NOT NULL REFERENCES members (id) ON DELETE CASCADE,
+         name TEXT NOT NULL,
+         secret_digest TEXT NOT NULL UNIQUE,
+         read_only INTEGER NOT NULL,
+         all_areas INTEGER NOT NULL,
+         expires_at INTEGER,
+         last_used_at INTEGER,
+         created_at INTEGER NOT NULL
+     );
+     CREATE INDEX tokens_by_member ON tokens (member_id);
+     CREATE TABLE token_areas (
+         token_id TEXT NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
+         area_id TEXT NOT NULL REFERENCES areas (id) ON DELETE CASCADE,
+         PRIMARY KEY (token_id, area_id)
+     );",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
