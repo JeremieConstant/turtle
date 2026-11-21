@@ -13,6 +13,7 @@
   --color-muted: #78716c;
   --color-line: #e7e5e4;
   --color-accent: #0f766e;
+  --color-danger: #b91c1c;
   /* Text on top of a person's colour. */
   --color-on-person: #ffffff;
 
@@ -25,6 +26,9 @@
   --color-person-5: #1d4ed8;
   --color-person-6: #4d7c0f;
   --color-person-7: #b45309;
+
+  /* How much a control that cannot be used right now fades. */
+  --opacity-disabled: 0.6;
 
   /* Spacing */
   --space-hair: 1px;
@@ -63,6 +67,7 @@
   --width-content: 1200px;
   --width-editor: 420px;
   --width-side: 320px;
+  --width-form: 400px;
   --height-editor: 60vh;
 }
 
@@ -74,5 +79,6 @@
     --color-muted: #a8a29e;
     --color-line: #3f3a36;
     --color-accent: #5eead4;
+    --color-danger: #fca5a5;
   }
 }

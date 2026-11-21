@@ -8,7 +8,8 @@
     "dev": "vite",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "build": "npm run check && vite build"
+    "build": "npm run generate && npm run check && vite build",
+    "generate": "node scripts/generate-operations.ts"
   },
   "dependencies": {
     "@tiptap/core": "^3.35.0",

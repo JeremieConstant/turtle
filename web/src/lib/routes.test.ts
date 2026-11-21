@@ -38,3 +38,8 @@ test('a title with nothing readable leaves the title part out', () => {
 test('a built Page address leads back to the same Page', () => {
   expect(parseAddress(pageAddress('a/b c', 'Some Title'))).toEqual({ screen: 'page', id: 'a/b c' })
 })
+
+test('the setup and sign-in screens have their own addresses', () => {
+  expect(parseAddress('/setup')).toEqual({ screen: 'setup' })
+  expect(parseAddress('/sign-in')).toEqual({ screen: 'sign-in' })
+})

@@ -11,6 +11,7 @@
   import { currentPerson } from '../lib/person'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
+  import { session } from '../lib/session.svelte'
 
   // The screen is created anew for every Page, so the ID never changes underneath it.
   const props: { id: string } = $props()
@@ -24,7 +25,8 @@
   let editor = $state.raw<TipTap | null>(null)
   let markdownShown = $state(false)
 
-  const person = currentPerson()
+  // The app shows Pages only to a signed-in Member.
+  const person = currentPerson(session.member?.name ?? 'Unknown')
   const doc = new Y.Doc()
   const connection = new Connection(
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${encodeURIComponent(id)}`,
@@ -36,6 +38,11 @@
     connection.close()
     doc.destroy()
   })
+
+  async function signOut() {
+    await session.signOut()
+    router.navigate('/sign-in')
+  }
 
   $effect(() => {
     document.title = `${title} · Turtle`
@@ -53,6 +60,7 @@
   <span class="title">{title}</span>
   <span class="people"><People awareness={connection.awareness} /></span>
   <ConnectionStatus {status} />
+  <button type="button" onclick={signOut}>Sign out</button>
 </header>
 
 <Toolbar {editor}>

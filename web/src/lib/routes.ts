@@ -1,8 +1,15 @@
 /** What an address in the address bar points at (ADR-0007). */
-export type Route = { screen: 'home' } | { screen: 'page'; id: string } | { screen: 'not-found' }
+export type Route =
+  | { screen: 'home' }
+  | { screen: 'setup' }
+  | { screen: 'sign-in' }
+  | { screen: 'page'; id: string }
+  | { screen: 'not-found' }
 
 export function parseAddress(pathname: string): Route {
   if (pathname === '/') return { screen: 'home' }
+  if (pathname === '/setup') return { screen: 'setup' }
+  if (pathname === '/sign-in') return { screen: 'sign-in' }
   // The title part is only for readability, so it is matched and ignored.
   const page = pathname.match(/^\/p\/([^/]+)(?:\/[^/]*)?\/?$/)
   if (page) {

@@ -1,8 +1,11 @@
 //! Turtle server, first slice: several people edit one Page live, the content
 //! survives a restart, and it is available as Markdown in both directions.
 
+mod http_api;
 mod markdown;
 mod model;
+mod ops;
+mod store;
 mod ydoc;
 
 use anyhow::Context;
@@ -111,6 +114,13 @@ impl App {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // `turtle catalogue` prints every operation with its schemas; the web
+    // app's types are generated from it.
+    if std::env::args().nth(1).as_deref() == Some("catalogue") {
+        println!("{:#}", ops::catalogue().describe());
+        return Ok(());
+    }
+
     let db_path = std::env::var("TURTLE_DB").unwrap_or_else(|_| "turtle.db".into());
     let web_dir = std::env::var("TURTLE_WEB").unwrap_or_else(|_| "web/dist".into());
     let port: u16 = std::env::var("TURTLE_PORT")
@@ -119,12 +129,10 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(4100);
 
-    let db = rusqlite::Connection::open(&db_path).with_context(|| format!("opening {db_path}"))?;
-    db.pragma_update(None, "journal_mode", "WAL")?;
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS pages (id TEXT PRIMARY KEY, state BLOB NOT NULL)",
-        [],
-    )?;
+    // Opening the core brings the schema up to date; the Page store gets its
+    // own connection so live editing does not wait behind operations.
+    let core = ops::Core::open(db_path.as_ref())?;
+    let db = store::open(db_path.as_ref())?;
 
     let app = Arc::new(App {
         db: Mutex::new(db),
@@ -153,8 +161,9 @@ async fn main() -> anyhow::Result<()> {
             "/api/pages/{page}/markdown",
             get(read_markdown).put(write_markdown),
         )
-        .fallback_service(ServeDir::new(&web_dir).fallback(index))
-        .with_state(app.clone());
+        .with_state(app.clone())
+        .merge(http_api::router(core))
+        .fallback_service(ServeDir::new(&web_dir).fallback(index));
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!("Turtle is listening on http://127.0.0.1:{port} (database: {db_path})");
