@@ -236,6 +236,17 @@ impl TestClient {
         }
     }
 
+    /// Waits until the server has closed the connection. Panics if it does not.
+    pub async fn wait_until_closed(&self, what: &str) {
+        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        while !self.reader.is_finished() {
+            if tokio::time::Instant::now() >= deadline {
+                panic!("timed out waiting until {what}");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
     /// Leaves the Page by closing the connection, and waits until it is closed.
     pub async fn disconnect(mut self) {
         let _ = self.outgoing.send(Message::Close(None));

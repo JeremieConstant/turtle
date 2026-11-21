@@ -7,6 +7,7 @@
   import type { Area, Entry, Kind } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { areaAddress } from '../lib/routes'
+  import { createEntry } from '../lib/tree'
   import NotFoundScreen from './NotFoundScreen.svelte'
 
   // The screen is created anew for every Area, so the ID never changes underneath it.
@@ -28,23 +29,35 @@
   let entries = $state.raw<Entry[] | null>(null)
   const writable = $derived(area !== null && area.role !== 'read')
 
-  /** Loads the Area and its tree; again after anything in the tree changed. */
-  async function load() {
+  /** Set when the tree could not be loaded again after a change; what is shown may be outdated. */
+  let reloadFailed = $state(false)
+
+  async function fetchTree() {
+    const tree = await call('get_tree', { area_id: id })
+    area = tree.area
+    entries = tree.entries
+  }
+
+  fetchTree().catch(caught => {
+    if (caught instanceof OperationError && caught.kind === 'not_found') missing = true
+    else loadFailed = true
+  })
+
+  /** Loads the tree again after something in it changed. The change itself already happened. */
+  async function reload() {
     try {
-      const tree = await call('get_tree', { area_id: id })
-      area = tree.area
-      entries = tree.entries
+      await fetchTree()
+      reloadFailed = false
     } catch (caught) {
+      // Access may have been lost in the meantime; that looks like any other missing Area.
       if (caught instanceof OperationError && caught.kind === 'not_found') missing = true
-      else loadFailed = true
+      else reloadFailed = true
     }
   }
-  void load()
 
   async function addAtTop(title: string, kind: Kind) {
-    const input = { area_id: id, title }
-    await call(kind === 'folder' ? 'create_folder' : 'create_page', input)
-    await load()
+    await createEntry(kind, { area_id: id, title })
+    await reload()
   }
 
   $effect(() => {
@@ -110,10 +123,13 @@
         </div>
       {/if}
       <p class="muted">Your Role here: {area.role}.</p>
+      {#if reloadFailed}
+        <p class="error" role="alert">The change was saved, but the tree could not be loaded again. Reload the page to see it.</p>
+      {/if}
       {#if entries && entries.length > 0}
         <ul class="tree">
           {#each entries as entry (entry.id)}
-            <TreeEntry {entry} areaId={id} {writable} onchange={load} />
+            <TreeEntry {entry} areaId={id} {writable} onchange={reload} />
           {/each}
         </ul>
       {:else if entries}
@@ -122,7 +138,7 @@
       {#if writable}
         <section>
           <h2>Add to the top of this Area</h2>
-          <TitleForm label="Title of the new entry" actions={ADD_ACTIONS} onsubmit={addAtTop} />
+          <TitleForm label="Title of the new Page or Folder" actions={ADD_ACTIONS} onsubmit={addAtTop} />
         </section>
       {/if}
     {/if}

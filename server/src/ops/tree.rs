@@ -49,7 +49,7 @@ pub enum Kind {
     Folder,
 }
 
-/// A Page or Folder with everything beneath it.
+/// A Page or Folder in the tree of an Area, with what is beneath it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Entry {
     pub id: String,
@@ -91,13 +91,13 @@ pub struct PageId {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct Rename {
+pub struct RenameEntry {
     pub id: String,
     pub title: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct TreeOf {
+pub struct TreeOfArea {
     pub area_id: String,
 }
 
@@ -147,20 +147,20 @@ fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind) -> Op
     Ok(Entry { id, kind, title, children: Vec::new() }.into())
 }
 
-pub fn rename_page(core: &Core, principal: &Principal, input: Rename) -> OpResult<Entry> {
+pub fn rename_page(core: &Core, principal: &Principal, input: RenameEntry) -> OpResult<Entry> {
     rename(core, principal, input, Kind::Page)
 }
 
-pub fn rename_folder(core: &Core, principal: &Principal, input: Rename) -> OpResult<Entry> {
+pub fn rename_folder(core: &Core, principal: &Principal, input: RenameEntry) -> OpResult<Entry> {
     rename(core, principal, input, Kind::Folder)
 }
 
-fn rename(core: &Core, principal: &Principal, input: Rename, kind: Kind) -> OpResult<Entry> {
+fn rename(core: &Core, principal: &Principal, input: RenameEntry, kind: Kind) -> OpResult<Entry> {
     areas::signed_in(principal)?;
     let db = core.db();
     // Access is checked before the input, so an unreadable entry stays hidden
     // whatever title is sent.
-    let found = readable(&db, principal, &input.id, kind)?;
+    let found = readable_entry(&db, principal, &input.id, kind)?;
     if found.role < Role::Write {
         return Err(OpError::NotPermitted(
             "Only someone with the Write Role can rename this.".into(),
@@ -178,7 +178,7 @@ fn rename(core: &Core, principal: &Principal, input: Rename, kind: Kind) -> OpRe
 pub fn get_page(core: &Core, principal: &Principal, input: PageId) -> OpResult<Page> {
     areas::signed_in(principal)?;
     let db = core.db();
-    let found = readable(&db, principal, &input.id, Kind::Page)?;
+    let found = readable_entry(&db, principal, &input.id, Kind::Page)?;
     let area = areas::readable_area(&db, principal, &found.area_id)?;
     Ok(Page {
         id: input.id,
@@ -189,7 +189,20 @@ pub fn get_page(core: &Core, principal: &Principal, input: PageId) -> OpResult<P
     .into())
 }
 
-pub fn get_tree(core: &Core, principal: &Principal, input: TreeOf) -> OpResult<Tree> {
+/// A Page whose content the principal may change: with the Write Role. Not an
+/// operation of its own; the editing connection and the Markdown endpoint ask
+/// it before they let a change through.
+pub fn page_to_change(core: &Core, principal: &Principal, id: &str) -> Result<Page, OpError> {
+    let page = get_page(core, principal, PageId { id: id.to_string() })?.output;
+    if page.role < Role::Write {
+        return Err(OpError::NotPermitted(
+            "Only someone with the Write Role can change this Page.".into(),
+        ));
+    }
+    Ok(page)
+}
+
+pub fn get_tree(core: &Core, principal: &Principal, input: TreeOfArea) -> OpResult<Tree> {
     areas::signed_in(principal)?;
     let db = core.db();
     let area = areas::readable_area(&db, principal, &input.area_id)?;
@@ -199,7 +212,7 @@ pub fn get_tree(core: &Core, principal: &Principal, input: TreeOf) -> OpResult<T
 }
 
 /// A Page or Folder the principal can read, with the Role they hold on it.
-struct Readable {
+struct ReadableEntry {
     area_id: String,
     title: String,
     role: Role,
@@ -207,7 +220,7 @@ struct Readable {
 
 /// A Page or Folder of the given kind that the principal can read. One they
 /// cannot read is reported exactly like one that does not exist.
-fn readable(db: &Connection, principal: &Principal, id: &str, kind: Kind) -> Result<Readable, OpError> {
+fn readable_entry(db: &Connection, principal: &Principal, id: &str, kind: Kind) -> Result<ReadableEntry, OpError> {
     let not_found = || {
         OpError::NotFound(match kind {
             Kind::Page => "There is no such Page.".into(),
@@ -223,7 +236,7 @@ fn readable(db: &Connection, principal: &Principal, id: &str, kind: Kind) -> Res
         .optional()?;
     let (area_id, title) = found.ok_or_else(not_found)?;
     let role = permissions::role_on(db, principal, id)?.ok_or_else(not_found)?;
-    Ok(Readable { area_id, title, role })
+    Ok(ReadableEntry { area_id, title, role })
 }
 
 /// Everything beneath a node, each level in the order of its siblings.
@@ -322,15 +335,11 @@ mod tests {
     fn outline(core: &Core, principal: &Principal, area: &Area) -> Vec<String> {
         fn walk(entries: &[Entry], depth: usize, out: &mut Vec<String>) {
             for entry in entries {
-                let kind = match entry.kind {
-                    Kind::Page => "page",
-                    Kind::Folder => "folder",
-                };
-                out.push(format!("{}{kind} {}", "  ".repeat(depth), entry.title));
+                out.push(format!("{}{} {}", "  ".repeat(depth), entry.kind.stored(), entry.title));
                 walk(&entry.children, depth + 1, out);
             }
         }
-        let tree = get_tree(core, principal, TreeOf { area_id: area.id.clone() }).unwrap().output;
+        let tree = get_tree(core, principal, TreeOfArea { area_id: area.id.clone() }).unwrap().output;
         let mut out = Vec::new();
         walk(&tree.entries, 0, &mut out);
         out
@@ -347,6 +356,14 @@ mod tests {
         assert_eq!(page.kind, Kind::Page);
         assert_eq!(page.title, "Onboarding");
         assert_eq!(outline(&core, &grace, &area), ["page Onboarding"]);
+    }
+
+    /// Asserts an outcome: success, or an error of the given kind.
+    fn expect<T: std::fmt::Debug>(outcome: Result<T, OpError>, expected: Result<(), &str>, who: &Principal) {
+        match expected {
+            Ok(()) => assert!(outcome.is_ok(), "{who:?}: {outcome:?}"),
+            Err(kind) => assert_eq!(outcome.unwrap_err().kind(), kind, "{who:?}"),
+        }
     }
 
     fn beneath(area: &Area, parent: &Entry, title: &str) -> NewEntry {
@@ -402,23 +419,15 @@ mod tests {
             (&Principal::Anonymous, Err("not_permitted")),
         ];
         for (principal, expected) in table {
-            let outcome = create_page(&core, principal, at_top(&area, "Notes"));
-            match expected {
-                Ok(()) => assert!(outcome.is_ok(), "{principal:?}"),
-                Err(kind) => assert_eq!(outcome.unwrap_err().kind(), kind, "{principal:?}"),
-            }
-            let outcome = create_folder(&core, principal, at_top(&area, "Notes"));
-            match expected {
-                Ok(()) => assert!(outcome.is_ok(), "{principal:?}"),
-                Err(kind) => assert_eq!(outcome.unwrap_err().kind(), kind, "{principal:?}"),
-            }
+            expect(create_page(&core, principal, at_top(&area, "Notes")), expected, principal);
+            expect(create_folder(&core, principal, at_top(&area, "Notes")), expected, principal);
         }
 
         let seen = ["page Notes", "folder Notes"];
         assert_eq!(outline(&core, &reader, &area), seen);
-        let hidden = get_tree(&core, &outsider, TreeOf { area_id: area.id.clone() }).unwrap_err();
+        let hidden = get_tree(&core, &outsider, TreeOfArea { area_id: area.id.clone() }).unwrap_err();
         assert_eq!(hidden.kind(), "not_found");
-        let anonymous = get_tree(&core, &Principal::Anonymous, TreeOf { area_id: area.id }).unwrap_err();
+        let anonymous = get_tree(&core, &Principal::Anonymous, TreeOfArea { area_id: area.id }).unwrap_err();
         assert_eq!(anonymous.kind(), "not_permitted");
     }
 
@@ -453,8 +462,8 @@ mod tests {
         assert_eq!(outline(&core, &grace, &area), ["page Notes"]);
     }
 
-    fn renamed(entry: &Entry, title: &str) -> Rename {
-        Rename { id: entry.id.clone(), title: title.into() }
+    fn renamed(entry: &Entry, title: &str) -> RenameEntry {
+        RenameEntry { id: entry.id.clone(), title: title.into() }
     }
 
     #[test]
@@ -498,11 +507,7 @@ mod tests {
             (&Principal::Anonymous, Err("not_permitted")),
         ];
         for (principal, expected) in table {
-            let outcome = rename_page(&core, principal, renamed(&page, "Renamed"));
-            match expected {
-                Ok(()) => assert!(outcome.is_ok(), "{principal:?}"),
-                Err(kind) => assert_eq!(outcome.unwrap_err().kind(), kind, "{principal:?}"),
-            }
+            expect(rename_page(&core, principal, renamed(&page, "Renamed")), expected, principal);
         }
         let wrong_kind = rename_page(&core, &grace, renamed(&folder, "Renamed")).unwrap_err();
         assert_eq!(wrong_kind.kind(), "not_found");
@@ -554,5 +559,33 @@ mod tests {
 
         let opened = get_page(&core, &grace, PageId { id: page.id }).unwrap().output;
         assert_eq!(opened.title, "Minutes");
+    }
+
+    #[test]
+    fn changing_a_pages_content_needs_the_write_role() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area = area(&core, &grace);
+        let page = create_page(&core, &grace, at_top(&area, "Notes")).unwrap().output;
+        let writer = member(&core, "Ken", false);
+        let reader = member(&core, "Dennis", false);
+        let outsider = member(&core, "Linus", false);
+        give_role(&core, &area.id, &writer, Role::Write);
+        give_role(&core, &area.id, &reader, Role::Read);
+
+        let table = [
+            (&grace, Ok(Role::Admin)),
+            (&writer, Ok(Role::Write)),
+            (&reader, Err("not_permitted")),
+            (&outsider, Err("not_found")),
+            (&Principal::Anonymous, Err("not_permitted")),
+        ];
+        for (principal, expected) in table {
+            let outcome = page_to_change(&core, principal, &page.id);
+            match expected {
+                Ok(role) => assert_eq!(outcome.unwrap().role, role, "{principal:?}"),
+                Err(kind) => assert_eq!(outcome.unwrap_err().kind(), kind, "{principal:?}"),
+            }
+        }
     }
 }

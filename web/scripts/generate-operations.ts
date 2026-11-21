@@ -91,11 +91,12 @@ function selfReferenced(schema: Schema, name: string): Schema {
  */
 function outputType(schema: Schema, definitions: Map<string, string>): string {
   if (!schema.title || schema.type !== 'object') return typeOf(schema, '    ')
-  const { $defs: _, $schema: __, title, description: ___, ...own } = selfReferenced(schema, schema.title) as Schema & {
-    $schema?: string
-  }
-  definitions.set(title!, typeOf(own))
-  return title!
+  const title = schema.title
+  // Only the shape: definitions are collected separately, and the
+  // description and title belong to the operation, not the type.
+  const { type, properties, required, additionalProperties } = selfReferenced(schema, title)
+  definitions.set(title, typeOf({ type, properties, required, additionalProperties }))
+  return title
 }
 
 export function generate(operations: Operation[]): string {

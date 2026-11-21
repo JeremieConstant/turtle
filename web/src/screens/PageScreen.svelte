@@ -6,6 +6,7 @@
   import type { Page } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
+  import { session } from '../lib/session.svelte'
   import NotFoundScreen from './NotFoundScreen.svelte'
 
   // The screen is created anew for every Page, so the ID never changes underneath it.
@@ -23,6 +24,29 @@
       if (caught instanceof OperationError && caught.kind === 'not_found') missing = true
       else loadFailed = true
     })
+
+  /** When the last check after a lost connection began; the editor retries every second. */
+  let lastCheck = 0
+  const CHECK_INTERVAL = 5000
+
+  /**
+   * The editor lost its connection. The server also closes it when the
+   * session ends or the Page can no longer be read, and then refuses every
+   * retry, so find out which: signed out goes to sign-in (App sees it), a Page
+   * gone shows as not found, and a changed Role reaches the editor.
+   */
+  async function checkAccess() {
+    if (Date.now() - lastCheck < CHECK_INTERVAL) return
+    lastCheck = Date.now()
+    try {
+      await session.load()
+      if (!session.member) return
+      page = await call('get_page', { id })
+    } catch (caught) {
+      if (caught instanceof OperationError && caught.kind === 'not_found') missing = true
+      // Otherwise Turtle cannot be reached; the editor keeps retrying.
+    }
+  }
 
   $effect(() => {
     if (page) document.title = `${page.title} · Turtle`
@@ -42,7 +66,7 @@
   <AppHeader />
   <main class="message">This Page could not be loaded. Reload the page to try again.</main>
 {:else if page}
-  <PageView {page} />
+  <PageView {page} ondisconnect={checkAccess} />
 {/if}
 
 <style>

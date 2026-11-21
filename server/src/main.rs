@@ -18,7 +18,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
-use ops::permissions::Role;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -38,6 +37,11 @@ const FRAME_PRESENCE_REQUEST: u8 = 2;
 
 /// How often changed Pages are written to the database (ADR-0004: never per keystroke).
 const SAVE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// How often an open editing connection checks that its session is still
+/// valid and the Page still readable, even when nothing is sent. Changes are
+/// checked each time they arrive.
+const ACCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Where the data directory is when `TURTLE_DATA` does not say: beside
 /// wherever Turtle was started.
@@ -231,25 +235,42 @@ impl<E: Into<anyhow::Error>> From<E> for Failure {
     }
 }
 
-/// The Role the caller holds on a Page, or the response that turns them
-/// away: 401 when nobody is signed in, 404 for anything but a Page they can
-/// read (a Folder, a Page of the first slice without an Area).
-async fn page_role(app: &Arc<App>, headers: HeaderMap, page_id: &str) -> Result<Role, Response> {
-    let core = app.core.clone();
+/// What a request may do with a Page.
+#[derive(Clone, Copy)]
+enum Use {
+    Read,
+    Change,
+}
+
+/// The Page, if the caller of this request may use it that way. The
+/// operation layer decides; this only finds the caller and answers like the
+/// API does, except that nobody signed in gets 401. Anything but a Page the
+/// caller can read (a Folder, a Page of the first slice without an Area) is
+/// not found; a change without the Write Role is not permitted.
+async fn page_for(
+    core: &Arc<ops::Core>,
+    headers: HeaderMap,
+    page_id: &str,
+    using: Use,
+) -> Result<ops::tree::Page, Response> {
+    let core = core.clone();
     let page_id = page_id.to_string();
     let outcome = tokio::task::spawn_blocking(move || {
         let principal = http_api::principal(&core, &headers)?;
-        if principal == ops::Principal::Anonymous {
-            return Ok(None);
-        }
-        let page = ops::tree::get_page(&core, &principal, ops::tree::PageId { id: page_id })?;
-        Ok(Some(page.output.role))
+        let page = match using {
+            Use::Read => ops::tree::get_page(&core, &principal, ops::tree::PageId { id: page_id })
+                .map(|reply| reply.output),
+            Use::Change => ops::tree::page_to_change(&core, &principal, &page_id),
+        };
+        Ok::<_, ops::OpError>(page.map_err(|error| (principal == ops::Principal::Anonymous, error)))
     })
     .await;
     match outcome {
-        Ok(Ok(Some(role))) => Ok(role),
-        Ok(Ok(None)) => Err((StatusCode::UNAUTHORIZED, "Sign in first.").into_response()),
-        Ok(Err(error)) => Err(http_api::error_response(error)),
+        Ok(Ok(Ok(page))) => Ok(page),
+        Ok(Ok(Err((true, ops::OpError::NotPermitted(message))))) => {
+            Err((StatusCode::UNAUTHORIZED, message).into_response())
+        }
+        Ok(Ok(Err((_, error)))) | Ok(Err(error)) => Err(http_api::error_response(error)),
         Err(error) => Err(http_api::error_response(ops::OpError::Internal(error.into()))),
     }
 }
@@ -259,7 +280,7 @@ async fn read_markdown(
     Path(page_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Response, Failure> {
-    if let Err(refused) = page_role(&app, headers, &page_id).await {
+    if let Err(refused) = page_for(&app.core, headers, &page_id, Use::Read).await {
         return Ok(refused);
     }
     let page = app.open_page(&page_id)?;
@@ -275,13 +296,8 @@ async fn write_markdown(
     headers: HeaderMap,
     body: String,
 ) -> Result<Response, Failure> {
-    match page_role(&app, headers, &page_id).await {
-        Ok(role) if role >= Role::Write => {}
-        Ok(_) => {
-            let message = "Only someone with the Write Role can change this Page.";
-            return Ok((StatusCode::FORBIDDEN, message).into_response());
-        }
-        Err(refused) => return Ok(refused),
+    if let Err(refused) = page_for(&app.core, headers, &page_id, Use::Change).await {
+        return Ok(refused);
     }
     let page = app.open_page(&page_id)?;
     if let Some(update) = ydoc::write(&page.doc, &markdown::from_markdown(&body)) {
@@ -297,18 +313,41 @@ async fn connect(
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Failure> {
-    let role = match page_role(&app, headers, &page_id).await {
-        Ok(role) => role,
-        Err(refused) => return Ok(refused),
-    };
+    if let Err(refused) = page_for(&app.core, headers.clone(), &page_id, Use::Read).await {
+        return Ok(refused);
+    }
     let page = app.open_page(&page_id)?;
     let connection = app.next_connection.fetch_add(1, Ordering::SeqCst);
-    let may_edit = role >= Role::Write;
+    let access = Access {
+        core: app.core.clone(),
+        headers,
+        page_id,
+    };
     Ok(upgrade.on_upgrade(move |socket| async move {
-        if let Err(error) = serve_connection(socket, page, connection, may_edit).await {
+        if let Err(error) = serve_connection(socket, page, connection, access).await {
             eprintln!("connection {connection} ended with an error: {error:#}");
         }
     }))
+}
+
+/// What an open editing connection needs to check its access again: the
+/// request it was opened with and the Page it is for.
+struct Access {
+    core: Arc<ops::Core>,
+    headers: HeaderMap,
+    page_id: String,
+}
+
+impl Access {
+    /// Whether the connection may still use the Page that way now. It may
+    /// not once the session ended or expired, the Page can no longer be
+    /// read, or, for a change, the Write Role is gone.
+    async fn allows(&self, using: Use) -> Result<(), StatusCode> {
+        match page_for(&self.core, self.headers.clone(), &self.page_id, using).await {
+            Ok(_) => Ok(()),
+            Err(refused) => Err(refused.status()),
+        }
+    }
 }
 
 fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {
@@ -322,9 +361,7 @@ async fn serve_connection(
     socket: WebSocket,
     page: Arc<OpenPage>,
     connection: u64,
-    // Without the Write Role, edits are dropped: someone who can only read
-    // follows the Page but never changes it.
-    may_edit: bool,
+    access: Access,
 ) -> anyhow::Result<()> {
     let (mut outgoing, mut incoming) = socket.split();
 
@@ -343,8 +380,17 @@ async fn serve_connection(
         .send((connection, vec![FRAME_PRESENCE_REQUEST]));
 
     let mut own_presence: Option<(u64, u64)> = None;
+    let mut recheck = tokio::time::interval_at(
+        tokio::time::Instant::now() + ACCESS_RECHECK_INTERVAL,
+        ACCESS_RECHECK_INTERVAL,
+    );
     let result = loop {
         tokio::select! {
+            _ = recheck.tick() => {
+                if access.allows(Use::Read).await.is_err() {
+                    break Ok(());
+                }
+            }
             message = incoming.next() => {
                 let data = match message {
                     Some(Ok(Message::Binary(data))) => data,
@@ -353,8 +399,15 @@ async fn serve_connection(
                     Some(Err(error)) => break Err(error.into()),
                 };
                 match data.first() {
-                    Some(&FRAME_UPDATE) if !may_edit => {}
                     Some(&FRAME_UPDATE) => {
+                        // Checked for every change, so one made after signing
+                        // out or losing the Write Role never lands. Without
+                        // Write the change is dropped; the reader stays.
+                        match access.allows(Use::Change).await {
+                            Ok(()) => {}
+                            Err(StatusCode::FORBIDDEN) => continue,
+                            Err(_) => break Ok(()),
+                        }
                         let applied = Update::decode_v1(&data[1..])
                             .context("unreadable update")
                             .and_then(|update| Ok(page.doc.transact_mut().apply_update(update)?));

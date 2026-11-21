@@ -22,6 +22,10 @@ _Avoid_: Site, Seite, document, article
 A container in the tree of an Area that groups Pages and other Folders and has no content of its own.
 _Avoid_: Ordner, directory, section
 
+**Entry**:
+A Page or Folder as it sits in the tree of an Area, among its siblings.
+_Avoid_: Node, item, element
+
 **Subtree**:
 A Page or Folder together with everything beneath it in the tree.
 _Avoid_: Subsite, Subbereich, sub-area, branch

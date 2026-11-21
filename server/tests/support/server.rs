@@ -53,14 +53,32 @@ impl TestServer {
             "POST",
             "/api/create_first_account",
             &[("Content-Type", "application/json")],
-            r#"{"name":"Ada","email":"ada@example.org","password":"correct horse battery"}"#,
+            &serde_json::json!({ "name": "Ada", "email": EMAIL, "password": PASSWORD }).to_string(),
         )
         .await;
         assert_eq!(response.status, 200, "signing up: {}", response.body);
+        self.signed_in(response)
+    }
+
+    /// Signs the Member from `sign_up` in once more, in a session of its own.
+    pub async fn sign_in(&self) -> Member {
+        let response = http::request(
+            self.addr,
+            "POST",
+            "/api/sign_in",
+            &[("Content-Type", "application/json")],
+            &serde_json::json!({ "email": EMAIL, "password": PASSWORD }).to_string(),
+        )
+        .await;
+        assert_eq!(response.status, 200, "signing in: {}", response.body);
+        self.signed_in(response)
+    }
+
+    fn signed_in(&self, response: http::Response) -> Member {
         let cookie = response
             .header("set-cookie")
             .and_then(|value| value.split(';').next())
-            .expect("signing up sets the session cookie")
+            .expect("signing in sets the session cookie")
             .to_string();
         Member { addr: self.addr, cookie }
     }
@@ -132,6 +150,9 @@ fn announced_port(line: &str) -> Option<u16> {
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok().filter(|&port| port != 0)
 }
+
+const EMAIL: &str = "ada@example.org";
+const PASSWORD: &str = "correct horse battery";
 
 /// A signed-in Member, calling operations as the web app does.
 pub struct Member {

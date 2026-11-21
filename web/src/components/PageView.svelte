@@ -2,24 +2,32 @@
   import type { Editor as TipTap } from '@tiptap/core'
   import { onDestroy, untrack } from 'svelte'
   import * as Y from 'yjs'
+  import { Connection, type Status } from '../lib/connection'
+  import type { Page } from '../lib/operations.gen'
+  import { currentPerson } from '../lib/person'
+  import { router } from '../lib/router.svelte'
+  import { areaAddress } from '../lib/routes'
+  import { session } from '../lib/session.svelte'
+  import AppHeader from './AppHeader.svelte'
   import ConnectionStatus from './ConnectionStatus.svelte'
   import Editor from './Editor.svelte'
   import MarkdownView from './MarkdownView.svelte'
   import People from './People.svelte'
   import Toolbar from './Toolbar.svelte'
-  import { Connection, type Status } from '../lib/connection'
-  import { currentPerson } from '../lib/person'
-  import type { Page } from '../lib/operations.gen'
-  import { router } from '../lib/router.svelte'
-  import { areaAddress } from '../lib/routes'
-  import { session } from '../lib/session.svelte'
-  import AppHeader from './AppHeader.svelte'
 
-  /** A Page that has been found and may be read. It is opened once and stays open while this lives. */
-  const { page }: { page: Page } = $props()
+  const {
+    page,
+    ondisconnect,
+  }: {
+    /** A Page that has been found and may be read. It is opened once and stays open while this lives. */
+    page: Page
+    /** Called whenever the connection drops, so the screen can find out whether access is gone. */
+    ondisconnect: () => void
+  } = $props()
   const id = untrack(() => page.id)
   const editable = $derived(page.role !== 'read')
 
+  const areaLink = $derived(areaAddress(page.area.id, page.area.name))
   let status = $state<Status>('connecting')
   let loaded = $state(false)
   let editor = $state.raw<TipTap | null>(null)
@@ -31,18 +39,20 @@
   const connection = new Connection(
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${encodeURIComponent(id)}`,
     doc,
-    next => (status = next),
+    next => {
+      status = next
+      if (next === 'disconnected') ondisconnect()
+    },
     () => (loaded = true),
   )
   onDestroy(() => {
     connection.close()
     doc.destroy()
   })
-
 </script>
 
 <AppHeader>
-  <a class="area" href={areaAddress(page.area.id, page.area.name)} onclick={event => router.follow(event, areaAddress(page.area.id, page.area.name))}>{page.area.name}</a>
+  <a class="area" href={areaLink} onclick={event => router.follow(event, areaLink)}>{page.area.name}</a>
   <span class="title">{page.title}</span>
   <People awareness={connection.awareness} />
   <ConnectionStatus {status} />
@@ -72,10 +82,7 @@
 </main>
 
 <style>
-  .area {
-    color: var(--color-muted);
-  }
-
+  .area,
   .title {
     color: var(--color-muted);
   }

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { call } from '../lib/ops'
   import type { Entry, Kind } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
+  import { createEntry, renameEntry } from '../lib/tree'
   import Self from './TreeEntry.svelte'
   import TitleForm, { ADD_ACTIONS } from './TitleForm.svelte'
 
@@ -21,12 +21,12 @@
     onchange: () => Promise<void>
   } = $props()
 
+  const address = $derived(pageAddress(entry.id, entry.title))
   let expanded = $state(false)
   let editing = $state<'add' | 'rename' | null>(null)
 
   async function add(title: string, kind: Kind) {
-    const input = { area_id: areaId, parent_id: entry.id, title }
-    await call(kind === 'folder' ? 'create_folder' : 'create_page', input)
+    await createEntry(kind, { area_id: areaId, parent_id: entry.id, title })
     editing = null
     // The new entry is shown where it went.
     expanded = true
@@ -34,7 +34,7 @@
   }
 
   async function rename(title: string) {
-    await call(entry.kind === 'page' ? 'rename_page' : 'rename_folder', { id: entry.id, title })
+    await renameEntry(entry, title)
     editing = null
     await onchange()
   }
@@ -54,7 +54,7 @@
       <span class="toggle" aria-hidden="true"></span>
     {/if}
     {#if entry.kind === 'page'}
-      <a href={pageAddress(entry.id, entry.title)} onclick={event => router.follow(event, pageAddress(entry.id, entry.title))}>{entry.title}</a>
+      <a href={address} onclick={event => router.follow(event, address)}>{entry.title}</a>
     {:else}
       <span class="folder">{entry.title}</span>
     {/if}
@@ -68,7 +68,7 @@
 
   {#if editing === 'add'}
     <TitleForm
-      label={`Title of the new entry beneath ${entry.title}`}
+      label={`Title of the new Page or Folder beneath ${entry.title}`}
       actions={ADD_ACTIONS}
       onsubmit={add}
       oncancel={() => (editing = null)}

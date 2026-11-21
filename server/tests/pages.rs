@@ -25,6 +25,31 @@ async fn the_editing_websocket_needs_a_valid_session() {
 }
 
 #[tokio::test]
+async fn an_open_editor_stops_changing_the_page_once_its_session_ends() {
+    let mut server = TestServer::start().await;
+    let leaving = server.sign_up().await;
+    let page = leaving.create_page("Roadmap").await;
+    let staying = server.sign_in().await;
+    let editor = server.connect(&leaving, &page).await;
+    editor.append_paragraph("Before signing out");
+    let observer = server.connect(&staying, &page).await;
+    observer
+        .wait_until("the observer sees the first edit", |content| {
+            content.paragraphs == ["Before signing out"]
+        })
+        .await;
+
+    leaving.call("sign_out", json!({})).await;
+    editor.append_paragraph("After signing out");
+
+    editor.wait_until_closed("the server closes the signed-out editor").await;
+    // Opened afterwards, so it holds whatever the server applied.
+    let late = server.connect(&staying, &page).await;
+    assert_eq!(late.paragraphs(), ["Before signing out"]);
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn only_pages_of_an_area_can_be_opened() {
     let mut server = TestServer::start().await;
     let member = server.sign_up().await;
