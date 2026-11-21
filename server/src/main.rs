@@ -2,6 +2,7 @@
 
 mod diff;
 mod http_api;
+mod live;
 mod markdown;
 mod model;
 mod ops;
@@ -10,7 +11,6 @@ mod store;
 mod web_app;
 mod ydoc;
 
-use anyhow::Context;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
@@ -19,25 +19,17 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
+use live::{frame, OpenPage, FRAME_PRESENCE, FRAME_PRESENCE_REQUEST, FRAME_UPDATE};
 use ops::permissions::Role;
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use yrs::updates::decoder::Decode;
-use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
+use yrs::{ReadTxn, StateVector, Transact};
 
-// The first byte of every WebSocket frame says what the rest is.
-/// A document update, in both directions.
-const FRAME_UPDATE: u8 = 0;
-/// Presence (who is here, where their cursor is). Relayed, never interpreted.
-const FRAME_PRESENCE: u8 = 1;
-/// Sent by the server when someone joins, asking the others to announce themselves.
-const FRAME_PRESENCE_REQUEST: u8 = 2;
-
-/// How often changed Pages are written to the database (ADR-0004: never per keystroke).
+/// How often changed Pages are written to the database (ADR-0004: never per
+/// keystroke), and Versions that are due recorded.
 const SAVE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// How often an open editing connection checks that its session is still
@@ -53,82 +45,10 @@ const SEARCH_INTERVAL: Duration = Duration::from_secs(1);
 /// wherever Turtle was started.
 const DEFAULT_DATA_DIR: &str = "turtle-data";
 
-/// A Page that is open in memory.
-struct OpenPage {
-    doc: Doc,
-    /// Frames for everyone connected, tagged with the connection that sent them.
-    frames: broadcast::Sender<(u64, Vec<u8>)>,
-    unsaved: AtomicBool,
-}
-
 struct App {
-    /// Decides who may open which Page.
+    /// Decides who may open which Page, and holds the open Pages.
     core: Arc<ops::Core>,
-    db: Mutex<rusqlite::Connection>,
-    pages: Mutex<HashMap<String, Arc<OpenPage>>>,
     next_connection: AtomicU64,
-}
-
-impl App {
-    fn open_page(&self, id: &str) -> anyhow::Result<Arc<OpenPage>> {
-        let mut pages = self.pages.lock().unwrap();
-        if let Some(page) = pages.get(id) {
-            return Ok(page.clone());
-        }
-        let doc = Doc::new();
-        let stored: Option<Vec<u8>> = {
-            let db = self.db.lock().unwrap();
-            let mut statement = db.prepare("SELECT state FROM pages WHERE id = ?1")?;
-            let mut rows = statement.query([id])?;
-            match rows.next()? {
-                Some(row) => Some(row.get(0)?),
-                None => None,
-            }
-        };
-        if let Some(state) = stored {
-            let update = Update::decode_v1(&state).context("stored page is unreadable")?;
-            doc.transact_mut().apply_update(update)?;
-        }
-        let (frames, _) = broadcast::channel(1024);
-        let page = Arc::new(OpenPage {
-            doc,
-            frames,
-            unsaved: AtomicBool::new(false),
-        });
-        pages.insert(id.to_string(), page.clone());
-        Ok(page)
-    }
-
-    fn save_changed_pages(&self) -> anyhow::Result<()> {
-        let open: Vec<(String, Arc<OpenPage>)> = self
-            .pages
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(id, page)| (id.clone(), page.clone()))
-            .collect();
-        for (id, page) in open {
-            if !page.unsaved.swap(false, Ordering::SeqCst) {
-                continue;
-            }
-            let state = page
-                .doc
-                .transact()
-                .encode_state_as_update_v1(&StateVector::default());
-            let saved = self.db.lock().unwrap().execute(
-                "INSERT INTO pages (id, state) VALUES (?1, ?2)
-                 ON CONFLICT (id) DO UPDATE SET state = excluded.state",
-                rusqlite::params![id, state],
-            );
-            if let Err(error) = saved {
-                // Keep the page marked so the next round tries again.
-                page.unsaved.store(true, Ordering::SeqCst);
-                return Err(error.into());
-            }
-            self.core.page_changed(&id);
-        }
-        Ok(())
-    }
 }
 
 #[tokio::main]
@@ -152,26 +72,22 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(4100);
 
-    // Opening the core brings the schema up to date; the Page store gets its
-    // own connection so live editing does not wait behind operations.
+    // Opening the core brings the schema up to date.
     let db_path = store::database_in(&data_dir)?;
     let core = Arc::new(ops::Core::open(&db_path)?);
-    let db = store::open(&db_path)?;
 
     let app = Arc::new(App {
         core: core.clone(),
-        db: Mutex::new(db),
-        pages: Mutex::new(HashMap::new()),
         next_connection: AtomicU64::new(1),
     });
 
-    let saver = app.clone();
+    let saver = core.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SAVE_INTERVAL);
         loop {
             tick.tick().await;
-            let app = saver.clone();
-            match tokio::task::spawn_blocking(move || app.save_changed_pages()).await {
+            let core = saver.clone();
+            match tokio::task::spawn_blocking(move || core.save_changed_pages()).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => eprintln!("saving pages failed: {error:#}"),
                 Err(error) => eprintln!("saving pages panicked: {error}"),
@@ -215,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_requested())
         .await?;
 
-    app.save_changed_pages()?;
+    app.core.save_before_stopping()?;
     app.core.close_search()?;
     Ok(())
 }
@@ -278,7 +194,7 @@ async fn page_for(
     headers: HeaderMap,
     page_id: &str,
     using: Use,
-) -> Result<ops::tree::Page, Response> {
+) -> Result<Opened, Response> {
     let core = core.clone();
     let page_id = page_id.to_string();
     let outcome = tokio::task::spawn_blocking(move || {
@@ -288,17 +204,27 @@ async fn page_for(
                 .map(|reply| reply.output),
             Use::Change => ops::tree::page_to_change(&core, &principal, &page_id),
         };
-        Ok::<_, ops::OpError>(page.map_err(|error| (principal == ops::Principal::Anonymous, error)))
+        let opened = page.and_then(|page| {
+            let member_id = ops::areas::signed_in(&principal)?.to_string();
+            Ok(Opened { page, member_id })
+        });
+        Ok::<_, ops::OpError>(opened.map_err(|error| (principal == ops::Principal::Anonymous, error)))
     })
     .await;
     match outcome {
-        Ok(Ok(Ok(page))) => Ok(page),
+        Ok(Ok(Ok(opened))) => Ok(opened),
         Ok(Ok(Err((true, ops::OpError::NotPermitted(message))))) => {
             Err((StatusCode::UNAUTHORIZED, message).into_response())
         }
         Ok(Ok(Err((_, error)))) | Ok(Err(error)) => Err(http_api::error_response(error)),
         Err(error) => Err(http_api::error_response(ops::OpError::Internal(error.into()))),
     }
+}
+
+/// A Page someone may use, and who they are.
+struct Opened {
+    page: ops::tree::Page,
+    member_id: String,
 }
 
 async fn read_markdown(
@@ -309,7 +235,7 @@ async fn read_markdown(
     if let Err(refused) = page_for(&app.core, headers, &page_id, Use::Read).await {
         return Ok(refused);
     }
-    let page = app.open_page(&page_id)?;
+    let page = app.core.live().open(&page_id)?;
     let markdown = markdown::to_markdown(&ydoc::read(&page.doc));
     Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], markdown).into_response())
 }
@@ -322,14 +248,12 @@ async fn write_markdown(
     headers: HeaderMap,
     body: String,
 ) -> Result<Response, Failure> {
-    if let Err(refused) = page_for(&app.core, headers, &page_id, Use::Change).await {
-        return Ok(refused);
-    }
-    let page = app.open_page(&page_id)?;
-    if let Some(update) = ydoc::write(&page.doc, &markdown::from_markdown(&body)) {
-        page.unsaved.store(true, Ordering::SeqCst);
-        let _ = page.frames.send((0, frame(FRAME_UPDATE, &update)));
-    }
+    let author = match page_for(&app.core, headers, &page_id, Use::Change).await {
+        Ok(opened) => opened.member_id,
+        Err(refused) => return Ok(refused),
+    };
+    let page = app.core.live().open(&page_id)?;
+    app.core.live().write(&page, &markdown::from_markdown(&body), &author);
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -341,22 +265,32 @@ async fn connect(
 ) -> Result<Response, Failure> {
     // Watched before access is checked, so a change in between is noticed.
     let access_changes = app.core.watch_access();
-    let role = match page_for(&app.core, headers.clone(), &page_id, Use::Read).await {
-        Ok(opened) => opened.role,
+    let (role, member_id) = match page_for(&app.core, headers.clone(), &page_id, Use::Read).await {
+        Ok(opened) => (opened.page.role, opened.member_id),
         Err(refused) => return Ok(refused),
     };
-    let page = app.open_page(&page_id)?;
+    let page = app.core.live().open(&page_id)?;
     let connection = app.next_connection.fetch_add(1, Ordering::SeqCst);
     let access = Access {
         core: app.core.clone(),
         headers,
         page_id,
         role,
+        member_id,
         changes: access_changes,
     };
+    let core = app.core.clone();
     Ok(upgrade.on_upgrade(move |socket| async move {
-        if let Err(error) = serve_connection(socket, page, connection, access).await {
+        core.live().connected(&page);
+        if let Err(error) = serve_connection(socket, page.clone(), connection, access).await {
             eprintln!("connection {connection} ended with an error: {error:#}");
+        }
+        // Recording a Version writes to the database.
+        let left = tokio::task::spawn_blocking(move || core.live().disconnected(&page)).await;
+        match left {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => eprintln!("recording a Version failed: {error:#}"),
+            Err(error) => eprintln!("recording a Version panicked: {error}"),
         }
     }))
 }
@@ -369,6 +303,8 @@ struct Access {
     headers: HeaderMap,
     page_id: String,
     role: Role,
+    /// Who is editing, to be named among the authors of the next Version.
+    member_id: String,
     /// Fires whenever someone's access may have changed.
     changes: tokio::sync::watch::Receiver<u64>,
 }
@@ -379,7 +315,7 @@ impl Access {
     /// its new Role, or finds it can no longer read it.
     async fn still_holds_role(&self) -> bool {
         match page_for(&self.core, self.headers.clone(), &self.page_id, Use::Read).await {
-            Ok(page) => page.role == self.role,
+            Ok(opened) => opened.page.role == self.role,
             Err(_) => false,
         }
     }
@@ -393,13 +329,6 @@ impl Access {
             Err(refused) => Err(refused.status()),
         }
     }
-}
-
-fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(payload.len() + 1);
-    frame.push(kind);
-    frame.extend_from_slice(payload);
-    frame
 }
 
 async fn serve_connection(
@@ -458,13 +387,9 @@ async fn serve_connection(
                             Err(StatusCode::FORBIDDEN) => continue,
                             Err(_) => break Ok(()),
                         }
-                        let applied = Update::decode_v1(&data[1..])
-                            .context("unreadable update")
-                            .and_then(|update| Ok(page.doc.transact_mut().apply_update(update)?));
-                        if let Err(error) = applied {
+                        if let Err(error) = access.core.live().apply(&page, &data[1..], &access.member_id) {
                             break Err(error);
                         }
-                        page.unsaved.store(true, Ordering::SeqCst);
                         let _ = page.frames.send((connection, data.to_vec()));
                     }
                     Some(&FRAME_PRESENCE) => {

@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 /// Workspace Admin without a Grant.
 const COLUMNS: [&str; 5] = ["Admin", "Write", "Read", "no Role", "Workspace Admin"];
 
-/// What exists before each call. Every call gets a fresh one.
+/// What exists before each call. Every call gets a fresh one. The Page has
+/// one Version.
 struct Fixture {
     area_id: String,
     page_id: String,
@@ -73,6 +74,14 @@ fn table() -> Vec<Row> {
             |f| json!({"area_id": f.area_id, "holder": {"kind": "member", "member_id": f.ken_id}}),
             [OK, REFUSED, REFUSED, HIDDEN, OK],
         ),
+        ("list_versions", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
+        ("get_version", |f| json!({"page_id": f.page_id, "number": 1}), [OK, OK, OK, HIDDEN, OK]),
+        (
+            "compare_versions",
+            |f| json!({"page_id": f.page_id, "from": 1, "to": 1}),
+            [OK, OK, OK, HIDDEN, OK],
+        ),
+        ("restore_version", |f| json!({"page_id": f.page_id, "number": 1}), [OK, OK, REFUSED, HIDDEN, OK]),
     ]
 }
 
@@ -110,6 +119,11 @@ fn every_operation_respects_the_role_of_its_caller() {
                     Principal::Anonymous => unreachable!(),
                 },
             };
+            let page = core.live().open(&fixture.page_id).unwrap();
+            core.live().connected(&page);
+            let Principal::Member { id: grace_id, .. } = &grace else { unreachable!() };
+            core.live().write(&page, &crate::markdown::from_markdown("Notes for the team."), grace_id);
+            core.live().disconnected(&page).unwrap();
             give_role(&core, &area_id, &ken, Role::Read);
             let caller = member(&core, "Caller", column == "Workspace Admin");
             let role = match column {

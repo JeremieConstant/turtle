@@ -35,7 +35,7 @@ An image or file that belongs to a Page.
 _Avoid_: Upload, asset, media
 
 **Version**:
-A recorded state of a Page with its author, which can be compared with other Versions and restored.
+A recorded state of a Page with its authors, the people whose changes arrived since the previous Version; it can be compared with other Versions and restored.
 _Avoid_: Revision, snapshot, history entry
 
 **Trash**:

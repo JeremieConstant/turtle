@@ -14,6 +14,7 @@
   import MarkdownView from './MarkdownView.svelte'
   import People from './People.svelte'
   import Toolbar from './Toolbar.svelte'
+  import Versions from './Versions.svelte'
 
   const {
     page,
@@ -32,6 +33,7 @@
   let loaded = $state(false)
   let editor = $state.raw<TipTap | null>(null)
   let markdownShown = $state(false)
+  let versionsShown = $state(false)
 
   // The app shows Pages only to a signed-in Member.
   const person = currentPerson(session.member?.name ?? 'Unknown')
@@ -66,6 +68,9 @@
       {markdownShown ? 'Hide Markdown' : 'Show Markdown'}
     </button>
   {/if}
+  <button type="button" onclick={() => (versionsShown = !versionsShown)}>
+    {versionsShown ? 'Hide Versions' : 'Versions'}
+  </button>
 </Toolbar>
 
 <main>
@@ -77,7 +82,10 @@
     {/if}
   </div>
   {#if markdownShown}
-    <div class="markdown"><MarkdownView pageId={id} {doc} /></div>
+    <div class="side"><MarkdownView pageId={id} {doc} /></div>
+  {/if}
+  {#if versionsShown}
+    <div class="side"><Versions pageId={id} {editable} /></div>
   {/if}
 </main>
 
@@ -102,7 +110,7 @@
     min-width: 0;
   }
 
-  .markdown {
+  .side {
     flex: 1 1 var(--width-side);
     min-width: 0;
   }

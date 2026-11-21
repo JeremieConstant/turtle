@@ -11,6 +11,24 @@ export type AreaList = {
   areas: Area[]
 }
 
+export type Author = {
+  id: string
+  name: string
+}
+
+export type Change = "same" | "added" | "removed"
+
+export type ComparedLine = {
+  change: Change
+  text: string
+}
+
+export type Comparison = {
+  from: VersionSummary
+  lines: ComparedLine[]
+  to: VersionSummary
+}
+
 export type Entry = {
   children: Entry[]
   id: string
@@ -82,6 +100,12 @@ export type Page = {
   title: string
 }
 
+export type Restored = {
+  /** The new Version, which says what the restored one said. None when the
+Page already said that and its last Version did too. */
+  version?: VersionSummary | null
+}
+
 export type Role = "read" | "write" | "admin"
 
 export type RoleAfterwards = {
@@ -128,6 +152,34 @@ export type Tree = {
   area: Area
   /** The top of the Area, in order. */
   entries: Entry[]
+}
+
+export type Version = {
+  /** Whose changes arrived since the previous Version, by name. */
+  authors: Author[]
+  /** The Page as it was, in Markdown. */
+  markdown: string
+  /** Counts up from 1 within the Page. */
+  number: number
+  /** Seconds since the Unix epoch. */
+  recorded_at: number
+  /** The number of the Version this one restored, if it was a restore. */
+  restored_from?: number | null
+}
+
+export type VersionList = {
+  versions: VersionSummary[]
+}
+
+export type VersionSummary = {
+  /** Whose changes arrived since the previous Version, by name. */
+  authors: Author[]
+  /** Counts up from 1 within the Page. */
+  number: number
+  /** Seconds since the Unix epoch. */
+  recorded_at: number
+  /** The number of the Version this one restored, if it was a restore. */
+  restored_from?: number | null
 }
 
 /** Every operation, with its input and output. */
@@ -325,5 +377,45 @@ the beginning of, so results can be shown while typing. */
       query: string
     }
     output: SearchResults
+  }
+  /** Lists the Versions of a Page, newest first, each with when it was recorded and who wrote the changes it holds. Needs the Read Role. */
+  list_versions: {
+    input: {
+      /** The Page whose Versions to list. */
+      page_id: string
+    }
+    output: VersionList
+  }
+  /** Gets one Version of a Page with its content as Markdown. Needs the Read Role. */
+  get_version: {
+    input: {
+      /** The Version's number within the Page. */
+      number: number
+      /** The Page the Version belongs to. */
+      page_id: string
+    }
+    output: Version
+  }
+  /** Compares two Versions of a Page line by line in Markdown, showing what was added and removed going from one to the other. Needs the Read Role. */
+  compare_versions: {
+    input: {
+      /** The number of the Version to compare from. Lines only it has count as removed. */
+      from: number
+      /** The Page both Versions belong to. */
+      page_id: string
+      /** The number of the Version to compare to. Lines only it has count as added. */
+      to: number
+    }
+    output: Comparison
+  }
+  /** Makes a Page say what one of its Versions said, as a new Version; the Versions in between stay. Only what differs is changed, so people editing at that moment keep their work and their cursor. Needs the Write Role. */
+  restore_version: {
+    input: {
+      /** The Version's number within the Page. */
+      number: number
+      /** The Page the Version belongs to. */
+      page_id: string
+    }
+    output: Restored
   }
 }

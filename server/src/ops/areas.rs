@@ -168,8 +168,8 @@ pub fn list_areas(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Ar
     Ok(AreaList { areas }.into())
 }
 
-/// The acting Member's ID; nobody else may work with Areas.
-pub(super) fn signed_in(principal: &Principal) -> Result<&str, OpError> {
+/// The acting Member's ID; nobody else may work with Areas and Pages.
+pub fn signed_in(principal: &Principal) -> Result<&str, OpError> {
     match principal {
         Principal::Member { id, .. } => Ok(id),
         Principal::Anonymous => Err(OpError::NotPermitted("Sign in first.".into())),

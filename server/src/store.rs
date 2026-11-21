@@ -73,6 +73,23 @@ const MIGRATIONS: &[&str] = &[
          created_at INTEGER NOT NULL,
          expires_at INTEGER NOT NULL
      );",
+    // A Version keeps the Page's content as Markdown, which holds everything
+    // a Page can say (ADR-0006) and is what Versions are compared by.
+    "CREATE TABLE versions (
+         page_id TEXT NOT NULL REFERENCES nodes (id) ON DELETE CASCADE,
+         number INTEGER NOT NULL,
+         markdown TEXT NOT NULL,
+         recorded_at INTEGER NOT NULL,
+         restored_from INTEGER,
+         PRIMARY KEY (page_id, number)
+     );
+     CREATE TABLE version_authors (
+         page_id TEXT NOT NULL,
+         number INTEGER NOT NULL,
+         member_id TEXT NOT NULL REFERENCES members (id) ON DELETE CASCADE,
+         PRIMARY KEY (page_id, number, member_id),
+         FOREIGN KEY (page_id, number) REFERENCES versions (page_id, number) ON DELETE CASCADE
+     );",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

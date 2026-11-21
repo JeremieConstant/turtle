@@ -14,6 +14,7 @@ pub mod members;
 pub mod permissions;
 pub mod search;
 pub mod tree;
+pub mod versions;
 
 use rusqlite::Connection;
 use schemars::JsonSchema;
@@ -24,27 +25,41 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Tells the time in seconds since the Unix epoch.
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
 /// What operations work on: the database and the time.
 pub struct Core {
     db: Mutex<Connection>,
-    clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    clock: Clock,
     /// Counts the changes that may have taken access away or changed a Role,
     /// so open editors check theirs again at once.
     access: tokio::sync::watch::Sender<u64>,
     search: crate::search::Index,
+    live: crate::live::Pages,
 }
 
 impl Core {
     /// Opens the database and, beside it, the search index.
     pub fn open(db_path: &Path) -> anyhow::Result<Core> {
-        Ok(Core {
-            db: Mutex::new(crate::store::open(db_path)?),
-            search: crate::search::Index::open(&db_path.with_file_name("search"))?,
-            clock: Arc::new(|| {
+        Core::open_with_clock(
+            db_path,
+            Arc::new(|| {
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map_or(0, |since| since.as_secs() as i64)
             }),
+        )
+    }
+
+    fn open_with_clock(db_path: &Path, clock: Clock) -> anyhow::Result<Core> {
+        // The open Pages get a connection of their own, so live editing does
+        // not wait behind operations.
+        Ok(Core {
+            db: Mutex::new(crate::store::open(db_path)?),
+            search: crate::search::Index::open(&db_path.with_file_name("search"))?,
+            live: crate::live::Pages::new(crate::store::open(db_path)?, clock.clone()),
+            clock,
             access: tokio::sync::watch::Sender::new(0),
         })
     }
@@ -68,6 +83,26 @@ impl Core {
     /// it as it is now once the index has caught up.
     pub fn page_changed(&self, page_id: &str) {
         self.search.page_changed(page_id);
+    }
+
+    /// The Pages open in memory.
+    pub fn live(&self) -> &crate::live::Pages {
+        &self.live
+    }
+
+    /// Writes every changed open Page to the database, and records a
+    /// Version of each whose changes have waited long enough.
+    pub fn save_changed_pages(&self) -> anyhow::Result<()> {
+        // Recording does not wait for saving: a Version holds its own content.
+        let saved = self.live.save_changed(|id| self.page_changed(id));
+        self.live.record_due()?;
+        saved
+    }
+
+    /// Saves every open Page and records its unrecorded changes, as Turtle stops.
+    pub fn save_before_stopping(&self) -> anyhow::Result<()> {
+        self.live.save_changed(|id| self.page_changed(id))?;
+        self.live.record_all()
     }
 
     /// Brings the search index up to date with every change said so far,
@@ -292,6 +327,7 @@ pub fn catalogue() -> Catalogue {
     grants::register(&mut catalogue);
     tree::register(&mut catalogue);
     search::register(&mut catalogue);
+    versions::register(&mut catalogue);
     catalogue
 }
 
@@ -354,10 +390,11 @@ pub(crate) mod testing {
 
     pub fn fresh() -> TestCore {
         let dir = tempfile::tempdir().unwrap();
-        let mut core = Core::open(&dir.path().join("turtle.db")).unwrap();
         let time = Arc::new(AtomicI64::new(1_700_000_000));
         let shown = time.clone();
-        core.clock = Arc::new(move || shown.load(Ordering::SeqCst));
+        let core =
+            Core::open_with_clock(&dir.path().join("turtle.db"), Arc::new(move || shown.load(Ordering::SeqCst)))
+                .unwrap();
         TestCore {
             core,
             time,
@@ -398,6 +435,10 @@ mod tests {
             "get_page",
             "get_tree",
             "search",
+            "list_versions",
+            "get_version",
+            "compare_versions",
+            "restore_version",
         ];
         for expected in expected_names {
             assert!(names.contains(&expected), "{expected} is missing from {names:?}");
