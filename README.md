@@ -38,6 +38,7 @@ Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you t
 | --- | --- | --- |
 | `TURTLE_DATA` | `turtle-data` in the directory Turtle is started from | The data directory. It is created on the first start and holds the database, `turtle.db`. |
 | `TURTLE_PORT` | `4100` | The port Turtle listens on. |
+| `TURTLE_LOG_SAVES` | unset | When set, Turtle prints a line for each save of changed Pages and how long it took, to see whether saving keeps up. |
 
 Settings are environment variables:
 
@@ -66,5 +67,7 @@ A debug build embeds whatever `web/dist` holds when it is compiled, and starts w
 ```bash
 git config core.hooksPath .githooks
 ```
+
+`scripts/load-test.sh` runs the load test on demand: 500 people editing at the same time against a release build, with a report on how fast changes reach the others, memory and saving. The last recorded run is in [docs/load-test.md](docs/load-test.md).
 
 Licensed under [AGPL-3.0](LICENSE).

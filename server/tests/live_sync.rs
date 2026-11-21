@@ -7,6 +7,7 @@
 
 mod support;
 
+use std::time::Duration;
 use support::TestServer;
 
 // One thread, so the two edits below are really concurrent (see there).
@@ -69,6 +70,21 @@ async fn content_survives_a_restart_on_the_same_data_directory() {
     let reader = server.connect(&member, &page).await;
     assert_eq!(reader.paragraphs(), ["Checklist. Day one: laptop and accounts."]);
     assert_eq!(reader.content().document, before);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn when_asked_the_server_reports_each_save_and_how_long_it_took() {
+    let mut server = TestServer::start_reporting_saves().await;
+    let member = server.sign_up().await;
+    let page = member.create_page("Shared notes").await;
+    let editor = server.connect(&member, &page).await;
+    editor.append_paragraph("Q1 goals");
+
+    // Rounds with nothing to write are not reported.
+    let save = server.next_save("the server saves the changed Page").await;
+    assert_eq!(save.pages, 1);
+    assert!(save.took < Duration::from_secs(2), "saving took {:?}", save.took);
     server.stop().await;
 }
 
