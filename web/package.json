@@ -1,0 +1,25 @@
+{
+  "name": "turtle-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.35.0",
+    "@tiptap/extension-collaboration": "^3.35.0",
+    "@tiptap/extension-collaboration-caret": "^3.35.0",
+    "@tiptap/pm": "^3.35.0",
+    "@tiptap/starter-kit": "^3.35.0",
+    "@tiptap/y-tiptap": "^3.3.1",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

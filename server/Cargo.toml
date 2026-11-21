@@ -1,0 +1,15 @@
+[package]
+name = "turtle"
+version = "0.0.1"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["ws"] }
+futures-util = "0.3.34"
+pulldown-cmark = "0.13.6"
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+tokio = { version = "1.54.1", features = ["full"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
+yrs = "0.28.2"

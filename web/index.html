@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Turtle</title>
+  </head>
+  <body>
+    <header>
+      <strong class="brand">Turtle</strong>
+      <span id="page-name"></span>
+      <span id="people"></span>
+      <span id="status" data-state="connecting">Connecting…</span>
+    </header>
+    <div id="toolbar" role="toolbar" aria-label="Formatting"></div>
+    <main>
+      <div id="editor"></div>
+      <aside id="markdown" hidden>
+        <h2>Markdown</h2>
+        <pre id="markdown-text"></pre>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,214 @@
+:root {
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --text: #1c1917;
+  --muted: #78716c;
+  --line: #e7e5e4;
+  --accent: #0f766e;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --surface: #24211f;
+    --text: #f5f5f4;
+    --muted: #a8a29e;
+    --line: #3f3a36;
+    --accent: #5eead4;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 system-ui, sans-serif;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  color: var(--accent);
+}
+
+#page-name {
+  color: var(--muted);
+}
+
+#people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.person {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--person);
+  color: #fff;
+  font-size: 13px;
+}
+
+#status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#status[data-state='connected'] {
+  color: var(--accent);
+}
+
+#toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+button {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.markdown-toggle {
+  margin-left: auto;
+}
+
+main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+#editor {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+#markdown {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+#markdown h2 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#markdown pre {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font: 13px/1.5 ui-monospace, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tiptap {
+  min-height: 60vh;
+  outline: none;
+}
+
+.tiptap > :first-child {
+  margin-top: 0;
+}
+
+.tiptap h1,
+.tiptap h2,
+.tiptap h3 {
+  line-height: 1.25;
+}
+
+.tiptap blockquote {
+  margin-left: 0;
+  padding-left: 16px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
+.tiptap code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--line);
+  font: 0.9em ui-monospace, monospace;
+}
+
+.tiptap pre {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--line);
+  overflow-x: auto;
+}
+
+.tiptap pre code {
+  padding: 0;
+  background: none;
+}
+
+.tiptap a {
+  color: var(--accent);
+}
+
+.tiptap hr {
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+/* Other people's cursors */
+.collaboration-carets__caret {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 1px solid;
+  border-right: 1px solid;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.collaboration-carets__label {
+  position: absolute;
+  top: -1.4em;
+  left: -1px;
+  padding: 0 6px;
+  border-radius: 4px 4px 4px 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  user-select: none;
+}
