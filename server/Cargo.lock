@@ -1259,6 +1259,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "tower",
  "yrs",
 ]

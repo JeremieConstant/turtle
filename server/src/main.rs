@@ -175,18 +175,41 @@ async fn main() -> anyhow::Result<()> {
         .merge(web_app::router(web_app::EMBEDDED));
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    // With port 0 the system picks one; the line says which (the tests read it).
+    let port = listener.local_addr()?.port();
     println!(
         "Turtle is listening on http://127.0.0.1:{port} (data directory: {})",
         data_dir.display()
     );
     axum::serve(listener, router)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown_requested())
         .await?;
 
     app.save_changed_pages()?;
     Ok(())
+}
+
+/// Ctrl+C, or SIGTERM as sent by service managers, container runtimes and `kill`.
+async fn shutdown_requested() {
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                terminate.recv().await;
+            }
+            Err(error) => {
+                eprintln!("cannot listen for SIGTERM, only Ctrl+C stops Turtle: {error}");
+                std::future::pending().await
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        () = terminate => {}
+    }
 }
 
 struct Failure(anyhow::Error);
