@@ -94,7 +94,8 @@ impl App {
         Ok(page)
     }
 
-    fn save_changed_pages(&self) -> anyhow::Result<()> {
+    /// Writes every Page changed since the last save and returns how many.
+    fn save_changed_pages(&self) -> anyhow::Result<usize> {
         let open: Vec<(String, Arc<OpenPage>)> = self
             .pages
             .lock()
@@ -102,6 +103,7 @@ impl App {
             .iter()
             .map(|(id, page)| (id.clone(), page.clone()))
             .collect();
+        let mut saved_pages = 0;
         for (id, page) in open {
             if !page.unsaved.swap(false, Ordering::SeqCst) {
                 continue;
@@ -120,8 +122,9 @@ impl App {
                 page.unsaved.store(true, Ordering::SeqCst);
                 return Err(error.into());
             }
+            saved_pages += 1;
         }
-        Ok(())
+        Ok(saved_pages)
     }
 }
 
@@ -159,14 +162,25 @@ async fn main() -> anyhow::Result<()> {
         next_connection: AtomicU64::new(1),
     });
 
+    // For load tests and for an operator who wants to see whether saving
+    // keeps up: one line per save that wrote anything.
+    let log_saves = std::env::var_os("TURTLE_LOG_SAVES").is_some_and(|value| !value.is_empty());
     let saver = app.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SAVE_INTERVAL);
         loop {
             tick.tick().await;
             let app = saver.clone();
+            let started = std::time::Instant::now();
             match tokio::task::spawn_blocking(move || app.save_changed_pages()).await {
-                Ok(Ok(())) => {}
+                Ok(Ok(0)) => {}
+                Ok(Ok(pages)) => {
+                    if log_saves {
+                        let took = started.elapsed().as_secs_f64() * 1000.0;
+                        let noun = if pages == 1 { "Page" } else { "Pages" };
+                        println!("Saved {pages} {noun} in {took:.3} ms.");
+                    }
+                }
                 Ok(Err(error)) => eprintln!("saving pages failed: {error:#}"),
                 Err(error) => eprintln!("saving pages panicked: {error}"),
             }
