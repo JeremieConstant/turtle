@@ -1,11 +1,11 @@
-//! Turtle server, first slice: several people edit one Page live, the content
-//! survives a restart, and it is available as Markdown in both directions.
+//! Turtle server: one binary with the web app inside and one data directory.
 
 mod http_api;
 mod markdown;
 mod model;
 mod ops;
 mod store;
+mod web_app;
 mod ydoc;
 
 use anyhow::Context;
@@ -18,11 +18,11 @@ use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tower_http::services::{ServeDir, ServeFile};
 use yrs::updates::decoder::Decode;
 use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
 
@@ -36,6 +36,10 @@ const FRAME_PRESENCE_REQUEST: u8 = 2;
 
 /// How often changed Pages are written to the database (ADR-0004: never per keystroke).
 const SAVE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Where the data directory is when `TURTLE_DATA` does not say: beside
+/// wherever Turtle was started.
+const DEFAULT_DATA_DIR: &str = "turtle-data";
 
 /// A Page that is open in memory.
 struct OpenPage {
@@ -121,8 +125,12 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let db_path = std::env::var("TURTLE_DB").unwrap_or_else(|_| "turtle.db".into());
-    let web_dir = std::env::var("TURTLE_WEB").unwrap_or_else(|_| "web/dist".into());
+    // Everything Turtle keeps lives in one directory.
+    let data_dir = PathBuf::from(
+        std::env::var_os("TURTLE_DATA")
+            .filter(|dir| !dir.is_empty())
+            .unwrap_or_else(|| DEFAULT_DATA_DIR.into()),
+    );
     let port: u16 = std::env::var("TURTLE_PORT")
         .or_else(|_| std::env::var("PORT"))
         .ok()
@@ -131,8 +139,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Opening the core brings the schema up to date; the Page store gets its
     // own connection so live editing does not wait behind operations.
-    let core = ops::Core::open(db_path.as_ref())?;
-    let db = store::open(db_path.as_ref())?;
+    let db_path = store::database_in(&data_dir)?;
+    let core = ops::Core::open(&db_path)?;
+    let db = store::open(&db_path)?;
 
     let app = Arc::new(App {
         db: Mutex::new(db),
@@ -154,7 +163,6 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let index = ServeFile::new(format!("{web_dir}/index.html"));
     let router = Router::new()
         .route("/ws/{page}", get(connect))
         .route(
@@ -163,10 +171,13 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_state(app.clone())
         .merge(http_api::router(core))
-        .fallback_service(ServeDir::new(&web_dir).fallback(index));
+        .merge(web_app::router(web_app::EMBEDDED));
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    println!("Turtle is listening on http://127.0.0.1:{port} (database: {db_path})");
+    println!(
+        "Turtle is listening on http://127.0.0.1:{port} (data directory: {})",
+        data_dir.display()
+    );
     axum::serve(listener, router)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
