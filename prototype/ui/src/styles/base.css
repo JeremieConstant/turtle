@@ -1,0 +1,157 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-body);
+  font-size: 100%;
+  line-height: var(--leading-ui);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: inherit;
+}
+
+:focus-visible {
+  outline: var(--line-thick) solid var(--color-focus);
+  outline-offset: var(--space-half);
+}
+
+::selection {
+  background: var(--color-focus-soft);
+}
+
+dialog {
+  padding: 0;
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-float);
+  color: inherit;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.18);
+}
+
+[popover] {
+  margin: 0;
+  padding: var(--space-1);
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  color: inherit;
+}
+
+/* A quiet, square-cornered button used for every secondary action. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: var(--line) solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  font-size: var(--text-m);
+  font-weight: var(--weight-medium);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.btn:hover {
+  background: var(--color-sunken);
+}
+
+.btn:active {
+  transform: scale(var(--press-scale));
+}
+
+.btn.primary {
+  border-color: var(--color-text);
+  background: var(--color-text);
+  color: var(--color-bg);
+}
+
+.btn.primary:hover {
+  background: var(--color-text-2);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-muted);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.icon-btn:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Menus open with a short fade from their trigger and close at once. */
+[popover]:popover-open {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+@starting-style {
+  [popover]:popover-open {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}

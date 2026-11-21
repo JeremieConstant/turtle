@@ -1,0 +1,118 @@
+/*
+ * Every colour, distance, type setting, radius and motion duration of the
+ * prototype is defined here and nowhere else (ADR-0007). Components read
+ * these properties only, so this file can carry over to web/ as it is.
+ *
+ * The palette is monochrome. Colour appears only where it means something:
+ * focus and the drop target (--color-focus), the people editing a Page
+ * (--color-person-*), and an Agent's change (--color-agent).
+ */
+:root {
+  color-scheme: light;
+
+  /* Neutrals */
+  --color-bg: #ffffff;
+  --color-side: #f7f7f6;
+  --color-surface: #ffffff;
+  --color-sunken: #f2f2f0;
+  --color-hover: #ececea;
+  --color-selected: #e4e4e1;
+  --color-line: #e6e6e3;
+  --color-line-strong: #d4d4d0;
+  --color-text: #1a1a19;
+  --color-text-2: #4a4a47;
+  --color-muted: #82827d;
+  --color-faint: #b0b0aa;
+
+  /* Meaning */
+  --color-focus: #2f6bdc;
+  --color-focus-soft: rgb(47 107 220 / 0.1);
+  --color-agent: #0f7b6c;
+  --color-agent-soft: rgb(15 123 108 / 0.1);
+  --color-person-1: #d9480f;
+  --color-person-2: #c2255c;
+  --color-on-color: #ffffff;
+  --color-danger: #b42318;
+
+  /* Spacing, on a 4px grid */
+  --space-hair: 1px;
+  --space-half: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Shape */
+  --line: 1px;
+  --line-thick: 2px;
+  --line-quote: 3px;
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 10px;
+  --radius-round: 999px;
+
+  /* Type. The system face first: it brings optical sizes and tracking. */
+  --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --text-xs: 0.75rem;
+  --text-s: 0.8125rem;
+  --text-m: 0.875rem;
+  --text-base: 1rem;
+  --text-l: 1.125rem;
+  --text-h3: 1.1875rem;
+  --text-h2: 1.4375rem;
+  --text-h1: 2rem;
+  --text-search: 1.25rem;
+  --leading-tight: 1.2;
+  --leading-ui: 1.4;
+  --leading-body: 1.65;
+  --leading-code: 1.55;
+  --tracking-display: -0.022em;
+  --tracking-heading: -0.012em;
+  --tracking-small: 0.01em;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+
+  /* Layout */
+  --width-side: 280px;
+  --width-text: 46rem;
+  --width-start: 40rem;
+  --height-row: 28px;
+  --indent: 16px;
+  --height-bar: 48px;
+  --width-menu: 240px;
+  --layer-drag: 50;
+  --layer-menu: 40;
+  --layer-drawer: 30;
+
+  /* Depth: one shadow, used only on things that float above the page */
+  --shadow-float: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.1);
+
+  /* Motion. Short and quiet; reduced motion sets every duration to 0. */
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --dur-agent: 2400ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --press-scale: 0.97;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0ms;
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --dur-agent: 0ms;
+    --press-scale: 1;
+  }
+}
