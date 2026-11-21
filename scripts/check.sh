@@ -11,9 +11,13 @@ step "Server lints"
 cargo clippy --quiet --manifest-path server/Cargo.toml --all-targets -- -D warnings
 
 step "Generated operation types match the catalogue"
+# Compared with the file as it was, not with git, so work not yet staged
+# passes once the file is regenerated.
+generated=web/src/lib/operations.gen.ts
+before=$(shasum "$generated" 2>/dev/null || true)
 npm --prefix web run --silent generate
-if ! git diff --quiet -- web/src/lib/operations.gen.ts; then
-  echo "web/src/lib/operations.gen.ts was out of date and has been regenerated. Commit it." >&2
+if [ "$before" != "$(shasum "$generated")" ]; then
+  echo "$generated was out of date and has been regenerated. Run the checks again, and commit it." >&2
   exit 1
 fi
 
