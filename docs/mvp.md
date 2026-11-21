@@ -95,7 +95,7 @@ Macros, blogs, whiteboards, databases, likes, task management, a plugin marketpl
 ## Technology
 
 - Backend in Rust, with `yrs` for the collaborative documents, SQLite for storage and Tantivy for search.
-- Frontend: a small single-page app in TypeScript with TipTap and Yjs, embedded in the binary. Its looks do not matter for the MVP.
+- Frontend: a Svelte 5 single-page app with TipTap and Yjs, typed from the operation catalogue and embedded in the binary (ADR-0007). Its looks do not matter for the MVP.
 - Live editing over WebSocket. Open documents are held in memory and written to SQLite in batches.
 
 ## Open risks
