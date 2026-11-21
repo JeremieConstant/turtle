@@ -18,6 +18,11 @@ export class Connection {
   readonly awareness: Awareness
   private socket: WebSocket | null = null
   private hasLoaded = false
+  private closed = false
+  private retry: ReturnType<typeof setTimeout> | undefined
+  private readonly leave = () => {
+    removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
+  }
 
   constructor(
     private readonly url: string,
@@ -39,11 +44,19 @@ export class Connection {
         this.send(FRAME_PRESENCE, encodeAwarenessUpdate(this.awareness, clients))
       },
     )
-    window.addEventListener('beforeunload', () => {
-      removeAwarenessStates(this.awareness, [doc.clientID], 'unload')
-    })
+    window.addEventListener('beforeunload', this.leave)
 
     this.open()
+  }
+
+  /** Leaves the Page for good: the others see this person go, and nothing reconnects. */
+  close() {
+    this.closed = true
+    clearTimeout(this.retry)
+    window.removeEventListener('beforeunload', this.leave)
+    this.leave()
+    this.socket?.close()
+    this.awareness.destroy()
   }
 
   private open() {
@@ -75,10 +88,11 @@ export class Connection {
     }
     socket.onclose = () => {
       this.socket = null
+      if (this.closed) return
       this.onStatus('disconnected')
       const others = [...this.awareness.getStates().keys()].filter(id => id !== this.doc.clientID)
       removeAwarenessStates(this.awareness, others, this)
-      setTimeout(() => this.open(), 1000)
+      this.retry = setTimeout(() => this.open(), 1000)
     }
   }
 

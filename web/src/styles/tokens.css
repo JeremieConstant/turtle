@@ -1,0 +1,78 @@
+/*
+ * Every colour, distance and type setting of the web app is defined here and
+ * nowhere else (ADR-0007). Components use these properties only, so a design
+ * pass changes values in this file, not structure elsewhere.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Colours */
+  --color-bg: #fbfaf7;
+  --color-surface: #ffffff;
+  --color-text: #1c1917;
+  --color-muted: #78716c;
+  --color-line: #e7e5e4;
+  --color-accent: #0f766e;
+  /* Text on top of a person's colour. */
+  --color-on-person: #ffffff;
+
+  /* The colours people are told apart by. One is picked per person and sent
+     to the others, so these stay the same in the dark variant. */
+  --color-person-1: #c2410c;
+  --color-person-2: #0f766e;
+  --color-person-3: #7c3aed;
+  --color-person-4: #be185d;
+  --color-person-5: #1d4ed8;
+  --color-person-6: #4d7c0f;
+  --color-person-7: #b45309;
+
+  /* Spacing */
+  --space-hair: 1px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  /* Shape */
+  --line-width: 1px;
+  --line-width-quote: 3px;
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 8px;
+  --radius-pill: 999px;
+
+  /* Type */
+  --font-body: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --text-xs: 12px;
+  --text-s: 13px;
+  --text-m: 14px;
+  --text-base: 16px;
+  /* Relative to the surrounding text. */
+  --text-code-inline: 0.9em;
+  --tracking-label: 0.05em;
+  /* How far a cursor's name sits above the line it is on. */
+  --offset-caret-label: -1.4em;
+  --leading-tight: 1.25;
+  --leading-code: 1.5;
+  --leading-body: 1.6;
+  --weight-strong: 600;
+
+  /* Layout */
+  --width-content: 1200px;
+  --width-editor: 420px;
+  --width-side: 320px;
+  --height-editor: 60vh;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1c1917;
+    --color-surface: #24211f;
+    --color-text: #f5f5f4;
+    --color-muted: #a8a29e;
+    --color-line: #3f3a36;
+    --color-accent: #5eead4;
+  }
+}

@@ -1,0 +1,31 @@
+/* Defaults for the browser's own elements. Everything else is scoped to its component. */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: var(--text-base) / var(--leading-body) var(--font-body);
+}
+
+button {
+  padding: var(--space-1) var(--space-3);
+  border: var(--line-width) solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-m);
+  cursor: pointer;
+}
+
+button[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+a {
+  color: var(--color-accent);
+}
