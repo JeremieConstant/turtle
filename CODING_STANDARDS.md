@@ -18,6 +18,10 @@ Something the caller may not read answers exactly like something that does not e
 
 Error messages are whole sentences that say what to do next ("Enter a title."), name things with glossary terms, and never expose internals. Internal failures are logged on the server, not described to the caller.
 
+## A Version holds exactly its authors' changes
+
+People's edits arrive at an open Page at any moment. Code that reads a Page's content, changes it, and takes its unrecorded changes for a Version does all three under one `state` lock in `live.rs`, so an edit arriving in between can neither be undone nor credited to the wrong author.
+
 ## Comments say why
 
 A comment explains a reason, a constraint or a decision the code cannot show. Doc comments on operations and their input and output say what a caller needs to know, because they become the API and MCP descriptions.

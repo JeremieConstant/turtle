@@ -467,43 +467,9 @@ mod tests {
 
     #[test]
     fn every_operation_is_described_in_the_catalogue() {
+        // Which operations exist is held by the table in `every_operation`,
+        // which needs a row for each.
         let catalogue = catalogue();
-        let names: Vec<_> = catalogue.operations().iter().map(|op| op.name).collect();
-        let expected_names = [
-            "get_session",
-            "create_first_account",
-            "sign_in",
-            "sign_out",
-            "invite_member",
-            "accept_invitation",
-            "list_members",
-            "deactivate_member",
-            "set_workspace_admin",
-            "create_password_reset",
-            "reset_password",
-            "create_area",
-            "get_area",
-            "list_areas",
-            "rename_area",
-            "create_page",
-            "create_folder",
-            "rename_page",
-            "rename_folder",
-            "get_page",
-            "get_tree",
-            "search",
-            "list_versions",
-            "get_version",
-            "compare_versions",
-            "restore_version",
-            "get_page_markdown",
-            "replace_page",
-            "replace_section",
-            "append_to_page",
-        ];
-        for expected in expected_names {
-            assert!(names.contains(&expected), "{expected} is missing from {names:?}");
-        }
         for operation in catalogue.operations() {
             assert!(!operation.description.is_empty(), "{}", operation.name);
             assert!(operation.input_schema.is_object(), "{}", operation.name);
