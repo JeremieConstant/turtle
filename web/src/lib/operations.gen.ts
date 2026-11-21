@@ -11,6 +11,13 @@ export type AreaList = {
   areas: Area[]
 }
 
+export type CreatedToken = {
+  token: TokenSummary
+  /** The value an Agent sends as `Authorization: Bearer <value>`. Shown
+only here; Turtle keeps only a hash of it. */
+  value: string
+}
+
 export type Entry = {
   children: Entry[]
   id: string
@@ -96,6 +103,30 @@ address Turtle is reached at. */
   address: string
   /** When the link stops working, in seconds since the Unix epoch. */
   expires_at: number
+}
+
+export type TokenArea = {
+  id: string
+  name: string
+}
+
+export type TokenList = {
+  /** Newest first. */
+  tokens: TokenSummary[]
+}
+
+export type TokenSummary = {
+  /** The only Areas it reaches; every Area its owner reaches if absent.
+Areas the owner can no longer read are left out. */
+  areas?: TokenArea[] | null
+  created_at: number
+  /** When it stops working, in seconds since the Unix epoch. */
+  expires_at?: number | null
+  id: string
+  /** When it was last used, in seconds since the Unix epoch. */
+  last_used_at?: number | null
+  name: string
+  read_only: boolean
 }
 
 export type Tree = {
@@ -188,7 +219,7 @@ export type Operations = {
     }
     output: Member
   }
-  /** Creates an Area. The caller becomes its Admin and is the only one with access. */
+  /** Creates an Area. The caller becomes its Admin and is the only one with access. A Token limited to chosen Areas cannot. */
   create_area: {
     input: {
       name: string
@@ -288,5 +319,31 @@ export type Operations = {
       area_id: string
     }
     output: Tree
+  }
+  /** Creates a Token that lets an Agent act as the caller, optionally only reading, only in chosen Areas, and until a date. Its value is shown only in this answer. */
+  create_token: {
+    input: {
+      /** The only Areas it reaches; every Area the caller reaches if absent. */
+      area_ids?: string[] | null
+      /** When it stops working, in seconds since the Unix epoch; never if absent. */
+      expires_at?: number | null
+      /** What the Token is for, to tell it apart from the others. */
+      name: string
+      /** Whether nothing can be changed through it. */
+      read_only?: boolean
+    }
+    output: CreatedToken
+  }
+  /** Lists the caller's Tokens with when each was last used. */
+  list_tokens: {
+    input: Record<string, never>
+    output: TokenList
+  }
+  /** Revokes one of the caller's Tokens; it stops working at once. */
+  revoke_token: {
+    input: {
+      id: string
+    }
+    output: null
   }
 }

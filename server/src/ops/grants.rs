@@ -11,11 +11,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub(super) fn register(catalogue: &mut Catalogue) {
-    catalogue.add(
-        "list_grants",
-        "Lists the Grants of an Area, and the active Members one can be given to. Needs the Admin Role on the Area.",
-        list_grants,
-    );
+    catalogue
+        .add(
+            "list_grants",
+            "Lists the Grants of an Area, and the active Members one can be given to. Needs the Admin Role on the Area.",
+            list_grants,
+        )
+        .changes = false;
     catalogue.add(
         "set_grant",
         "Gives a Member, or all Members at once, a Role on an Area, replacing the Role they held there. Someone holding several Grants gets the highest Role. The last Admin of an Area keeps that Role. Needs the Admin Role on the Area.",

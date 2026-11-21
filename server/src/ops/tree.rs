@@ -30,16 +30,20 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         "Renames a Folder. Needs the Write Role.",
         rename_folder,
     );
-    catalogue.add(
-        "get_page",
-        "Gets a Page by its ID, with its Area and the caller's Role on it. A Page the caller cannot read is reported as not found.",
-        get_page,
-    );
-    catalogue.add(
-        "get_tree",
-        "Gets the tree of Pages and Folders of an Area, each in the order of its siblings.",
-        get_tree,
-    );
+    catalogue
+        .add(
+            "get_page",
+            "Gets a Page by its ID, with its Area and the caller's Role on it. A Page the caller cannot read is reported as not found.",
+            get_page,
+        )
+        .changes = false;
+    catalogue
+        .add(
+            "get_tree",
+            "Gets the tree of Pages and Folders of an Area, each in the order of its siblings.",
+            get_tree,
+        )
+        .changes = false;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

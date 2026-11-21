@@ -3,6 +3,7 @@
 mod diff;
 mod http_api;
 mod markdown;
+mod mcp;
 mod model;
 mod ops;
 mod store;
@@ -194,7 +195,8 @@ async fn main() -> anyhow::Result<()> {
             get(read_markdown).put(write_markdown),
         )
         .with_state(app.clone())
-        .merge(http_api::router(core))
+        .merge(http_api::router(core.clone()))
+        .merge(mcp::router(core))
         .merge(web_app::router(web_app::EMBEDDED));
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
@@ -280,7 +282,7 @@ async fn page_for(
                 .map(|reply| reply.output),
             Use::Change => ops::tree::page_to_change(&core, &principal, &page_id),
         };
-        Ok::<_, ops::OpError>(page.map_err(|error| (principal == ops::Principal::Anonymous, error)))
+        Ok::<_, http_api::Refusal>(page.map_err(|error| (principal == ops::Principal::Anonymous, error)))
     })
     .await;
     match outcome {
@@ -288,7 +290,8 @@ async fn page_for(
         Ok(Ok(Err((true, ops::OpError::NotPermitted(message))))) => {
             Err((StatusCode::UNAUTHORIZED, message).into_response())
         }
-        Ok(Ok(Err((_, error)))) | Ok(Err(error)) => Err(http_api::error_response(error)),
+        Ok(Ok(Err((_, error)))) => Err(http_api::error_response(error)),
+        Ok(Err(no_caller)) => Err(no_caller.into_response()),
         Err(error) => Err(http_api::error_response(ops::OpError::Internal(error.into()))),
     }
 }
