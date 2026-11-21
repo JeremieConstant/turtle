@@ -247,6 +247,9 @@ enum Use {
 /// API does, except that nobody signed in gets 401. Anything but a Page the
 /// caller can read (a Folder, a Page of the first slice without an Area) is
 /// not found; a change without the Write Role is not permitted.
+// The refusal is the handlers' own response type; boxing it would only move
+// the allocation.
+#[allow(clippy::result_large_err)]
 async fn page_for(
     core: &Arc<ops::Core>,
     headers: HeaderMap,

@@ -1,3 +1,7 @@
+## Checks
+
+`scripts/check.sh` is the definition of done: it runs everything CI runs. Coding standards for review are in `CODING_STANDARDS.md`.
+
 ## Agent skills
 
 ### Issue tracker

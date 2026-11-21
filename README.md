@@ -61,4 +61,10 @@ cargo test --manifest-path server/Cargo.toml
 
 A debug build embeds whatever `web/dist` holds when it is compiled, and starts without a web app if that directory is missing. After changing the web app, run `npm --prefix web run build` and build the server again. `npm --prefix web test` runs the web app's tests.
 
+`scripts/check.sh` runs every check CI runs: lints, the generated operation types, the web app's type check and tests, and the server's tests. To run it before each commit, enable the hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 Licensed under [AGPL-3.0](LICENSE).

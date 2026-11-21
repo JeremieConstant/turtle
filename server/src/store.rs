@@ -14,6 +14,8 @@ pub fn database_in(data_dir: &Path) -> anyhow::Result<PathBuf> {
 
 /// Schema changes, applied in order on start. The database remembers how many
 /// it has seen, so a migration is never edited once released: add a new one.
+/// A migration is known by its position alone. When two branches each add
+/// one, whoever merges second moves theirs after the other's.
 const MIGRATIONS: &[&str] = &[
     // Databases written by the first slice already have this table.
     "CREATE TABLE IF NOT EXISTS pages (id TEXT PRIMARY KEY, state BLOB NOT NULL)",

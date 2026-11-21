@@ -19,6 +19,9 @@ pub enum Inline {
     HardBreak,
 }
 
+// The variants are named as Markdown and the editor name them, so a code
+// block is `CodeBlock` even though the enum is `Block`.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
     Paragraph(Vec<Inline>),
