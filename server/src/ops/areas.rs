@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "create_area",
-        "Creates an Area. The caller becomes its Admin and is the only one with access. A Token limited to chosen Areas cannot.",
+        "Creates an Area. The caller becomes its Admin and is the only one with access. A standalone Agent, and a Token limited to chosen Areas, cannot.",
         create_area,
     );
     catalogue
@@ -67,7 +67,11 @@ pub struct RenameArea {
 const MAX_NAME_LENGTH: usize = 200;
 
 pub fn create_area(core: &Core, principal: &Principal, input: NewArea) -> OpResult<Area> {
-    let member_id = signed_in(principal)?;
+    // An Area whose only Admin is an Agent would have nobody to manage it.
+    let member_id = signed_in_member(
+        principal,
+        "An Agent cannot create an Area. Ask an Admin of an Area to give the Agent a Role there.",
+    )?;
     if principal.token().is_some_and(|token| token.areas.is_some()) {
         return Err(OpError::NotPermitted(
             "This Token is limited to chosen Areas, so it cannot create a new one.".into(),
@@ -177,10 +181,20 @@ pub fn list_areas(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Ar
     Ok(AreaList { areas }.into())
 }
 
-/// The acting Member's ID; nobody else may work with Areas and Pages.
-pub fn signed_in(principal: &Principal) -> Result<&str, OpError> {
+/// Refuses nobody signed in: only Members and Agents work with Areas and Pages.
+pub fn signed_in(principal: &Principal) -> Result<(), OpError> {
+    match principal {
+        Principal::Member { .. } | Principal::Agent { .. } => Ok(()),
+        Principal::Anonymous => Err(OpError::NotPermitted("Sign in first.".into())),
+    }
+}
+
+/// The acting Member's ID, for what only a Member can do, also through a
+/// Token: a standalone Agent has no account of its own to do it with.
+pub fn signed_in_member<'a>(principal: &'a Principal, refusal: &str) -> Result<&'a str, OpError> {
     match principal {
         Principal::Member { id, .. } => Ok(id),
+        Principal::Agent { .. } => Err(OpError::NotPermitted(refusal.into())),
         Principal::Anonymous => Err(OpError::NotPermitted("Sign in first.".into())),
     }
 }

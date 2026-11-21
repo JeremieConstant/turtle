@@ -225,7 +225,7 @@ async fn an_agent_writes_markdown_through_mcp_and_people_with_the_page_open_see_
         })
         .await;
     let agent: Value = serde_json::from_str(seen.others.values().next().unwrap()).unwrap();
-    assert_eq!(agent, json!({ "user": { "name": "Claude", "agent": true } }));
+    assert_eq!(agent, json!({ "user": { "name": "Claude", "agent": true, "member": "Ada" } }));
 
     let missing = call_tool(&server, &token, "replace_section", json!({ "page_id": page, "heading": "Budget", "markdown": "" })).await;
     assert_eq!(missing["isError"], true);
@@ -234,8 +234,49 @@ async fn an_agent_writes_markdown_through_mcp_and_people_with_the_page_open_see_
     let read = call_tool(&server, &token, "get_page_markdown", json!({ "page_id": page })).await;
     assert_eq!(read["structuredContent"]["markdown"], "## Goals\n\nShip it.\n\n## Risks\n\nThe weather.\n");
     let versions = ada.call("list_versions", json!({ "page_id": page })).await;
-    let author = json!([{ "id": ada.id().await, "name": "Ada", "agent": "Claude" }]);
+    let author = json!([{ "kind": "agent_for_member", "name": "Claude", "member_id": ada.id().await, "member_name": "Ada" }]);
     assert_eq!(versions["versions"][0]["authors"], author);
     server.stop().await;
 }
 
+
+#[tokio::test]
+async fn a_standalone_agent_acts_with_its_own_roles_through_mcp_and_the_http_api_until_it_is_deactivated() {
+    let mut server = TestServer::start().await;
+    let ada = server.sign_up().await;
+    let reviewer = ada.call("create_agent", json!({ "name": "Reviewer" })).await;
+    let engineering = ada.call("create_area", json!({ "name": "Engineering" })).await;
+    let everyone = ada.call("create_area", json!({ "name": "Everyone" })).await;
+    let grant = |area: &Value, holder: Value| json!({ "area_id": area["id"], "holder": holder, "role": "write" });
+    ada.call("set_grant", grant(&engineering, json!({ "kind": "agent", "agent_id": reviewer["id"] }))).await;
+    ada.call("set_grant", grant(&everyone, json!({ "kind": "all_members" }))).await;
+    let page = ada.call("create_page", json!({ "area_id": engineering["id"], "title": "Plan" })).await;
+    let page = page["id"].as_str().unwrap().to_string();
+    let token = token(&ada, json!({ "name": "CI", "agent_id": reviewer["id"] })).await;
+
+    // Only the Area it was given, not the one given to all Members.
+    let areas = call_tool(&server, &token, "list_areas", json!({})).await;
+    let names: Vec<_> = areas["structuredContent"]["areas"].as_array().unwrap().iter().map(|area| area["name"].clone()).collect();
+    assert_eq!(names, [json!("Engineering")]);
+    let through_api = api(&server, &token, "get_session", json!({})).await;
+    let session: Value = serde_json::from_str(&through_api.body).unwrap();
+    assert_eq!((session["member"].clone(), session["agent"]["name"].clone()), (Value::Null, json!("Reviewer")));
+
+    let editor = server.connect(&ada, &page).await;
+    let written = call_tool(&server, &token, "replace_page", json!({ "page_id": page, "markdown": "Looks good." })).await;
+    assert_eq!(written["isError"], false, "{written}");
+    let seen = editor
+        .wait_until("the editor sees the Agent", |content| content.others.values().any(|state| state.contains("Reviewer")))
+        .await;
+    let present: Value = serde_json::from_str(seen.others.values().next().unwrap()).unwrap();
+    assert_eq!(present, json!({ "user": { "name": "Reviewer", "agent": true } }));
+    let versions = ada.call("list_versions", json!({ "page_id": page })).await;
+    let author = json!([{ "kind": "agent", "id": reviewer["id"], "name": "Reviewer" }]);
+    assert_eq!(versions["versions"][0]["authors"], author);
+
+    ada.call("deactivate_agent", json!({ "id": reviewer["id"] })).await;
+    assert_eq!(api(&server, &token, "list_areas", json!({})).await.status, 401);
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    assert_eq!(mcp(&server, Some(&token), list).await.status, 401);
+    server.stop().await;
+}

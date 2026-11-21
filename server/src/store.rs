@@ -126,6 +126,59 @@ const MIGRATIONS: &[&str] = &[
          SELECT page_id, number, member_id FROM version_authors;
      DROP TABLE version_authors;
      ALTER TABLE version_authors_new RENAME TO version_authors;",
+    // A standalone Agent has a name, Tokens and Grants of its own. A Token
+    // belongs to either a Member or an Agent, and so does a Version's author.
+    // The Token tables are rebuilt with their Areas set aside first, since
+    // dropping `tokens` would take the rows of `token_areas` with it.
+    "CREATE TABLE agents (
+         id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         created_at INTEGER NOT NULL,
+         deactivated_at INTEGER
+     );
+     CREATE TABLE tokens_new (
+         id TEXT PRIMARY KEY,
+         member_id TEXT REFERENCES members (id) ON DELETE CASCADE,
+         agent_id TEXT REFERENCES agents (id) ON DELETE CASCADE,
+         name TEXT NOT NULL,
+         secret_digest TEXT NOT NULL UNIQUE,
+         read_only INTEGER NOT NULL,
+         all_areas INTEGER NOT NULL,
+         expires_at INTEGER,
+         last_used_at INTEGER,
+         created_at INTEGER NOT NULL,
+         CHECK ((member_id IS NULL) != (agent_id IS NULL))
+     );
+     INSERT INTO tokens_new (id, member_id, name, secret_digest, read_only, all_areas, expires_at, last_used_at, created_at)
+         SELECT id, member_id, name, secret_digest, read_only, all_areas, expires_at, last_used_at, created_at FROM tokens;
+     CREATE TABLE kept_token_areas AS SELECT token_id, area_id FROM token_areas;
+     DROP TABLE token_areas;
+     DROP TABLE tokens;
+     ALTER TABLE tokens_new RENAME TO tokens;
+     CREATE INDEX tokens_by_member ON tokens (member_id);
+     CREATE INDEX tokens_by_agent ON tokens (agent_id);
+     CREATE TABLE token_areas (
+         token_id TEXT NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
+         area_id TEXT NOT NULL REFERENCES areas (id) ON DELETE CASCADE,
+         PRIMARY KEY (token_id, area_id)
+     );
+     INSERT INTO token_areas SELECT token_id, area_id FROM kept_token_areas;
+     DROP TABLE kept_token_areas;
+     CREATE TABLE version_authors_new (
+         page_id TEXT NOT NULL,
+         number INTEGER NOT NULL,
+         member_id TEXT REFERENCES members (id) ON DELETE CASCADE,
+         agent_id TEXT REFERENCES agents (id) ON DELETE CASCADE,
+         agent TEXT NOT NULL DEFAULT '',
+         CHECK ((member_id IS NULL) != (agent_id IS NULL)),
+         FOREIGN KEY (page_id, number) REFERENCES versions (page_id, number) ON DELETE CASCADE
+     );
+     INSERT INTO version_authors_new (page_id, number, member_id, agent)
+         SELECT page_id, number, member_id, agent FROM version_authors;
+     DROP TABLE version_authors;
+     ALTER TABLE version_authors_new RENAME TO version_authors;
+     CREATE UNIQUE INDEX version_authors_once
+         ON version_authors (page_id, number, coalesce(member_id, ''), coalesce(agent_id, ''), agent);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
@@ -216,6 +269,48 @@ mod tests {
             })
             .unwrap();
         assert_eq!(state, vec![1, 2]);
+    }
+
+    #[test]
+    fn tokens_with_their_areas_and_version_authors_survive_the_arrival_of_agents() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = database_in(data_dir.path()).unwrap();
+        {
+            // As the database was before standalone Agents.
+            let old = Connection::open(&path).unwrap();
+            old.pragma_update(None, "foreign_keys", true).unwrap();
+            let before_agents = 8;
+            for migration in &MIGRATIONS[..before_agents] {
+                old.execute_batch(migration).unwrap();
+            }
+            old.pragma_update(None, "user_version", before_agents as i64).unwrap();
+            add_member(&old).unwrap();
+            old.execute_batch(
+                "INSERT INTO areas (id, name, created_at) VALUES ('a1', 'Engineering', 0);
+                 INSERT INTO nodes (id, area_id, parent_id, kind, created_at) VALUES ('p1', 'a1', NULL, 'root', 0);
+                 INSERT INTO tokens (id, member_id, name, secret_digest, read_only, all_areas, created_at)
+                     VALUES ('t1', 'm1', 'Claude', 'digest', 0, 0, 0);
+                 INSERT INTO token_areas (token_id, area_id) VALUES ('t1', 'a1');
+                 INSERT INTO versions (page_id, number, markdown, recorded_at) VALUES ('p1', 1, 'One.', 0);
+                 INSERT INTO version_authors (page_id, number, member_id, agent) VALUES ('p1', 1, 'm1', 'Claude');",
+            )
+            .unwrap();
+        }
+
+        let db = open(&path).unwrap();
+
+        let token: (String, String) = db
+            .query_row(
+                "SELECT tokens.member_id, token_areas.area_id FROM tokens JOIN token_areas ON token_areas.token_id = tokens.id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(token, ("m1".into(), "a1".into()));
+        let author: (String, String) = db
+            .query_row("SELECT member_id, agent FROM version_authors", [], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap();
+        assert_eq!(author, ("m1".into(), "Claude".into()));
     }
 
     #[test]

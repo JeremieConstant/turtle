@@ -199,7 +199,7 @@ mod tests {
 
     /// An Agent acting through a Token of `owner` called `name`.
     fn agent(core: &Core, owner: &Principal, name: &str) -> Principal {
-        let input = NewToken { name: name.into(), read_only: false, area_ids: None, expires_at: None };
+        let input = NewToken { name: name.into(), read_only: false, area_ids: None, expires_at: None, agent_id: None };
         let value = create_token(core, owner, input).unwrap().output.value;
         principal_for_token(core, &value).unwrap().unwrap()
     }
@@ -230,8 +230,12 @@ mod tests {
         let versions = list_versions(&core, &grace, VersionsOfPage { page_id }).unwrap().output.versions;
         assert_eq!(versions.len(), 1);
         assert_eq!(written.version, Some(versions[0].clone()));
-        let author = &versions[0].authors[0];
-        assert_eq!((author.name.as_str(), author.agent.as_deref()), ("Grace", Some("Claude")));
+        let claude = crate::ops::versions::Author::AgentForMember {
+            name: "Claude".into(),
+            member_id: "member-grace".into(),
+            member_name: "Grace".into(),
+        };
+        assert_eq!(versions[0].authors, [claude]);
     }
 
     fn write_page(core: &Core, writer: &Principal, page_id: &str, markdown: &str) {
@@ -344,7 +348,8 @@ Open it.
         assert_eq!(markdown(&core, &grace, &created.id), "# Runbook\n\nRestart it.\n");
         let versions = list_versions(&core, &grace, VersionsOfPage { page_id: created.id }).unwrap().output.versions;
         assert_eq!(versions.len(), 1);
-        assert_eq!(versions[0].authors[0].agent.as_deref(), Some("Claude"));
+        let by_claude = matches!(&versions[0].authors[0], crate::ops::versions::Author::AgentForMember { name, .. } if name == "Claude");
+        assert!(by_claude, "{:?}", versions[0].authors);
     }
 
     #[test]
@@ -380,8 +385,11 @@ Open it.
 
         assert_eq!(markdown(&core, &grace, &page_id), "## Plan\n\nShip it today. Really.\n\n## Risks\n\nThe weather.\n");
         let versions = list_versions(&core, &grace, VersionsOfPage { page_id: page_id.clone() }).unwrap().output.versions;
-        let listed: Vec<_> = versions.iter().map(|version| (version.number, version.authors[0].agent.clone(), version.authors.len())).collect();
-        assert_eq!(listed, [(3, Some("Claude".to_string()), 1), (2, None, 1), (1, None, 1)]);
+        let by_agent = |version: &VersionSummary| {
+            matches!(&version.authors[..], [crate::ops::versions::Author::AgentForMember { name, .. }] if name == "Claude")
+        };
+        let listed: Vec<_> = versions.iter().map(|version| (version.number, by_agent(version), version.authors.len())).collect();
+        assert_eq!(listed, [(3, true, 1), (2, false, 1), (1, false, 1)]);
     }
 
     /// The presence entries in the frames sent so far: (client, clock, state).
@@ -418,7 +426,8 @@ Open it.
 
         let sent = presence_sent(&mut frames);
         assert_eq!(sent.len(), 2, "{sent:?}");
-        let expected = serde_json::json!({ "user": { "name": "Claude", "agent": true } });
+        // An Agent acting for a Member is shown with the Member's name.
+        let expected = serde_json::json!({ "user": { "name": "Claude", "agent": true, "member": "Grace" } });
         assert_eq!((sent[0].2.clone(), sent[1].2.clone()), (expected.clone(), expected));
         assert_eq!(sent[0].0, sent[1].0, "one Agent appears once, however often it writes");
         assert!(sent[1].1 > sent[0].1, "a later write is newer to the editors");

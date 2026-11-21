@@ -6,6 +6,7 @@
 //! MCP tools) are generated from it, so nothing can exist in only one of them.
 
 pub mod accounts;
+pub mod agents;
 pub mod areas;
 pub mod content;
 #[cfg(test)]
@@ -148,6 +149,9 @@ pub enum Principal {
         /// The Token this Member is acting through, if any, with its limits.
         token: Option<TokenLimits>,
     },
+    /// A standalone Agent, which always acts through one of its Tokens and
+    /// holds only the Roles given to it by name.
+    Agent { id: String, token: TokenLimits },
 }
 
 /// What a Token takes away from its owner's access. It never adds any.
@@ -165,6 +169,7 @@ impl Principal {
     pub fn token(&self) -> Option<&TokenLimits> {
         match self {
             Principal::Member { token, .. } => token.as_ref(),
+            Principal::Agent { token, .. } => Some(token),
             Principal::Anonymous => None,
         }
     }
@@ -176,8 +181,17 @@ impl Principal {
             Principal::Member { workspace_admin, token, .. } => {
                 *workspace_admin && token.as_ref().is_none_or(|token| token.areas.is_none())
             }
-            Principal::Anonymous => false,
+            Principal::Agent { .. } | Principal::Anonymous => false,
         }
+    }
+}
+
+/// Refuses everyone but a Workspace Admin, saying what only they can do.
+pub(crate) fn require_workspace_admin(principal: &Principal, refusal: &str) -> Result<(), OpError> {
+    if principal.acts_as_workspace_admin() {
+        Ok(())
+    } else {
+        Err(OpError::NotPermitted(refusal.into()))
     }
 }
 
@@ -376,6 +390,7 @@ pub fn catalogue() -> Catalogue {
         operations: Vec::new(),
     };
     accounts::register(&mut catalogue);
+    agents::register(&mut catalogue);
     members::register(&mut catalogue);
     areas::register(&mut catalogue);
     grants::register(&mut catalogue);

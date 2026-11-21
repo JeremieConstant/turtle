@@ -41,7 +41,7 @@ async fn a_version_naming_its_author_is_recorded_when_the_last_editor_leaves() {
     let versions = versions_once_there_are(&ada, &page, 1).await;
     assert_eq!(versions.len(), 1);
     assert_eq!(versions[0]["number"], 1);
-    assert_eq!(versions[0]["authors"], json!([{ "id": ada.id().await, "name": "Ada" }]));
+    assert_eq!(versions[0]["authors"], json!([{ "kind": "member", "id": ada.id().await, "name": "Ada" }]));
     let first = ada.call("get_version", json!({ "page_id": page, "number": 1 })).await;
     assert_eq!(first["markdown"], "Agenda for Monday.\n");
     server.stop().await;

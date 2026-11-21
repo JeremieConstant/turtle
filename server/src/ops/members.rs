@@ -372,13 +372,7 @@ fn unusable_link() -> OpError {
 
 /// Only a Workspace Admin manages Members.
 fn require_workspace_admin(principal: &Principal) -> Result<(), OpError> {
-    if principal.acts_as_workspace_admin() {
-        Ok(())
-    } else {
-        Err(OpError::NotPermitted(
-            "Only a Workspace Admin can manage Members.".into(),
-        ))
-    }
+    super::require_workspace_admin(principal, "Only a Workspace Admin can manage Members.")
 }
 
 #[cfg(test)]

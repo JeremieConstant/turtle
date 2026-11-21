@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "list_versions",
-        "Lists the Versions of a Page, newest first, each with when it was recorded and who wrote the changes it holds. Needs the Read Role.",
+        "Lists the Versions of a Page, newest first, each with when it was recorded and who wrote the changes it holds: Members, Agents acting for a Member, and standalone Agents, told apart. Needs the Read Role.",
         list_versions,
     );
     catalogue.add(
@@ -38,18 +38,21 @@ pub struct VersionsOfPage {
     pub page_id: String,
 }
 
-/// Someone whose changes a Version holds: a Member, or an Agent acting
-/// through one of their Tokens.
+/// Someone whose changes a Version holds, told apart by what they are.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct Author {
-    /// The Member, or the Member whose Token the Agent acted through.
-    pub id: String,
-    /// The Member's name.
-    pub name: String,
-    /// The Agent's name, which is the name of the Token it acted through.
-    /// Absent when the Member made the changes themself.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<String>,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Author {
+    /// A Member who made the changes themself.
+    Member { id: String, name: String },
+    /// An Agent acting for a Member through one of the Member's Tokens.
+    AgentForMember {
+        /// The Agent's name, which is the name of the Token it acted through.
+        name: String,
+        member_id: String,
+        member_name: String,
+    },
+    /// A standalone Agent, with its own name and Roles.
+    Agent { id: String, name: String },
 }
 
 /// A Version as it is listed, without its content.
@@ -216,15 +219,26 @@ fn readable_page(core: &Core, principal: &Principal, page_id: &str) -> Result<Pa
 }
 
 fn authors_of(db: &Connection, page_id: &str, number: u32) -> rusqlite::Result<Vec<Author>> {
+    // People and the Agents acting for them by the person's name, each Agent
+    // after the person; standalone Agents by their own name among them.
     let mut statement = db.prepare(
-        "SELECT members.id, members.name, version_authors.agent FROM version_authors
-         JOIN members ON members.id = version_authors.member_id
+        "SELECT members.id, members.name, version_authors.agent, agents.id, agents.name
+         FROM version_authors
+         LEFT JOIN members ON members.id = version_authors.member_id
+         LEFT JOIN agents ON agents.id = version_authors.agent_id
          WHERE version_authors.page_id = ?1 AND version_authors.number = ?2
-         ORDER BY members.name COLLATE NOCASE, members.id, version_authors.agent",
+           AND (members.id IS NOT NULL OR agents.id IS NOT NULL)
+         ORDER BY coalesce(members.name, agents.name) COLLATE NOCASE,
+                  coalesce(members.id, agents.id), version_authors.agent",
     )?;
     let authors = statement.query_map(rusqlite::params![page_id, number], |row| {
+        let member: Option<(String, String)> = row.get::<_, Option<String>>(0)?.zip(row.get(1)?);
         let agent: String = row.get(2)?;
-        Ok(Author { id: row.get(0)?, name: row.get(1)?, agent: (!agent.is_empty()).then_some(agent) })
+        Ok(match member {
+            Some((id, name)) if agent.is_empty() => Author::Member { id, name },
+            Some((member_id, member_name)) => Author::AgentForMember { name: agent, member_id, member_name },
+            None => Author::Agent { id: row.get(3)?, name: row.get(4)? },
+        })
     })?;
     authors.collect()
 }
@@ -261,7 +275,13 @@ mod tests {
     }
 
     fn names(version: &VersionSummary) -> Vec<&str> {
-        version.authors.iter().map(|author| author.name.as_str()).collect()
+        version
+            .authors
+            .iter()
+            .map(|author| match author {
+                Author::Member { name, .. } | Author::AgentForMember { name, .. } | Author::Agent { name, .. } => name.as_str(),
+            })
+            .collect()
     }
 
     #[test]
@@ -370,6 +390,46 @@ mod tests {
         let recorded = versions(&core, &grace, &page_id);
         assert_eq!(names(&recorded[0]), ["Ada"]);
         assert_eq!(names(&recorded[1]), ["Grace", "Linus"]);
+    }
+
+    #[test]
+    fn a_version_tells_a_member_an_agent_acting_for_one_and_a_standalone_agent_apart() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let agents = crate::ops::agents::create_agent;
+        let reviewer = agents(&core, &ada, crate::ops::agents::NewAgent { name: "Reviewer".into() }).unwrap().output;
+        let page_id = page(&core, &grace);
+        let open = core.live().open(&page_id).unwrap();
+        core.live().connected(&open);
+
+        let by = |author: crate::live::Author, markdown: &str| {
+            core.live().write(&open, &crate::markdown::from_markdown(markdown), &author);
+        };
+        by(crate::live::Author::member("member-grace"), "One.");
+        by(crate::live::Author::AgentForMember { member_id: "member-grace".into(), agent: "Claude".into() }, "Two.");
+        by(crate::live::Author::Agent(reviewer.id.clone()), "Three.");
+        core.live().disconnected(&open).unwrap();
+        // A renamed Agent is shown by the name it has now.
+        let rename = crate::ops::agents::RenameAgent { id: reviewer.id.clone(), name: "Proofreader".into() };
+        crate::ops::agents::rename_agent(&core, &ada, rename).unwrap();
+
+        let recorded = versions(&core, &grace, &page_id);
+        assert_eq!(
+            recorded[0].authors,
+            [
+                Author::Member { id: "member-grace".into(), name: "Grace".into() },
+                Author::AgentForMember {
+                    name: "Claude".into(),
+                    member_id: "member-grace".into(),
+                    member_name: "Grace".into()
+                },
+                Author::Agent { id: reviewer.id, name: "Proofreader".into() },
+            ]
+        );
+        let listed = serde_json::to_value(&recorded[0].authors).unwrap();
+        assert_eq!(listed[1]["kind"], "agent_for_member");
+        assert_eq!(listed[2]["kind"], "agent");
     }
 
     /// A Page by Grace with Versions 1 and 2, the first two lines of a list.

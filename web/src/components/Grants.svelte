@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import { holderFromKey, holderKey, withoutGrant } from '../lib/grants'
+  import { holderFromKey, holderKey, holderLabel, withoutGrant } from '../lib/grants'
   import { call, OperationError } from '../lib/ops'
   import type { Grant, GrantHolder, GrantList, Role, RoleAfterwards } from '../lib/operations.gen'
 
@@ -81,10 +81,10 @@
     <ul>
       {#each list.grants as grant (holderKey(grant.holder))}
         <li>
-          <span>{grant.name}</span>
+          <span>{holderLabel(grant.holder, grant.name)}</span>
           <div class="row">
             <select
-              aria-label="Role of {grant.name}"
+              aria-label="Role of {holderLabel(grant.holder, grant.name)}"
               disabled={busy}
               value={grant.role}
               onchange={event => choose(grant, event.currentTarget)}

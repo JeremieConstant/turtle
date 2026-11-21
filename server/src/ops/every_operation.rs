@@ -18,6 +18,8 @@ struct Fixture {
     folder_id: String,
     /// A Member with Read, the subject of Member and Grant operations.
     ken_id: String,
+    /// A standalone Agent without a Role, the subject of Agent operations.
+    agent_id: String,
 }
 
 /// The outcome expected from each column: "ok" or the kind of error.
@@ -52,6 +54,10 @@ fn table() -> Vec<Row> {
         ),
         ("create_password_reset", |f| json!({"id": f.ken_id}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("reset_password", |_| json!({"secret": "made-up", "password": "long enough password"}), [REFUSED; 5]),
+        ("create_agent", |_| json!({"name": "Reviewer"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        ("list_agents", |_| json!({}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        ("rename_agent", |f| json!({"id": f.agent_id, "name": "Proofreader"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        ("deactivate_agent", |f| json!({"id": f.agent_id}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("create_area", |_| json!({"name": "Sales"}), [OK; 5]),
         ("get_area", |f| json!({"id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         ("list_areas", |_| json!({}), [OK; 5]),
@@ -128,9 +134,13 @@ fn every_operation_respects_the_role_of_its_caller() {
                 area_id: area_id.clone(),
                 ken_id: match &ken {
                     Principal::Member { id, .. } => id.clone(),
-                    Principal::Anonymous => unreachable!(),
+                    _ => unreachable!(),
                 },
+                agent_id: "agent-archivist".into(),
             };
+            core.db()
+                .execute("INSERT INTO agents (id, name, created_at) VALUES ('agent-archivist', 'Archivist', 0)", [])
+                .unwrap();
             let page = core.live().open(&fixture.page_id).unwrap();
             core.live().connected(&page);
             let Principal::Member { id: grace_id, .. } = &grace else { unreachable!() };

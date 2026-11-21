@@ -1,8 +1,9 @@
-//! Tokens: credentials a Member creates so an Agent can act as them, through
-//! the HTTP API and the MCP endpoint, never with more access than they have.
+//! Tokens: credentials a Member creates so an Agent can act as them, or a
+//! Workspace Admin creates for a standalone Agent, used through the HTTP API
+//! and the MCP endpoint, never with more access than their owner has.
 
-use super::accounts::{digest, random_hex, Nothing};
-use super::areas;
+use super::accounts::{digest, random_hex};
+use super::{agents, areas};
 use super::{Catalogue, Core, OpError, OpResult, Principal, TokenLimits};
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
@@ -12,17 +13,17 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "create_token",
-            "Creates a Token that lets an Agent act as the caller, optionally only reading, only in chosen Areas, and until a date. Its value is shown only in this answer.",
+            "Creates a Token that lets an Agent act as the caller, or, for a Workspace Admin, one for a standalone Agent to act as itself; optionally only reading, only in chosen Areas, and until a date. Its value is shown only in this answer.",
             create_token,
         )
         .browser_only = true;
     {
-        let operation = catalogue.add("list_tokens", "Lists the caller's Tokens with when each was last used.", list_tokens);
+        let operation = catalogue.add("list_tokens", "Lists the caller's Tokens, or a standalone Agent's for a Workspace Admin, with when each was last used.", list_tokens);
         operation.browser_only = true;
         operation.changes = false;
     }
     catalogue
-        .add("revoke_token", "Revokes one of the caller's Tokens; it stops working at once.", revoke_token)
+        .add("revoke_token", "Revokes one of the caller's Tokens, or of a standalone Agent's for a Workspace Admin; it stops working at once.", revoke_token)
         .browser_only = true;
 }
 
@@ -39,6 +40,16 @@ pub struct NewToken {
     /// When it stops working, in seconds since the Unix epoch; never if absent.
     #[serde(default)]
     pub expires_at: Option<i64>,
+    /// The standalone Agent it is for; the caller's own if absent.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct TokensOf {
+    /// The standalone Agent whose Tokens to list; the caller's own if absent.
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 /// An Area a Token is limited to.
@@ -81,6 +92,38 @@ pub struct TokenList {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TokenId {
     pub id: String,
+    /// The standalone Agent the Token is for; the caller's own if absent.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+/// Whose Tokens a call manages.
+enum Owner {
+    Member(String),
+    Agent(agents::AgentEntry),
+}
+
+impl Owner {
+    /// The column of `tokens` that names this owner, and the value there.
+    fn column(&self) -> (&'static str, &str) {
+        match self {
+            Owner::Member(id) => ("member_id", id),
+            Owner::Agent(agent) => ("agent_id", &agent.id),
+        }
+    }
+}
+
+/// The caller themself, or the standalone Agent a Workspace Admin manages.
+fn owner(db: &Connection, principal: &Principal, agent_id: Option<&str>) -> Result<Owner, OpError> {
+    let Some(agent_id) = agent_id else {
+        let member_id = areas::signed_in_member(
+            principal,
+            "A standalone Agent cannot manage Tokens. Ask a Workspace Admin to manage them in Turtle.",
+        )?;
+        return Ok(Owner::Member(member_id.to_string()));
+    };
+    agents::require_workspace_admin(principal)?;
+    Ok(Owner::Agent(agents::agent_entry(db, agent_id)?))
 }
 
 /// Every Token value starts with this, so a leaked one is easy to recognise.
@@ -93,7 +136,12 @@ const LAST_USE_PRECISION: i64 = 60;
 const MAX_NAME_LENGTH: usize = 200;
 
 pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpResult<CreatedToken> {
-    let member_id = areas::signed_in(principal)?;
+    let owner = owner(&core.db(), principal, input.agent_id.as_deref())?;
+    if let Owner::Agent(agent) = &owner {
+        if !agent.active {
+            return Err(OpError::Conflict("A deactivated Agent cannot act, so it gets no new Token.".into()));
+        }
+    }
     let name = valid_name(&input.name)?;
     let now = core.now();
     if input.expires_at.is_some_and(|expires_at| expires_at <= now) {
@@ -104,7 +152,8 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
 
     let mut db = core.db();
     let transaction = db.transaction()?;
-    // Only Areas the caller can read, so a Token never reaches further.
+    // Only Areas the caller can read, so a Token never reaches further. A
+    // standalone Agent's is made by a Workspace Admin, who reads every Area.
     let mut chosen: Option<Vec<TokenArea>> = None;
     if let Some(area_ids) = &input.area_ids {
         if area_ids.is_empty() {
@@ -121,10 +170,13 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
         }
         chosen = Some(found);
     }
+    let (owner_column, owner_id) = owner.column();
     transaction.execute(
-        "INSERT INTO tokens (id, member_id, name, secret_digest, read_only, all_areas, expires_at, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![id, member_id, name, digest(&value), input.read_only, chosen.is_none(), input.expires_at, now],
+        &format!(
+            "INSERT INTO tokens (id, {owner_column}, name, secret_digest, read_only, all_areas, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+        ),
+        rusqlite::params![id, owner_id, name, digest(&value), input.read_only, chosen.is_none(), input.expires_at, now],
     )?;
     for area in chosen.iter().flatten() {
         transaction.execute(
@@ -148,14 +200,15 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
     Ok(CreatedToken { token, value }.into())
 }
 
-pub fn list_tokens(core: &Core, principal: &Principal, _: Nothing) -> OpResult<TokenList> {
-    let member_id = areas::signed_in(principal)?;
+pub fn list_tokens(core: &Core, principal: &Principal, input: TokensOf) -> OpResult<TokenList> {
     let db = core.db();
-    let mut statement = db.prepare(
+    let owner = owner(&db, principal, input.agent_id.as_deref())?;
+    let (owner_column, owner_id) = owner.column();
+    let mut statement = db.prepare(&format!(
         "SELECT id, name, read_only, all_areas, expires_at, last_used_at, created_at
-         FROM tokens WHERE member_id = ?1 ORDER BY created_at DESC, id",
-    )?;
-    let rows = statement.query_map([member_id], |row| {
+         FROM tokens WHERE {owner_column} = ?1 ORDER BY created_at DESC, id"
+    ))?;
+    let rows = statement.query_map([owner_id], |row| {
         Ok((
             TokenSummary {
                 id: row.get(0)?,
@@ -189,11 +242,14 @@ pub fn list_tokens(core: &Core, principal: &Principal, _: Nothing) -> OpResult<T
 }
 
 pub fn revoke_token(core: &Core, principal: &Principal, input: TokenId) -> OpResult<()> {
-    let member_id = areas::signed_in(principal)?;
-    let removed = core.db().execute(
-        "DELETE FROM tokens WHERE id = ?1 AND member_id = ?2",
-        rusqlite::params![input.id, member_id],
+    let db = core.db();
+    let owner = owner(&db, principal, input.agent_id.as_deref())?;
+    let (owner_column, owner_id) = owner.column();
+    let removed = db.execute(
+        &format!("DELETE FROM tokens WHERE id = ?1 AND {owner_column} = ?2"),
+        rusqlite::params![input.id, owner_id],
     )?;
+    drop(db);
     if removed == 0 {
         return Err(OpError::NotFound("There is no such Token.".into()));
     }
@@ -201,23 +257,28 @@ pub fn revoke_token(core: &Core, principal: &Principal, input: TokenId) -> OpRes
     Ok(().into())
 }
 
-/// Finds out who acts through a Token value, and with which limits. An
-/// unknown, expired or revoked Token, or one whose owner was deactivated, is
-/// nobody. A use is remembered as the Token's last, to the minute.
-/// Who a change by the caller is credited to: the Member, or the Agent
-/// acting through their Token, named after the Token.
+/// Who a change by the caller is credited to: the Member, the Agent acting
+/// for them through their Token, named after the Token, or a standalone Agent.
 pub(crate) fn author_of(core: &Core, principal: &Principal) -> Result<crate::live::Author, OpError> {
-    let member_id = areas::signed_in(principal)?;
-    let Some(token) = principal.token() else { return Ok(crate::live::Author::member(member_id)) };
+    let (member_id, token) = match principal {
+        Principal::Anonymous => return Err(OpError::NotPermitted("Sign in first.".into())),
+        Principal::Agent { id, .. } => return Ok(crate::live::Author::Agent(id.clone())),
+        Principal::Member { id, token, .. } => (id, token),
+    };
+    let Some(token) = token else { return Ok(crate::live::Author::Member(member_id.clone())) };
     let name: Option<String> = core
         .db()
         .query_row("SELECT name FROM tokens WHERE id = ?1", [&token.id], |row| row.get(0))
         .optional()?;
     // The Token was revoked a moment ago; the caller is still an Agent.
     let agent = name.unwrap_or_else(|| "Agent".into());
-    Ok(crate::live::Author { member_id: member_id.to_string(), agent: Some(agent) })
+    Ok(crate::live::Author::AgentForMember { member_id: member_id.clone(), agent })
 }
 
+/// Finds out who acts through a Token value, and with which limits: the
+/// Member who owns it, or the standalone Agent it is for. An unknown, expired
+/// or revoked Token, or one whose owner was deactivated, is nobody. A use is
+/// remembered as the Token's last, to the minute.
 pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>, OpError> {
     if !value.starts_with(VALUE_PREFIX) {
         return Ok(None);
@@ -226,24 +287,27 @@ pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>
     let db = core.db();
     let found = db
         .query_row(
-            "SELECT tokens.id, tokens.read_only, tokens.all_areas, members.id, members.workspace_admin
-             FROM tokens JOIN members ON members.id = tokens.member_id
+            "SELECT tokens.id, tokens.read_only, tokens.all_areas, members.id, members.workspace_admin, agents.id
+             FROM tokens
+             LEFT JOIN members ON members.id = tokens.member_id AND members.deactivated_at IS NULL
+             LEFT JOIN agents ON agents.id = tokens.agent_id AND agents.deactivated_at IS NULL
              WHERE tokens.secret_digest = ?1
                AND (tokens.expires_at IS NULL OR tokens.expires_at > ?2)
-               AND members.deactivated_at IS NULL",
+               AND (members.id IS NOT NULL OR agents.id IS NOT NULL)",
             rusqlite::params![digest(value), now],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, bool>(1)?,
                     row.get::<_, bool>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, bool>(4)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<bool>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((token_id, read_only, all_areas, member_id, workspace_admin)) = found else {
+    let Some((token_id, read_only, all_areas, member_id, workspace_admin, agent_id)) = found else {
         return Ok(None);
     };
     let areas = if all_areas { None } else { Some(token_area_ids(&db, &token_id)?) };
@@ -254,11 +318,11 @@ pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>
          WHERE id = ?2 AND (last_used_at IS NULL OR last_used_at <= ?1 - ?3)",
         rusqlite::params![now, token_id, LAST_USE_PRECISION],
     )?;
-    Ok(Some(Principal::Member {
-        id: member_id,
-        workspace_admin,
-        session: None,
-        token: Some(TokenLimits { id: token_id, read_only, areas }),
+    let token = TokenLimits { id: token_id, read_only, areas };
+    Ok(Some(match (member_id, agent_id) {
+        (Some(id), _) => Principal::Member { id, workspace_admin: workspace_admin.unwrap_or(false), session: None, token: Some(token) },
+        (None, Some(id)) => Principal::Agent { id, token },
+        (None, None) => return Ok(None),
     }))
 }
 
@@ -288,7 +352,7 @@ fn valid_name(name: &str) -> Result<String, OpError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::accounts::get_session;
+    use crate::ops::accounts::{get_session, Nothing};
     use crate::ops::areas::{create_area, list_areas, NewArea};
     use crate::ops::members::list_members;
     use crate::ops::permissions::Role;
@@ -297,7 +361,7 @@ mod tests {
     use serde_json::json;
 
     fn named(name: &str) -> NewToken {
-        NewToken { name: name.into(), read_only: false, area_ids: None, expires_at: None }
+        NewToken { name: name.into(), read_only: false, area_ids: None, expires_at: None, agent_id: None }
     }
 
     #[test]
@@ -322,7 +386,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let created = create_token(&core, &grace, named("Agent")).unwrap().output;
 
-        let listed = list_tokens(&core, &grace, Nothing {}).unwrap().output;
+        let listed = list_tokens(&core, &grace, TokensOf::default()).unwrap().output;
         assert_eq!(listed.tokens, [created.token]);
         let listed = serde_json::to_string(&listed).unwrap();
         assert!(!listed.contains(&created.value));
@@ -350,14 +414,14 @@ mod tests {
         core.advance(60);
         principal_for_token(&core, &kept.value).unwrap().unwrap();
 
-        let listed = list_tokens(&core, &grace, Nothing {}).unwrap().output.tokens;
+        let listed = list_tokens(&core, &grace, TokensOf::default()).unwrap().output.tokens;
         let seen: Vec<_> = listed.iter().map(|token| (token.name.as_str(), token.last_used_at)).collect();
         assert_eq!(seen, [("Revoked", Some(1_700_000_060)), ("Kept", Some(1_700_000_120))]);
 
-        revoke_token(&core, &grace, TokenId { id: revoked.token.id.clone() }).unwrap();
+        revoke_token(&core, &grace, TokenId { id: revoked.token.id.clone(), agent_id: None }).unwrap();
         assert_eq!(principal_for_token(&core, &revoked.value).unwrap(), None);
         assert!(principal_for_token(&core, &kept.value).unwrap().is_some());
-        let names: Vec<_> = list_tokens(&core, &grace, Nothing {}).unwrap().output.tokens.into_iter().map(|t| t.name).collect();
+        let names: Vec<_> = list_tokens(&core, &grace, TokensOf::default()).unwrap().output.tokens.into_iter().map(|t| t.name).collect();
         assert_eq!(names, ["Kept"]);
     }
 
@@ -368,8 +432,8 @@ mod tests {
         let ken = member(&core, "Ken", true);
         let (created, _) = agent(&core, &grace, named("Agent"));
 
-        assert!(list_tokens(&core, &ken, Nothing {}).unwrap().output.tokens.is_empty());
-        let refused = revoke_token(&core, &ken, TokenId { id: created.token.id.clone() }).unwrap_err();
+        assert!(list_tokens(&core, &ken, TokensOf::default()).unwrap().output.tokens.is_empty());
+        let refused = revoke_token(&core, &ken, TokenId { id: created.token.id.clone(), agent_id: None }).unwrap_err();
         assert_eq!(refused.kind(), "not_found");
         assert!(principal_for_token(&core, &created.value).unwrap().is_some());
     }
@@ -468,7 +532,7 @@ mod tests {
         let holder = crate::ops::grants::GrantHolder::Member { member_id: "member-ken".into() };
         crate::ops::grants::remove_grant(&core, &grace, crate::ops::grants::RemoveGrant { area_id: engineering, holder }).unwrap();
         assert!(area_names(&core, &agent).is_empty());
-        let listed = list_tokens(&core, &ken, Nothing {}).unwrap().output.tokens;
+        let listed = list_tokens(&core, &ken, TokensOf::default()).unwrap().output.tokens;
         assert_eq!(listed[0].areas, Some(vec![]));
     }
 
@@ -508,6 +572,103 @@ mod tests {
             let refused = catalogue.call(&core, &agent, operation.name, json!({})).unwrap_err();
             assert_eq!(refused.kind(), "not_permitted", "{}", operation.name);
         }
+    }
+
+    fn standalone(core: &Core, admin: &Principal, name: &str) -> String {
+        crate::ops::agents::create_agent(core, admin, crate::ops::agents::NewAgent { name: name.into() })
+            .unwrap()
+            .output
+            .id
+    }
+
+    fn for_agent(agent_id: &str, name: &str) -> NewToken {
+        NewToken { agent_id: Some(agent_id.into()), ..named(name) }
+    }
+
+    fn tokens_of(core: &Core, caller: &Principal, agent_id: Option<&str>) -> Vec<String> {
+        let input = TokensOf { agent_id: agent_id.map(str::to_string) };
+        list_tokens(core, caller, input).unwrap().output.tokens.into_iter().map(|token| token.name).collect()
+    }
+
+    #[test]
+    fn a_workspace_admin_manages_the_tokens_of_a_standalone_agent() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let reviewer = standalone(&core, &ada, "Reviewer");
+
+        let (kept, acting) = agent(&core, &ada, for_agent(&reviewer, "CI"));
+        core.advance(60);
+        let (revoked, _) = agent(&core, &ada, for_agent(&reviewer, "Laptop"));
+
+        assert!(matches!(&acting, Principal::Agent { id, .. } if *id == reviewer));
+        assert_eq!(tokens_of(&core, &ada, Some(&reviewer)), ["Laptop", "CI"]);
+        assert!(tokens_of(&core, &ada, None).is_empty(), "the Agent's Tokens are not Ada's");
+        let revoke = TokenId { id: revoked.token.id.clone(), agent_id: Some(reviewer.clone()) };
+        revoke_token(&core, &ada, revoke).unwrap();
+        assert_eq!(principal_for_token(&core, &revoked.value).unwrap(), None);
+        assert!(principal_for_token(&core, &kept.value).unwrap().is_some());
+        // A Member's own revoking does not reach the Agent's Tokens.
+        let own = TokenId { id: kept.token.id.clone(), agent_id: None };
+        assert_eq!(revoke_token(&core, &ada, own).unwrap_err().kind(), "not_found");
+    }
+
+    #[test]
+    fn only_a_workspace_admin_manages_an_agents_tokens() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let reviewer = standalone(&core, &ada, "Reviewer");
+        let (created, _) = agent(&core, &ada, for_agent(&reviewer, "CI"));
+
+        assert_eq!(create_token(&core, &grace, for_agent(&reviewer, "Mine")).unwrap_err().kind(), "not_permitted");
+        let input = TokensOf { agent_id: Some(reviewer.clone()) };
+        assert_eq!(list_tokens(&core, &grace, input).unwrap_err().kind(), "not_permitted");
+        let revoke = TokenId { id: created.token.id, agent_id: Some(reviewer) };
+        assert_eq!(revoke_token(&core, &grace, revoke).unwrap_err().kind(), "not_permitted");
+        let unknown = for_agent("no-such-agent", "CI");
+        assert_eq!(create_token(&core, &ada, unknown).unwrap_err().kind(), "not_found");
+    }
+
+    #[test]
+    fn deactivating_an_agent_disables_its_tokens() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let reviewer = standalone(&core, &ada, "Reviewer");
+        let (created, _) = agent(&core, &ada, for_agent(&reviewer, "CI"));
+
+        let id = crate::ops::agents::AgentId { id: reviewer.clone() };
+        crate::ops::agents::deactivate_agent(&core, &ada, id).unwrap();
+
+        assert_eq!(principal_for_token(&core, &created.value).unwrap(), None);
+        let refused = create_token(&core, &ada, for_agent(&reviewer, "Another")).unwrap_err();
+        assert_eq!(refused.kind(), "conflict");
+    }
+
+    #[test]
+    fn a_standalone_agent_reaches_only_what_it_was_given_and_never_manages_members() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let reviewer = standalone(&core, &ada, "Reviewer");
+        let engineering = area(&core, &ada, "Engineering");
+        let open = area(&core, &ada, "Open to all");
+        area(&core, &ada, "Secret");
+        let to_all = crate::ops::grants::GrantHolder::AllMembers;
+        let grant = crate::ops::grants::SetGrant { area_id: open, holder: to_all, role: Role::Write };
+        crate::ops::grants::set_grant(&core, &ada, grant).unwrap();
+        let holder = crate::ops::grants::GrantHolder::Agent { agent_id: reviewer.clone() };
+        let grant = crate::ops::grants::SetGrant { area_id: engineering.clone(), holder, role: Role::Write };
+        crate::ops::grants::set_grant(&core, &ada, grant).unwrap();
+        let (_, agent) = agent(&core, &ada, for_agent(&reviewer, "CI"));
+
+        assert_eq!(area_names(&core, &agent), ["Engineering"]);
+        let page = NewEntry { area_id: engineering, parent_id: None, title: "Review".into() };
+        assert!(create_page(&core, &agent, page.into()).is_ok());
+        assert_eq!(list_members(&core, &agent, Nothing {}).unwrap_err().kind(), "not_permitted");
+        let elsewhere = create_area(&core, &agent, NewArea { name: "Elsewhere".into() }).unwrap_err();
+        assert_eq!(elsewhere.kind(), "not_permitted");
+        let session = get_session(&core, &agent, Nothing {}).unwrap().output;
+        assert_eq!(session.member, None);
+        assert_eq!(session.agent.map(|agent| agent.name), Some("Reviewer".into()));
     }
 
     #[test]

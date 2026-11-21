@@ -7,6 +7,7 @@ export type Route =
   | { screen: 'page'; id: string }
   | { screen: 'members' }
   | { screen: 'tokens' }
+  | { screen: 'agents' }
   /** Where an invitation link leads; the secret is the link's last part. */
   | { screen: 'invitation'; secret: string }
   /** Where a password reset link leads. */
@@ -19,6 +20,7 @@ export function parseAddress(pathname: string): Route {
   if (pathname === '/sign-in') return { screen: 'sign-in' }
   if (pathname === '/settings/members') return { screen: 'members' }
   if (pathname === '/settings/tokens') return { screen: 'tokens' }
+  if (pathname === '/settings/agents') return { screen: 'agents' }
   const link = pathname.match(/^\/(join|reset-password)\/([^/]+)$/)
   if (link) {
     return link[1] === 'join' ? { screen: 'invitation', secret: link[2] } : { screen: 'password-reset', secret: link[2] }

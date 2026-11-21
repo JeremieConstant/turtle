@@ -65,8 +65,16 @@ A Member who manages the other Members and can see every Area.
 _Avoid_: Superuser, owner, root
 
 **Agent**:
-A non-human participant that reads and writes through the same permissions as a person and is always recognisable as non-human.
+A non-human participant that reads and writes through the same permissions as a person and is always recognisable as non-human. It is either a standalone Agent or an Agent acting for a Member.
 _Avoid_: Bot, service account, integration
+
+**Standalone Agent**:
+An Agent with its own name and Tokens, created by a Workspace Admin, that holds only the Roles given to it by name; a Grant to all Members does not include it.
+_Avoid_: Service account, bot user
+
+**Agent acting for a Member**:
+An Agent that acts as a Member through one of the Member's Tokens, with no identity of its own, and is named after that Token.
+_Avoid_: Personal agent, delegate
 
 **Token**:
 A credential that lets an Agent act, either as the Member who owns it or as a standalone Agent, and never with more access than its owner has.

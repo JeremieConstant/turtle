@@ -28,7 +28,9 @@
   {#each people as present}
     {#if 'agent' in present}
       <!-- An Agent is always recognisable as one. -->
-      <span class="person agent" title="An Agent changed this Page">{present.name} · Agent</span>
+      <span class="person agent" title="An Agent changed this Page">
+        {present.name} · {present.member ? `Agent of ${present.member}` : 'Agent'}
+      </span>
     {:else}
       <span class="person" style:--person={present.color}>{present.name}</span>
     {/if}

@@ -56,17 +56,23 @@ pub struct OpenPage {
 /// client ids, so these never collide with one.
 const FIRST_AGENT_CLIENT: u64 = 1 << 32;
 
-/// Who made a change: a Member, or an Agent acting through one of their Tokens.
+/// Who made a change. Only who they are: names are looked up when shown, so
+/// a renamed Agent stays one author.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Author {
-    pub member_id: String,
-    /// The Agent's name, when an Agent made the change.
-    pub agent: Option<String>,
+pub enum Author {
+    /// A Member, by ID.
+    Member(String),
+    /// An Agent acting for a Member through one of their Tokens. It has no
+    /// identity of its own, so it is known by the Token's name as it was.
+    AgentForMember { member_id: String, agent: String },
+    /// A standalone Agent, by ID.
+    Agent(String),
 }
 
+#[cfg(test)]
 impl Author {
     pub fn member(member_id: &str) -> Author {
-        Author { member_id: member_id.to_string(), agent: None }
+        Author::Member(member_id.to_string())
     }
 }
 
@@ -248,8 +254,9 @@ impl Pages {
         };
         if let Some(update) = update {
             let _ = page.frames.send((FROM_TURTLE, frame(FRAME_UPDATE, &update)));
-            if let Some(name) = &by.agent {
-                announce_agent(page, by, name);
+            // Only presence: the change stands even when it cannot be shown.
+            if let Err(error) = self.announce_agent(page, by) {
+                eprintln!("announcing an Agent on Page {} failed: {error:#}", page.id);
             }
         }
         let now = (self.clock)();
@@ -334,9 +341,14 @@ impl Pages {
             rusqlite::params![page_id, number, markdown, now, restored_from],
         )?;
         for author in authors {
+            let (member_id, agent_id, agent) = match author {
+                Author::Member(id) => (Some(id), None, ""),
+                Author::AgentForMember { member_id, agent } => (Some(member_id), None, agent.as_str()),
+                Author::Agent(id) => (None, Some(id), ""),
+            };
             transaction.execute(
-                "INSERT INTO version_authors (page_id, number, member_id, agent) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![page_id, number, author.member_id, author.agent.as_deref().unwrap_or_default()],
+                "INSERT INTO version_authors (page_id, number, member_id, agent_id, agent) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![page_id, number, member_id, agent_id, agent],
             )?;
         }
         transaction.commit()?;
@@ -379,10 +391,33 @@ impl Pages {
     }
 }
 
-/// Tells the editors which Agent just changed the Page, as presence without
-/// a cursor: Agents have none. Editors forget it after a while unless the
-/// Agent writes again, which is what an Agent being there means.
-fn announce_agent(page: &OpenPage, author: &Author, name: &str) {
+impl Pages {
+    /// Tells the editors which Agent just changed the Page, as presence
+    /// without a cursor: Agents have none. An Agent acting for a Member is
+    /// named with them. Editors forget it after a while unless the Agent
+    /// writes again, which is what an Agent being there means.
+    fn announce_agent(&self, page: &OpenPage, author: &Author) -> anyhow::Result<()> {
+        let user = {
+            let db = self.db.lock().unwrap();
+            match author {
+                Author::Member(_) => return Ok(()),
+                Author::AgentForMember { member_id, agent } => {
+                    let member: String =
+                        db.query_row("SELECT name FROM members WHERE id = ?1", [member_id], |row| row.get(0))?;
+                    serde_json::json!({ "name": agent, "agent": true, "member": member })
+                }
+                Author::Agent(id) => {
+                    let name: String = db.query_row("SELECT name FROM agents WHERE id = ?1", [id], |row| row.get(0))?;
+                    serde_json::json!({ "name": name, "agent": true })
+                }
+            }
+        };
+        announce_presence(page, author, user);
+        Ok(())
+    }
+}
+
+fn announce_presence(page: &OpenPage, author: &Author, user: serde_json::Value) {
     let client = {
         let mut agents = page.agents.lock().unwrap();
         let index = match agents.iter().position(|known| known == author) {
@@ -399,7 +434,7 @@ fn announce_agent(page: &OpenPage, author: &Author, name: &str) {
         *clock += 1;
         *clock
     };
-    let state = serde_json::json!({ "user": { "name": name, "agent": true } }).to_string();
+    let state = serde_json::json!({ "user": user }).to_string();
     let mut payload = Vec::new();
     write_varuint(&mut payload, 1);
     write_varuint(&mut payload, client);

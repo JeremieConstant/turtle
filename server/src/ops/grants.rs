@@ -14,18 +14,18 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "list_grants",
-            "Lists the Grants of an Area, and the active Members one can be given to. Needs the Admin Role on the Area.",
+            "Lists the Grants of an Area, and the active Members and standalone Agents one can be given to. Needs the Admin Role on the Area.",
             list_grants,
         )
         .changes = false;
     catalogue.add(
         "set_grant",
-        "Gives a Member, or all Members at once, a Role on an Area, replacing the Role they held there. Someone holding several Grants gets the highest Role. The last Admin of an Area keeps that Role. Needs the Admin Role on the Area.",
+        "Gives a Member, a standalone Agent, or all Members at once, a Role on an Area, replacing the Role they held there. A Grant to all Members does not include standalone Agents. Someone holding several Grants gets the highest Role. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area.",
         set_grant,
     );
     catalogue.add(
         "remove_grant",
-        "Takes away the Grant of a Member, or of all Members, on an Area. The last Admin of an Area keeps that Role. Needs the Admin Role on the Area.",
+        "Takes away the Grant of a Member, a standalone Agent, or all Members, on an Area. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area.",
         remove_grant,
     );
 }
@@ -35,7 +35,10 @@ pub(super) fn register(catalogue: &mut Catalogue) {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum GrantHolder {
     Member { member_id: String },
-    /// Every Member of the Workspace, including those who join later.
+    /// A standalone Agent.
+    Agent { agent_id: String },
+    /// Every Member of the Workspace, including those who join later, but
+    /// no standalone Agent.
     AllMembers,
 }
 
@@ -43,7 +46,7 @@ pub enum GrantHolder {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Grant {
     pub holder: GrantHolder,
-    /// The Member's name, or "All Members".
+    /// The Member's or Agent's name, or "All Members".
     pub name: String,
     pub role: Role,
 }
@@ -56,6 +59,13 @@ pub struct GrantableMember {
     pub name: String,
 }
 
+/// A standalone Agent that can be given a Grant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct GrantableAgent {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct GrantList {
     pub area: Area,
@@ -63,6 +73,8 @@ pub struct GrantList {
     pub grants: Vec<Grant>,
     /// Every active Member by name, to choose whom to give a Role.
     pub members: Vec<GrantableMember>,
+    /// Every active standalone Agent by name, likewise.
+    pub agents: Vec<GrantableAgent>,
 }
 
 /// What a change of Grants leaves the caller with.
@@ -113,7 +125,7 @@ pub fn remove_grant(core: &Core, principal: &Principal, input: RemoveGrant) -> O
     let mut db = core.db();
     let transaction = db.transaction()?;
     let area = administered_area(&transaction, principal, &input.area_id)?;
-    // Unlike giving one, removing a deactivated Member's Grant is fine.
+    // Unlike giving one, removing a deactivated Member's or Agent's Grant is fine.
     let holder = Holder::from(&input.holder);
     let root_id = root_of(&transaction, &area.id)?;
     if !permissions::revoke(&transaction, &root_id, &holder)? {
@@ -127,7 +139,8 @@ pub fn remove_grant(core: &Core, principal: &Principal, input: RemoveGrant) -> O
 
 /// Refuses a change that would leave an Area without an Admin who can act:
 /// all Members, or a Member who is not deactivated. Workspace Admins do not
-/// count, since they reach every Area without a Grant.
+/// count, since they reach every Area without a Grant, and neither do
+/// standalone Agents: a person has to stay able to manage the Area.
 fn keep_one_admin(db: &Connection, root_id: &str) -> Result<(), OpError> {
     let any_admin: bool = db.query_row(
         "SELECT EXISTS (
@@ -163,21 +176,25 @@ impl From<&GrantHolder> for Holder {
         match holder {
             GrantHolder::AllMembers => Holder::AllMembers,
             GrantHolder::Member { member_id } => Holder::Member(member_id.clone()),
+            GrantHolder::Agent { agent_id } => Holder::Agent(agent_id.clone()),
         }
     }
 }
 
-/// The holder to store, once a Member given by ID is known to be active.
+/// The holder to store, once a Member or Agent given by ID is known to be active.
 fn holder_of(db: &Connection, holder: &GrantHolder) -> Result<Holder, OpError> {
-    if let GrantHolder::Member { member_id } = holder {
-        let active: bool = db.query_row(
-            "SELECT EXISTS (SELECT 1 FROM members WHERE id = ?1 AND deactivated_at IS NULL)",
-            [member_id],
-            |row| row.get(0),
-        )?;
-        if !active {
-            return Err(OpError::NotFound("There is no such Member.".into()));
-        }
+    let (table, id, missing) = match holder {
+        GrantHolder::AllMembers => return Ok(holder.into()),
+        GrantHolder::Member { member_id } => ("members", member_id, "There is no such Member."),
+        GrantHolder::Agent { agent_id } => ("agents", agent_id, "There is no such Agent."),
+    };
+    let active: bool = db.query_row(
+        &format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE id = ?1 AND deactivated_at IS NULL)"),
+        [id],
+        |row| row.get(0),
+    )?;
+    if !active {
+        return Err(OpError::NotFound(missing.into()));
     }
     Ok(holder.into())
 }
@@ -192,6 +209,10 @@ fn grant_list(db: &Connection, area: Area) -> Result<GrantList, OpError> {
                 let name = db.query_row("SELECT name FROM members WHERE id = ?1", [&member_id], |row| row.get(0))?;
                 Grant { holder: GrantHolder::Member { member_id }, name, role }
             }
+            Holder::Agent(agent_id) => {
+                let name = db.query_row("SELECT name FROM agents WHERE id = ?1", [&agent_id], |row| row.get(0))?;
+                Grant { holder: GrantHolder::Agent { agent_id }, name, role }
+            }
         });
     }
     grants.sort_by(|a, b| {
@@ -204,7 +225,13 @@ fn grant_list(db: &Connection, area: Area) -> Result<GrantList, OpError> {
     let members = statement
         .query_map([], |row| Ok(GrantableMember { id: row.get(0)?, name: row.get(1)? }))?
         .collect::<Result<_, _>>()?;
-    Ok(GrantList { area, grants, members })
+    let mut statement = db.prepare(
+        "SELECT id, name FROM agents WHERE deactivated_at IS NULL ORDER BY name COLLATE NOCASE, id",
+    )?;
+    let agents = statement
+        .query_map([], |row| Ok(GrantableAgent { id: row.get(0)?, name: row.get(1)? }))?
+        .collect::<Result<_, _>>()?;
+    Ok(GrantList { area, grants, members, agents })
 }
 
 #[cfg(test)]
@@ -324,6 +351,52 @@ mod tests {
         set_grant(&core, &grace, to(&area_id, GrantHolder::AllMembers, Role::Admin)).unwrap();
         let removal = RemoveGrant { area_id: area_id.clone(), holder: grace_holder };
         remove_grant(&core, &grace, removal).unwrap();
+    }
+
+    fn agent(core: &Core, name: &str) -> String {
+        let ada = member(core, "Ada", true);
+        let input = crate::ops::agents::NewAgent { name: name.into() };
+        crate::ops::agents::create_agent(core, &ada, input).unwrap().output.id
+    }
+
+    #[test]
+    fn an_area_admin_gives_a_standalone_agent_a_role_like_a_member() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let reviewer = agent(&core, "Reviewer");
+        let area_id = area(&core, &grace);
+
+        let choices = list_grants(&core, &grace, GrantsOfArea { area_id: area_id.clone() }).unwrap().output;
+        assert_eq!(choices.agents, [GrantableAgent { id: reviewer.clone(), name: "Reviewer".into() }]);
+        let holder = GrantHolder::Agent { agent_id: reviewer.clone() };
+        set_grant(&core, &grace, to(&area_id, holder.clone(), Role::Write)).unwrap();
+
+        let list = list_grants(&core, &grace, GrantsOfArea { area_id: area_id.clone() }).unwrap().output;
+        let reviewer_grant = list.grants.iter().find(|grant| grant.holder == holder).unwrap();
+        assert_eq!((reviewer_grant.name.as_str(), reviewer_grant.role), ("Reviewer", Role::Write));
+        remove_grant(&core, &grace, RemoveGrant { area_id: area_id.clone(), holder }).unwrap();
+        assert_eq!(shown(&core, &grace, &area_id), [("Grace".into(), Role::Admin)]);
+    }
+
+    #[test]
+    fn a_standalone_agent_does_not_count_as_the_admin_a_person_needs_and_a_deactivated_one_gets_no_grant() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let reviewer = agent(&core, "Reviewer");
+        let area_id = area(&core, &grace);
+        let reviewer_holder = GrantHolder::Agent { agent_id: reviewer.clone() };
+        set_grant(&core, &grace, to(&area_id, reviewer_holder, Role::Admin)).unwrap();
+
+        let stepping_down = set_grant(&core, &grace, to(&area_id, holder(&grace), Role::Write)).unwrap_err();
+        assert_eq!(stepping_down.kind(), "conflict");
+
+        let barbara = member(&core, "Barbara", true);
+        crate::ops::agents::deactivate_agent(&core, &barbara, crate::ops::agents::AgentId { id: reviewer.clone() }).unwrap();
+        let other = area(&core, &grace);
+        let refused = set_grant(&core, &grace, to(&other, GrantHolder::Agent { agent_id: reviewer }, Role::Read)).unwrap_err();
+        assert_eq!(refused.kind(), "not_found");
+        let list = list_grants(&core, &grace, GrantsOfArea { area_id: other }).unwrap().output;
+        assert!(list.agents.is_empty());
     }
 
     #[test]

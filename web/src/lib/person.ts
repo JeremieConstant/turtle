@@ -3,9 +3,10 @@ export type Person = { name: string; color: string }
 
 /**
  * Who is on a Page as the others see them: a person, or an Agent that just
- * changed it. Turtle announces Agents itself, without a colour or a cursor.
+ * changed it, with the Member it acts for unless it is a standalone Agent.
+ * Turtle announces Agents itself, without a colour or a cursor.
  */
-export type Present = Person | { name: string; agent: true }
+export type Present = Person | { name: string; agent: true; member?: string }
 
 const PERSON_COLORS = 7
 

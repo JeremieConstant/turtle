@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { authorNames, previousNumber, versionTitle } from './versions'
 
-const person = (name: string) => ({ id: name.toLowerCase(), name })
+const person = (name: string) => ({ kind: 'member' as const, id: name.toLowerCase(), name })
 
 test('authors are named the way a sentence would list them', () => {
   expect(authorNames([person('Ada')])).toBe('Ada')
@@ -11,10 +11,15 @@ test('authors are named the way a sentence would list them', () => {
   expect(authorNames([])).toBe('Unknown')
 })
 
-test('an Agent is named as the Agent of the Member whose Token it used', () => {
-  const claude = { id: 'ada', name: 'Ada', agent: 'Claude' }
+test('an Agent acting for a Member is named as their Agent', () => {
+  const claude = { kind: 'agent_for_member' as const, name: 'Claude', member_id: 'ada', member_name: 'Ada' }
   expect(authorNames([claude])).toBe('Claude (Agent of Ada)')
   expect(authorNames([person('Ada'), claude])).toBe('Ada and Claude (Agent of Ada)')
+})
+
+test('a standalone Agent is named as an Agent of its own', () => {
+  const reviewer = { kind: 'agent' as const, id: 'r1', name: 'Reviewer' }
+  expect(authorNames([person('Grace'), reviewer])).toBe('Grace and Reviewer (Agent)')
 })
 
 test('a restored Version says which one it brought back', () => {

@@ -2,6 +2,7 @@
   import { router } from './lib/router.svelte'
   import type { Route } from './lib/routes'
   import { session } from './lib/session.svelte'
+  import AgentsScreen from './screens/AgentsScreen.svelte'
   import AreaScreen from './screens/AreaScreen.svelte'
   import AreasScreen from './screens/AreasScreen.svelte'
   import InvitationScreen from './screens/InvitationScreen.svelte'
@@ -64,6 +65,8 @@
   <MembersScreen />
 {:else if route.screen === 'tokens'}
   <TokensScreen />
+{:else if route.screen === 'agents'}
+  <AgentsScreen />
 {:else if route.screen === 'invitation'}
   {#key route.secret}
     <InvitationScreen secret={route.secret} />

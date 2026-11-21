@@ -15,7 +15,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "get_session",
-            "Says who is signed in, and whether this installation still needs its first account.",
+            "Says who is signed in, or which standalone Agent is calling, and whether this installation still needs its first account.",
             get_session,
         )
         .changes = false;
@@ -56,6 +56,16 @@ pub struct Session {
     pub setup_required: bool,
     /// The signed-in Member, if anyone is signed in.
     pub member: Option<Member>,
+    /// The standalone Agent calling through one of its Tokens, if it is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<CallingAgent>,
+}
+
+/// A standalone Agent as it learns who it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CallingAgent {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -80,8 +90,14 @@ pub const SESSION_LIFETIME: i64 = 30 * 24 * 60 * 60;
 
 pub fn get_session(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Session> {
     let db = core.db();
+    let agent = match principal {
+        Principal::Agent { id, .. } => Some(db.query_row("SELECT id, name FROM agents WHERE id = ?1", [id], |row| {
+            Ok(CallingAgent { id: row.get(0)?, name: row.get(1)? })
+        })?),
+        _ => None,
+    };
     let member = match principal {
-        Principal::Anonymous => None,
+        Principal::Anonymous | Principal::Agent { .. } => None,
         Principal::Member { id, .. } => Some(
             db.query_row(
                 "SELECT id, name, email, workspace_admin FROM members WHERE id = ?1",
@@ -93,6 +109,7 @@ pub fn get_session(core: &Core, principal: &Principal, _: Nothing) -> OpResult<S
     Ok(Session {
         setup_required: !any_member_exists(&db)?,
         member,
+        agent,
     }
     .into())
 }
@@ -337,7 +354,8 @@ mod tests {
             before.output,
             Session {
                 setup_required: true,
-                member: None
+                member: None,
+                agent: None,
             }
         );
 
@@ -352,7 +370,8 @@ mod tests {
             after.output,
             Session {
                 setup_required: false,
-                member: Some(created.output)
+                member: Some(created.output),
+                agent: None,
             }
         );
     }

@@ -52,6 +52,9 @@ impl Role {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Holder {
     Member(String),
+    /// A standalone Agent.
+    Agent(String),
+    /// Every Member; never a standalone Agent.
     AllMembers,
 }
 
@@ -59,6 +62,7 @@ impl Holder {
     fn stored(&self) -> String {
         match self {
             Holder::Member(id) => format!("member:{id}"),
+            Holder::Agent(id) => format!("agent:{id}"),
             Holder::AllMembers => "all_members".into(),
         }
     }
@@ -66,6 +70,7 @@ impl Holder {
     fn from_stored(stored: &str) -> Option<Holder> {
         match stored.split_once(':') {
             Some(("member", id)) => Some(Holder::Member(id.to_string())),
+            Some(("agent", id)) => Some(Holder::Agent(id.to_string())),
             None if stored == "all_members" => Some(Holder::AllMembers),
             _ => None,
         }
@@ -121,18 +126,14 @@ pub fn role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlit
     Ok(if token.read_only { role.map(|role| role.min(Role::Read)) } else { role })
 }
 
-/// The Role the Member behind a principal holds on a node, whatever Token
-/// they act through.
+/// The Role the Member or Agent behind a principal holds on a node, whatever
+/// Token they act through.
 fn owners_role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlite::Result<Option<Role>> {
-    let (member_id, workspace_admin) = match principal {
-        Principal::Anonymous => return Ok(None),
-        Principal::Member {
-            id,
-            workspace_admin,
-            ..
-        } => (id, *workspace_admin),
-    };
-    if workspace_admin {
+    let holders = holders_of(principal);
+    if holders.is_empty() {
+        return Ok(None);
+    }
+    if matches!(principal, Principal::Member { workspace_admin: true, .. }) {
         let exists: bool = db.query_row(
             "SELECT EXISTS (SELECT 1 FROM nodes WHERE id = ?1)",
             [node_id],
@@ -156,12 +157,8 @@ fn owners_role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusq
              )
              SELECT MAX(CASE role WHEN 'read' THEN 1 WHEN 'write' THEN 2 WHEN 'admin' THEN 3 END)
              FROM grants
-             WHERE node_id = (SELECT id FROM governing) AND holder IN (?2, ?3)",
-            rusqlite::params![
-                node_id,
-                Holder::Member(member_id.clone()).stored(),
-                Holder::AllMembers.stored()
-            ],
+             WHERE node_id = (SELECT id FROM governing) AND holder IN (SELECT value FROM json_each(?2))",
+            rusqlite::params![node_id, serde_json::to_string(&holders).map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?],
             |row| row.get(0),
         )
         .optional()?
@@ -198,18 +195,29 @@ pub fn governing_node(db: &Connection, node_id: &str) -> rusqlite::Result<Option
 /// list governs (see `governing_node`) is readable to them, and nothing else
 /// is. `None` for a Workspace Admin, who reads everything.
 pub fn readable_through(db: &Connection, principal: &Principal) -> rusqlite::Result<Option<Vec<String>>> {
-    let member_id = match principal {
-        Principal::Anonymous => return Ok(Some(Vec::new())),
-        Principal::Member { workspace_admin: true, .. } => return Ok(None),
-        Principal::Member { id, .. } => id,
-    };
-    // Every Role includes Read, so any Grant to them or to all Members will do.
-    let mut statement = db.prepare("SELECT DISTINCT node_id FROM grants WHERE holder IN (?1, ?2)")?;
+    if matches!(principal, Principal::Member { workspace_admin: true, .. }) {
+        return Ok(None);
+    }
+    let holders = holders_of(principal);
+    if holders.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    // Every Role includes Read, so any Grant that applies to them will do.
+    let mut statement =
+        db.prepare("SELECT DISTINCT node_id FROM grants WHERE holder IN (SELECT value FROM json_each(?1))")?;
+    let holders = serde_json::to_string(&holders).map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
     let nodes = statement
-        .query_map(
-            rusqlite::params![Holder::Member(member_id.clone()).stored(), Holder::AllMembers.stored()],
-            |row| row.get(0),
-        )?
+        .query_map([holders], |row| row.get(0))?
         .collect::<rusqlite::Result<Vec<String>>>()?;
     Ok(Some(nodes))
+}
+
+/// The stored holders whose Grants apply to a principal: a Member's own and
+/// those to all Members, or a standalone Agent's own alone.
+fn holders_of(principal: &Principal) -> Vec<String> {
+    match principal {
+        Principal::Anonymous => Vec::new(),
+        Principal::Member { id, .. } => vec![Holder::Member(id.clone()).stored(), Holder::AllMembers.stored()],
+        Principal::Agent { id, .. } => vec![Holder::Agent(id.clone()).stored()],
+    }
 }

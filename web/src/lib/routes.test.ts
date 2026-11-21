@@ -87,3 +87,7 @@ test('a link without a secret, or with more after it, is not found', () => {
 test('the Tokens screen has its own address under settings', () => {
   expect(parseAddress('/settings/tokens')).toEqual({ screen: 'tokens' })
 })
+
+test('the Agents screen has its own address under settings', () => {
+  expect(parseAddress('/settings/agents')).toEqual({ screen: 'agents' })
+})

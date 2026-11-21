@@ -16,6 +16,10 @@
     router.follow(event, '/settings/members')
   }
 
+  function goToAgents(event: MouseEvent) {
+    router.follow(event, '/settings/agents')
+  }
+
   function goToTokens(event: MouseEvent) {
     router.follow(event, '/settings/tokens')
   }
@@ -33,6 +37,7 @@
   <nav>
     {#if session.member?.workspace_admin}
       <a href="/settings/members" onclick={goToMembers}>Members</a>
+      <a href="/settings/agents" onclick={goToAgents}>Agents</a>
     {/if}
     <a href="/settings/tokens" onclick={goToTokens}>Tokens</a>
   </nav>
