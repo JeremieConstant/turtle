@@ -1,8 +1,8 @@
 import type { Author, VersionSummary } from './operations.gen'
 
-/** The authors of a Version as a sentence lists them: "Ada, Grace and Linus". */
+/** The authors of a Version as a sentence lists them: "Ada, Grace and Claude (Agent of Linus)". */
 export function authorNames(authors: Author[]): string {
-  const names = authors.map(author => author.name)
+  const names = authors.map(author => (author.agent ? `${author.agent} (Agent of ${author.name})` : author.name))
   if (names.length === 0) return 'Unknown'
   if (names.length === 1) return names[0]
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`

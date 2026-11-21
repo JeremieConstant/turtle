@@ -7,6 +7,7 @@
 
 pub mod accounts;
 pub mod areas;
+pub mod content;
 #[cfg(test)]
 mod every_operation;
 pub mod grants;
@@ -381,6 +382,7 @@ pub fn catalogue() -> Catalogue {
     tree::register(&mut catalogue);
     search::register(&mut catalogue);
     versions::register(&mut catalogue);
+    content::register(&mut catalogue);
     tokens::register(&mut catalogue);
     catalogue
 }
@@ -494,6 +496,10 @@ mod tests {
             "get_version",
             "compare_versions",
             "restore_version",
+            "get_page_markdown",
+            "replace_page",
+            "replace_section",
+            "append_to_page",
         ];
         for expected in expected_names {
             assert!(names.contains(&expected), "{expected} is missing from {names:?}");

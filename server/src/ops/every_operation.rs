@@ -85,6 +85,15 @@ fn table() -> Vec<Row> {
             [OK, OK, OK, HIDDEN, OK],
         ),
         ("restore_version", |f| json!({"page_id": f.page_id, "number": 1}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
+        ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),
+        // The Page has no headings, so those who may change it learn that.
+        (
+            "replace_section",
+            |f| json!({"page_id": f.page_id, "heading": "Plan", "markdown": "# Plan"}),
+            ["invalid_input", "invalid_input", REFUSED, HIDDEN, "invalid_input"],
+        ),
     ]
 }
 
@@ -125,7 +134,7 @@ fn every_operation_respects_the_role_of_its_caller() {
             let page = core.live().open(&fixture.page_id).unwrap();
             core.live().connected(&page);
             let Principal::Member { id: grace_id, .. } = &grace else { unreachable!() };
-            core.live().write(&page, &crate::markdown::from_markdown("Notes for the team."), grace_id);
+            core.live().write(&page, &crate::markdown::from_markdown("Notes for the team."), &crate::live::Author::member(grace_id));
             core.live().disconnected(&page).unwrap();
             give_role(&core, &area_id, &ken, Role::Read);
             let caller = member(&core, "Caller", column == "Workspace Admin");

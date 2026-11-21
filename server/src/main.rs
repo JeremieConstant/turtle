@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
-use live::{frame, OpenPage, FRAME_PRESENCE, FRAME_PRESENCE_REQUEST, FRAME_UPDATE};
+use live::{frame, read_varuint, write_varuint, OpenPage, FRAME_PRESENCE, FRAME_PRESENCE_REQUEST, FRAME_UPDATE};
 use ops::permissions::Role;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -208,20 +208,31 @@ async fn page_for(
     page_id: &str,
     using: Use,
 ) -> Result<Opened, Response> {
-    let core = core.clone();
     let page_id = page_id.to_string();
+    as_caller(core, headers, move |core, principal| {
+        let page = match using {
+            Use::Read => ops::tree::get_page(core, principal, ops::tree::PageId { id: page_id })?.output,
+            Use::Change => ops::tree::page_to_change(core, principal, &page_id)?,
+        };
+        let author = ops::tokens::author_of(core, principal)?;
+        Ok(Opened { page, author })
+    })
+    .await
+}
+
+/// Does `act` as the caller of this request, off the async workers, and
+/// answers a refusal like the API does, except that nobody signed in gets 401.
+#[allow(clippy::result_large_err)]
+async fn as_caller<T: Send + 'static>(
+    core: &Arc<ops::Core>,
+    headers: HeaderMap,
+    act: impl FnOnce(&ops::Core, &ops::Principal) -> Result<T, ops::OpError> + Send + 'static,
+) -> Result<T, Response> {
+    let core = core.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         let principal = http_api::principal(&core, &headers)?;
-        let page = match using {
-            Use::Read => ops::tree::get_page(&core, &principal, ops::tree::PageId { id: page_id })
-                .map(|reply| reply.output),
-            Use::Change => ops::tree::page_to_change(&core, &principal, &page_id),
-        };
-        let opened = page.and_then(|page| {
-            let member_id = ops::areas::signed_in(&principal)?.to_string();
-            Ok(Opened { page, member_id })
-        });
-        Ok::<_, http_api::Refusal>(opened.map_err(|error| (principal == ops::Principal::Anonymous, error)))
+        let done = act(&core, &principal);
+        Ok::<_, http_api::Refusal>(done.map_err(|error| (principal == ops::Principal::Anonymous, error)))
     })
     .await;
     match outcome {
@@ -238,37 +249,36 @@ async fn page_for(
 /// A Page someone may use, and who they are.
 struct Opened {
     page: ops::tree::Page,
-    member_id: String,
+    author: live::Author,
 }
 
-async fn read_markdown(
-    State(app): State<Arc<App>>,
-    Path(page_id): Path<String>,
-    headers: HeaderMap,
-) -> Result<Response, Failure> {
-    if let Err(refused) = page_for(&app.core, headers, &page_id, Use::Read).await {
-        return Ok(refused);
+/// The Page as plain Markdown, as `get_page_markdown` gives it.
+async fn read_markdown(State(app): State<Arc<App>>, Path(page_id): Path<String>, headers: HeaderMap) -> Response {
+    let read = as_caller(&app.core, headers, move |core, principal| {
+        ops::content::get_page_markdown(core, principal, ops::content::OfPage { page_id })
+    })
+    .await;
+    match read {
+        Ok(reply) => ([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], reply.output.markdown).into_response(),
+        Err(refused) => refused,
     }
-    let page = app.core.live().open(&page_id)?;
-    let markdown = markdown::to_markdown(&ydoc::read(&page.doc));
-    Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], markdown).into_response())
 }
 
-/// Makes the Page say what the given Markdown says, changing only what
-/// differs. Connected editors see the change at once.
+/// Makes the Page say what the given Markdown says, as `replace_page` does.
 async fn write_markdown(
     State(app): State<Arc<App>>,
     Path(page_id): Path<String>,
     headers: HeaderMap,
-    body: String,
-) -> Result<Response, Failure> {
-    let author = match page_for(&app.core, headers, &page_id, Use::Change).await {
-        Ok(opened) => opened.member_id,
-        Err(refused) => return Ok(refused),
-    };
-    let page = app.core.live().open(&page_id)?;
-    app.core.live().write(&page, &markdown::from_markdown(&body), &author);
-    Ok(StatusCode::NO_CONTENT.into_response())
+    markdown: String,
+) -> Response {
+    let written = as_caller(&app.core, headers, move |core, principal| {
+        ops::content::replace_page(core, principal, ops::content::NewContent { page_id, markdown })
+    })
+    .await;
+    match written {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(refused) => refused,
+    }
 }
 
 async fn connect(
@@ -279,8 +289,8 @@ async fn connect(
 ) -> Result<Response, Failure> {
     // Watched before access is checked, so a change in between is noticed.
     let access_changes = app.core.watch_access();
-    let (role, member_id) = match page_for(&app.core, headers.clone(), &page_id, Use::Read).await {
-        Ok(opened) => (opened.page.role, opened.member_id),
+    let (role, author) = match page_for(&app.core, headers.clone(), &page_id, Use::Read).await {
+        Ok(opened) => (opened.page.role, opened.author),
         Err(refused) => return Ok(refused),
     };
     let page = app.core.live().open(&page_id)?;
@@ -290,7 +300,7 @@ async fn connect(
         headers,
         page_id,
         role,
-        member_id,
+        author,
         changes: access_changes,
     };
     let core = app.core.clone();
@@ -321,7 +331,7 @@ struct Access {
     page_id: String,
     role: Role,
     /// Who is editing, to be named among the authors of the next Version.
-    member_id: String,
+    author: live::Author,
     /// Fires whenever someone's access may have changed.
     changes: tokio::sync::watch::Receiver<u64>,
 }
@@ -404,7 +414,7 @@ async fn serve_connection(
                             Err(StatusCode::FORBIDDEN) => continue,
                             Err(_) => break Ok(()),
                         }
-                        if let Err(error) = access.core.live().apply(&page, &data[1..], &access.member_id) {
+                        if let Err(error) = access.core.live().apply(&page, &data[1..], &access.author) {
                             break Err(error);
                         }
                         let _ = page.frames.send((connection, data.to_vec()));
@@ -493,26 +503,7 @@ fn went_away(error: &anyhow::Error) -> bool {
     })
 }
 
-fn read_varuint(data: &mut &[u8]) -> Option<u64> {
-    let mut value = 0u64;
-    for shift in (0..64).step_by(7) {
-        let (&byte, rest) = data.split_first()?;
-        *data = rest;
-        value |= u64::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            return Some(value);
-        }
-    }
-    None
-}
 
-fn write_varuint(out: &mut Vec<u8>, mut value: u64) {
-    while value >= 0x80 {
-        out.push((value as u8 & 0x7f) | 0x80);
-        value >>= 7;
-    }
-    out.push(value as u8);
-}
 
 #[cfg(test)]
 mod tests {

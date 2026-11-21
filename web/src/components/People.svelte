@@ -1,10 +1,10 @@
 <script lang="ts">
   import type { Awareness } from 'y-protocols/awareness'
-  import type { Person } from '../lib/person'
+  import type { Present } from '../lib/person'
 
   const { awareness }: { awareness: Awareness } = $props()
 
-  let people = $state.raw<Person[]>([])
+  let people = $state.raw<Present[]>([])
 
   $effect(() => {
     let shown = true
@@ -13,7 +13,7 @@
     const read = () =>
       queueMicrotask(() => {
         if (!shown) return
-        people = [...awareness.getStates().values()].flatMap(state => (state.user ? [state.user as Person] : []))
+        people = [...awareness.getStates().values()].flatMap(state => (state.user ? [state.user as Present] : []))
       })
     read()
     awareness.on('change', read)
@@ -25,8 +25,13 @@
 </script>
 
 <span class="people">
-  {#each people as person}
-    <span class="person" style:--person={person.color}>{person.name}</span>
+  {#each people as present}
+    {#if 'agent' in present}
+      <!-- An Agent is always recognisable as one. -->
+      <span class="person agent" title="An Agent changed this Page">{present.name} · Agent</span>
+    {:else}
+      <span class="person" style:--person={present.color}>{present.name}</span>
+    {/if}
   {/each}
 </span>
 
@@ -43,5 +48,11 @@
     background: var(--person);
     color: var(--color-on-person);
     font-size: var(--text-s);
+  }
+
+  .agent {
+    border: var(--line-width) dashed var(--color-muted);
+    background: none;
+    color: var(--color-muted);
   }
 </style>

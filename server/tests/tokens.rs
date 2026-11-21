@@ -190,3 +190,52 @@ async fn deactivating_a_member_disables_their_tokens() {
     let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
     assert_eq!(mcp(&server, Some(&kens_token), list).await.status, 401);
 }
+
+#[tokio::test]
+async fn an_agent_writes_markdown_through_mcp_and_people_with_the_page_open_see_it_and_its_name() {
+    let mut server = TestServer::start().await;
+    let ada = server.sign_up().await;
+    let token = token(&ada, json!({ "name": "Claude" })).await;
+    let area = ada.call("create_area", json!({ "name": "Engineering" })).await;
+    let created = call_tool(
+        &server,
+        &token,
+        "create_page",
+        json!({ "area_id": area["id"], "title": "Plan", "markdown": "## Goals\n\nShip it.\n\n## Risks\n\nNone." }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let page = created["structuredContent"]["id"].as_str().unwrap().to_string();
+    let editor = server.connect(&ada, &page).await;
+    editor.wait_until("the editor has the Page", |content| content.paragraphs == ["Ship it.", "None."]).await;
+
+    let replaced = call_tool(
+        &server,
+        &token,
+        "replace_section",
+        json!({ "page_id": page, "heading": "Risks", "markdown": "## Risks\n\nThe weather." }),
+    )
+    .await;
+    assert_eq!(replaced["isError"], false, "{replaced}");
+    assert_eq!(replaced["structuredContent"]["version"]["number"], 2, "{replaced}");
+
+    let seen = editor
+        .wait_until("the editor sees the change and who made it", |content| {
+            content.paragraphs == ["Ship it.", "The weather."] && content.others.values().any(|state| state.contains("Claude"))
+        })
+        .await;
+    let agent: Value = serde_json::from_str(seen.others.values().next().unwrap()).unwrap();
+    assert_eq!(agent, json!({ "user": { "name": "Claude", "agent": true } }));
+
+    let missing = call_tool(&server, &token, "replace_section", json!({ "page_id": page, "heading": "Budget", "markdown": "" })).await;
+    assert_eq!(missing["isError"], true);
+    assert_eq!(missing["content"][0]["text"], "No Section is headed \u{201c}Budget\u{201d}. The headings are: \u{201c}Goals\u{201d}, \u{201c}Risks\u{201d}.");
+
+    let read = call_tool(&server, &token, "get_page_markdown", json!({ "page_id": page })).await;
+    assert_eq!(read["structuredContent"]["markdown"], "## Goals\n\nShip it.\n\n## Risks\n\nThe weather.\n");
+    let versions = ada.call("list_versions", json!({ "page_id": page })).await;
+    let author = json!([{ "id": ada.id().await, "name": "Ada", "agent": "Claude" }]);
+    assert_eq!(versions["versions"][0]["authors"], author);
+    server.stop().await;
+}
+

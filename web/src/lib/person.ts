@@ -1,6 +1,12 @@
 /** How a person appears to the others on a Page. */
 export type Person = { name: string; color: string }
 
+/**
+ * Who is on a Page as the others see them: a person, or an Agent that just
+ * changed it. Turtle announces Agents itself, without a colour or a cursor.
+ */
+export type Present = Person | { name: string; agent: true }
+
 const PERSON_COLORS = 7
 
 /** A signed-in Member as the others see them: their name, and a colour that lasts for the browser session. */

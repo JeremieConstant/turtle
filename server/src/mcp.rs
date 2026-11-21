@@ -21,7 +21,9 @@ const PROTOCOL_VERSIONS: [&str; 3] = ["2025-11-25", "2025-06-18", "2025-03-26"];
 
 const INSTRUCTIONS: &str = "Turtle is a knowledge base of Areas, each holding a tree of Pages and Folders. \
 Every tool acts as the Member who owns your Token, with their Roles, reduced by the Token's limits. \
-Something you may not read is reported as not found.";
+Something you may not read is reported as not found. \
+Pages are read and written as Markdown: whole, one Section by its heading, or by appending. \
+People editing the Page keep their work and see your change with your Token's name, and each write is its own Version.";
 
 // JSON-RPC error codes.
 const PARSE_ERROR: i64 = -32700;

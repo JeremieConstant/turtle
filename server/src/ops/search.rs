@@ -168,7 +168,7 @@ mod tests {
 
     fn page(core: &Core, writer: &Principal, area: &Area, title: &str) -> String {
         let input = NewEntry { area_id: area.id.clone(), parent_id: None, title: title.into() };
-        create_page(core, writer, input).unwrap().output.id
+        create_page(core, writer, input.into()).unwrap().output.id
     }
 
     /// Gives a Page content, as the editing server does when it saves one.
@@ -383,14 +383,14 @@ mod tests {
         let setup = create_page(
             &core,
             &grace,
-            NewEntry { area_id: engineering.id.clone(), parent_id: Some(guides.id), title: "Setup".into() },
+            NewEntry { area_id: engineering.id.clone(), parent_id: Some(guides.id), title: "Setup".into() }.into(),
         )
         .unwrap()
         .output;
         let laptop = create_page(
             &core,
             &grace,
-            NewEntry { area_id: engineering.id.clone(), parent_id: Some(setup.id), title: "Laptop".into() },
+            NewEntry { area_id: engineering.id.clone(), parent_id: Some(setup.id), title: "Laptop".into() }.into(),
         )
         .unwrap()
         .output;

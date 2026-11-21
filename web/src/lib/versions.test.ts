@@ -11,6 +11,12 @@ test('authors are named the way a sentence would list them', () => {
   expect(authorNames([])).toBe('Unknown')
 })
 
+test('an Agent is named as the Agent of the Member whose Token it used', () => {
+  const claude = { id: 'ada', name: 'Ada', agent: 'Claude' }
+  expect(authorNames([claude])).toBe('Claude (Agent of Ada)')
+  expect(authorNames([person('Ada'), claude])).toBe('Ada and Claude (Agent of Ada)')
+})
+
 test('a restored Version says which one it brought back', () => {
   expect(versionTitle({ number: 3, restored_from: null })).toBe('Version 3')
   expect(versionTitle({ number: 4, restored_from: 1 })).toBe('Version 4, restored from Version 1')

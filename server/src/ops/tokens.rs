@@ -204,6 +204,20 @@ pub fn revoke_token(core: &Core, principal: &Principal, input: TokenId) -> OpRes
 /// Finds out who acts through a Token value, and with which limits. An
 /// unknown, expired or revoked Token, or one whose owner was deactivated, is
 /// nobody. A use is remembered as the Token's last, to the minute.
+/// Who a change by the caller is credited to: the Member, or the Agent
+/// acting through their Token, named after the Token.
+pub(crate) fn author_of(core: &Core, principal: &Principal) -> Result<crate::live::Author, OpError> {
+    let member_id = areas::signed_in(principal)?;
+    let Some(token) = principal.token() else { return Ok(crate::live::Author::member(member_id)) };
+    let name: Option<String> = core
+        .db()
+        .query_row("SELECT name FROM tokens WHERE id = ?1", [&token.id], |row| row.get(0))
+        .optional()?;
+    // The Token was revoked a moment ago; the caller is still an Agent.
+    let agent = name.unwrap_or_else(|| "Agent".into());
+    Ok(crate::live::Author { member_id: member_id.to_string(), agent: Some(agent) })
+}
+
 pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>, OpError> {
     if !value.starts_with(VALUE_PREFIX) {
         return Ok(None);
@@ -420,7 +434,7 @@ mod tests {
         assert_eq!(hidden.kind(), "not_found");
         assert_eq!(hidden.message(), missing.message());
         let page = NewEntry { area_id: secret, parent_id: None, title: "Leak".into() };
-        assert_eq!(create_page(&core, &agent, page).unwrap_err().kind(), "not_found");
+        assert_eq!(create_page(&core, &agent, page.into()).unwrap_err().kind(), "not_found");
         let elsewhere = create_area(&core, &agent, NewArea { name: "Elsewhere".into() }).unwrap_err();
         assert_eq!(elsewhere.kind(), "not_permitted");
     }
@@ -449,7 +463,7 @@ mod tests {
         let (_, agent) = agent(&core, &ken, input);
 
         let page = NewEntry { area_id: engineering.clone(), parent_id: None, title: "Notes".into() };
-        assert_eq!(create_page(&core, &agent, page).unwrap_err().kind(), "not_permitted");
+        assert_eq!(create_page(&core, &agent, page.into()).unwrap_err().kind(), "not_permitted");
 
         let holder = crate::ops::grants::GrantHolder::Member { member_id: "member-ken".into() };
         crate::ops::grants::remove_grant(&core, &grace, crate::ops::grants::RemoveGrant { area_id: engineering, holder }).unwrap();
@@ -463,7 +477,7 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", true);
         let engineering = area(&core, &grace, "Engineering");
-        let page = create_page(&core, &grace, NewEntry { area_id: engineering.clone(), parent_id: None, title: "Notes".into() })
+        let page = create_page(&core, &grace, NewEntry { area_id: engineering.clone(), parent_id: None, title: "Notes".into() }.into())
             .unwrap()
             .output;
         let (_, agent) = agent(&core, &grace, NewToken { read_only: true, ..named("Reader") });

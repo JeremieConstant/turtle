@@ -110,6 +110,22 @@ const MIGRATIONS: &[&str] = &[
          PRIMARY KEY (page_id, number, member_id),
          FOREIGN KEY (page_id, number) REFERENCES versions (page_id, number) ON DELETE CASCADE
      );",
+    // An author of a Version may be an Agent acting through a Token of the
+    // Member. Its name is kept as it was, so a revoked Token still shows who
+    // wrote; '' means the Member themself, because NULL would not keep the
+    // key unique.
+    "CREATE TABLE version_authors_new (
+         page_id TEXT NOT NULL,
+         number INTEGER NOT NULL,
+         member_id TEXT NOT NULL REFERENCES members (id) ON DELETE CASCADE,
+         agent TEXT NOT NULL DEFAULT '',
+         PRIMARY KEY (page_id, number, member_id, agent),
+         FOREIGN KEY (page_id, number) REFERENCES versions (page_id, number) ON DELETE CASCADE
+     );
+     INSERT INTO version_authors_new (page_id, number, member_id)
+         SELECT page_id, number, member_id FROM version_authors;
+     DROP TABLE version_authors;
+     ALTER TABLE version_authors_new RENAME TO version_authors;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

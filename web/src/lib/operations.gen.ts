@@ -12,7 +12,12 @@ export type AreaList = {
 }
 
 export type Author = {
+  /** The Agent's name, which is the name of the Token it acted through.
+Absent when the Member made the changes themself. */
+  agent?: string | null
+  /** The Member, or the Member whose Token the Agent acted through. */
   id: string
+  /** The Member's name. */
   name: string
 }
 
@@ -104,6 +109,12 @@ export type Page = {
   id: string
   /** The Role the caller holds on the Page. */
   role: Role
+  title: string
+}
+
+export type PageMarkdown = {
+  id: string
+  markdown: string
   title: string
 }
 
@@ -211,6 +222,11 @@ export type VersionSummary = {
   recorded_at: number
   /** The number of the Version this one restored, if it was a restore. */
   restored_from?: number | null
+}
+
+export type Written = {
+  /** The Version that holds the write. None when the Page already said that. */
+  version?: VersionSummary | null
 }
 
 /** Every operation, with its input and output. */
@@ -348,10 +364,12 @@ export type Operations = {
     }
     output: RoleAfterwards
   }
-  /** Creates a Page at the end of its parent: the top of an Area, or beneath a Page or Folder. Needs the Write Role. */
+  /** Creates a Page at the end of its parent: the top of an Area, or beneath a Page or Folder, optionally with content in Markdown, which is recorded as its first Version. Needs the Write Role. */
   create_page: {
     input: {
       area_id: string
+      /** What the Page says, in Markdown; empty if absent. */
+      markdown?: string | null
       /** The Page or Folder to create it beneath; at the top of the Area if absent. */
       parent_id?: string | null
       title: string
@@ -448,6 +466,43 @@ the beginning of, so results can be shown while typing. */
       page_id: string
     }
     output: Restored
+  }
+  /** Gets the content of a Page as Markdown. Needs the Read Role. */
+  get_page_markdown: {
+    input: {
+      page_id: string
+    }
+    output: PageMarkdown
+  }
+  /** Makes the content of a Page say what the given Markdown says. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
+  replace_page: {
+    input: {
+      markdown: string
+      page_id: string
+    }
+    output: Written
+  }
+  /** Replaces one Section of a Page with the given Markdown. A Section is a heading and everything up to the next heading of the same or a higher level, so its subsections go with it; the Markdown replaces the heading too, so start it with the heading to keep one. The Section is found by its heading's text, and by its position among Sections with the same heading when there are several. Changed like replace_page, as a Version of its own. Needs the Write Role. */
+  replace_section: {
+    input: {
+      /** The text of the Section's heading, without the leading `#`s. */
+      heading: string
+      /** What replaces the Section, heading included. */
+      markdown: string
+      /** Which of the Sections with this heading, counting from 1 at the top
+of the Page. Needed only when several Sections have this heading. */
+      occurrence?: number | null
+      page_id: string
+    }
+    output: Written
+  }
+  /** Adds the given Markdown at the end of a Page, after what is there, which stays as it is. Changed like replace_page, as a Version of its own. Needs the Write Role. */
+  append_to_page: {
+    input: {
+      markdown: string
+      page_id: string
+    }
+    output: Written
   }
   /** Creates a Token that lets an Agent act as the caller, optionally only reading, only in chosen Areas, and until a date. Its value is shown only in this answer. */
   create_token: {

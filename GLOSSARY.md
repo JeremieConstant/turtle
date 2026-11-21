@@ -20,7 +20,7 @@ _Avoid_: Site, Seite, document, article
 
 **Folder**:
 A container in the tree of an Area that groups Pages and other Folders and has no content of its own.
-_Avoid_: Ordner, directory, section
+_Avoid_: Ordner, directory
 
 **Entry**:
 A Page or Folder as it sits in the tree of an Area, among its siblings.
@@ -29,6 +29,10 @@ _Avoid_: Node, item, element
 **Subtree**:
 A Page or Folder together with everything beneath it in the tree.
 _Avoid_: Subsite, Subbereich, sub-area, branch
+
+**Section**:
+A heading of a Page with everything after it up to the next heading of the same or a higher level.
+_Avoid_: Chapter, block, Abschnitt
 
 **Attachment**:
 An image or file that belongs to a Page.

@@ -2,7 +2,7 @@
 //! When they are recorded is decided in `live`, where the open Pages are.
 
 use crate::diff::{align, Fit, Step};
-use super::areas::signed_in;
+use super::content::change_page;
 use super::tree::{get_page, page_to_change, Page, PageId};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use rusqlite::{Connection, OptionalExtension};
@@ -38,11 +38,18 @@ pub struct VersionsOfPage {
     pub page_id: String,
 }
 
-/// Someone whose changes a Version holds.
+/// Someone whose changes a Version holds: a Member, or an Agent acting
+/// through one of their Tokens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Author {
+    /// The Member, or the Member whose Token the Agent acted through.
     pub id: String,
+    /// The Member's name.
     pub name: String,
+    /// The Agent's name, which is the name of the Token it acted through.
+    /// Absent when the Member made the changes themself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 /// A Version as it is listed, without its content.
@@ -182,19 +189,14 @@ fn compare_lines(from: &str, to: &str) -> Vec<ComparedLine> {
 
 pub fn restore_version(core: &Core, principal: &Principal, input: VersionOfPage) -> OpResult<Restored> {
     page_to_change(core, principal, &input.page_id)?;
-    let author = signed_in(principal)?;
     let restoring = version(&core.db(), &input.page_id, input.number)?;
-    let page = core.live().open(&input.page_id)?;
-    let recorded = core.live().restore(&page, &restoring.markdown, input.number, author)?;
-    let version = match recorded {
-        Some(number) => Some(version(&core.db(), &input.page_id, number)?.summary),
-        None => None,
-    };
+    let blocks = crate::markdown::from_markdown(&restoring.markdown);
+    let version = change_page(core, principal, &input.page_id, Some(input.number), |_| Ok(blocks))?;
     Ok(Restored { version }.into())
 }
 
 /// A Version of a Page the caller may read.
-fn version(db: &Connection, page_id: &str, number: u32) -> Result<Version, OpError> {
+pub(super) fn version(db: &Connection, page_id: &str, number: u32) -> Result<Version, OpError> {
     let found = db
         .query_row(
             "SELECT recorded_at, restored_from, markdown FROM versions WHERE page_id = ?1 AND number = ?2",
@@ -215,13 +217,14 @@ fn readable_page(core: &Core, principal: &Principal, page_id: &str) -> Result<Pa
 
 fn authors_of(db: &Connection, page_id: &str, number: u32) -> rusqlite::Result<Vec<Author>> {
     let mut statement = db.prepare(
-        "SELECT members.id, members.name FROM version_authors
+        "SELECT members.id, members.name, version_authors.agent FROM version_authors
          JOIN members ON members.id = version_authors.member_id
          WHERE version_authors.page_id = ?1 AND version_authors.number = ?2
-         ORDER BY members.name COLLATE NOCASE, members.id",
+         ORDER BY members.name COLLATE NOCASE, members.id, version_authors.agent",
     )?;
     let authors = statement.query_map(rusqlite::params![page_id, number], |row| {
-        Ok(Author { id: row.get(0)?, name: row.get(1)? })
+        let agent: String = row.get(2)?;
+        Ok(Author { id: row.get(0)?, name: row.get(1)?, agent: (!agent.is_empty()).then_some(agent) })
     })?;
     authors.collect()
 }
@@ -238,7 +241,7 @@ mod tests {
     fn page(core: &Core, writer: &Principal) -> String {
         let area = create_area(core, writer, NewArea { name: "Engineering".into() }).unwrap().output;
         let input = NewEntry { area_id: area.id, parent_id: None, title: "Handbook".into() };
-        create_page(core, writer, input).unwrap().output.id
+        create_page(core, writer, input.into()).unwrap().output.id
     }
 
     fn id_of(principal: &Principal) -> &str {
@@ -249,7 +252,8 @@ mod tests {
     /// Has `author` change the Page to say the given Markdown, as an editor would.
     fn edit(core: &TestCore, page_id: &str, author: &Principal, markdown: &str) {
         let page = core.live().open(page_id).unwrap();
-        core.live().write(&page, &crate::markdown::from_markdown(markdown), id_of(author));
+        let author = crate::live::Author::member(id_of(author));
+        core.live().write(&page, &crate::markdown::from_markdown(markdown), &author);
     }
 
     fn versions(core: &Core, reader: &Principal, page_id: &str) -> Vec<VersionSummary> {

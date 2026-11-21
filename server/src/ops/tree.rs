@@ -12,7 +12,7 @@ use std::collections::HashMap;
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "create_page",
-        "Creates a Page at the end of its parent: the top of an Area, or beneath a Page or Folder. Needs the Write Role.",
+        "Creates a Page at the end of its parent: the top of an Area, or beneath a Page or Folder, optionally with content in Markdown, which is recorded as its first Version. Needs the Write Role.",
         create_page,
     );
     catalogue.add(
@@ -70,6 +70,22 @@ pub struct Tree {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct NewPage {
+    #[serde(flatten)]
+    pub entry: NewEntry,
+    /// What the Page says, in Markdown; empty if absent.
+    #[serde(default)]
+    pub markdown: Option<String>,
+}
+
+impl From<NewEntry> for NewPage {
+    /// An empty Page.
+    fn from(entry: NewEntry) -> NewPage {
+        NewPage { entry, markdown: None }
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct NewEntry {
     pub area_id: String,
     /// The Page or Folder to create it beneath; at the top of the Area if absent.
@@ -105,8 +121,13 @@ pub struct TreeOfArea {
     pub area_id: String,
 }
 
-pub fn create_page(core: &Core, principal: &Principal, input: NewEntry) -> OpResult<Entry> {
-    create(core, principal, input, Kind::Page)
+pub fn create_page(core: &Core, principal: &Principal, input: NewPage) -> OpResult<Entry> {
+    let created = create(core, principal, input.entry, Kind::Page)?;
+    if let Some(markdown) = input.markdown {
+        let page_id = created.output.id.clone();
+        super::content::replace_page(core, principal, super::content::NewContent { page_id, markdown })?;
+    }
+    Ok(created)
 }
 
 pub fn create_folder(core: &Core, principal: &Principal, input: NewEntry) -> OpResult<Entry> {
@@ -361,7 +382,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area = area(&core, &grace);
 
-        let page = create_page(&core, &grace, at_top(&area, "Onboarding")).unwrap().output;
+        let page = create_page(&core, &grace, at_top(&area, "Onboarding").into()).unwrap().output;
 
         assert_eq!(page.kind, Kind::Page);
         assert_eq!(page.title, "Onboarding");
@@ -387,12 +408,12 @@ mod tests {
         let area = area(&core, &grace);
 
         let guides = create_folder(&core, &grace, at_top(&area, "Guides")).unwrap().output;
-        let handbook = create_page(&core, &grace, at_top(&area, "Handbook")).unwrap().output;
-        create_page(&core, &grace, beneath(&area, &guides, "Setup")).unwrap();
+        let handbook = create_page(&core, &grace, at_top(&area, "Handbook").into()).unwrap().output;
+        create_page(&core, &grace, beneath(&area, &guides, "Setup").into()).unwrap();
         let archive = create_folder(&core, &grace, beneath(&area, &guides, "Archive")).unwrap().output;
-        create_page(&core, &grace, beneath(&area, &archive, "Old setup")).unwrap();
-        create_page(&core, &grace, beneath(&area, &handbook, "Holidays")).unwrap();
-        create_page(&core, &grace, beneath(&area, &guides, "Deploying")).unwrap();
+        create_page(&core, &grace, beneath(&area, &archive, "Old setup").into()).unwrap();
+        create_page(&core, &grace, beneath(&area, &handbook, "Holidays").into()).unwrap();
+        create_page(&core, &grace, beneath(&area, &guides, "Deploying").into()).unwrap();
         create_folder(&core, &grace, at_top(&area, "Attic")).unwrap();
 
         assert_eq!(guides.kind, Kind::Folder);
@@ -429,7 +450,7 @@ mod tests {
             (&Principal::Anonymous, Err("not_permitted")),
         ];
         for (principal, expected) in table {
-            expect(create_page(&core, principal, at_top(&area, "Notes")), expected, principal);
+            expect(create_page(&core, principal, at_top(&area, "Notes").into()), expected, principal);
             expect(create_folder(&core, principal, at_top(&area, "Notes")), expected, principal);
         }
 
@@ -447,11 +468,11 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let engineering = area(&core, &grace);
         let sales = area(&core, &grace);
-        let elsewhere = create_page(&core, &grace, at_top(&sales, "Pricing")).unwrap().output;
+        let elsewhere = create_page(&core, &grace, at_top(&sales, "Pricing").into()).unwrap().output;
         let missing = Entry { id: "no-such-node".into(), ..elsewhere.clone() };
 
         for parent in [&elsewhere, &missing] {
-            let refused = create_page(&core, &grace, beneath(&engineering, parent, "Notes")).unwrap_err();
+            let refused = create_page(&core, &grace, beneath(&engineering, parent, "Notes").into()).unwrap_err();
             assert_eq!(refused.kind(), "not_found", "{parent:?}");
         }
         assert!(outline(&core, &grace, &engineering).is_empty());
@@ -464,10 +485,10 @@ mod tests {
         let area = area(&core, &grace);
         let too_long = "x".repeat(MAX_TITLE_LENGTH + 1);
         for title in ["", "  ", too_long.as_str()] {
-            let refused = create_page(&core, &grace, at_top(&area, title)).unwrap_err();
+            let refused = create_page(&core, &grace, at_top(&area, title).into()).unwrap_err();
             assert_eq!(refused.kind(), "invalid_input", "{title:?}");
         }
-        let page = create_page(&core, &grace, at_top(&area, "  Notes ")).unwrap().output;
+        let page = create_page(&core, &grace, at_top(&area, "  Notes ").into()).unwrap().output;
         assert_eq!(page.title, "Notes");
         assert_eq!(outline(&core, &grace, &area), ["page Notes"]);
     }
@@ -481,9 +502,9 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let area = area(&core, &grace);
-        let page = create_page(&core, &grace, at_top(&area, "Notes")).unwrap().output;
+        let page = create_page(&core, &grace, at_top(&area, "Notes").into()).unwrap().output;
         let folder = create_folder(&core, &grace, at_top(&area, "Drafts")).unwrap().output;
-        create_page(&core, &grace, beneath(&area, &folder, "Idea")).unwrap();
+        create_page(&core, &grace, beneath(&area, &folder, "Idea").into()).unwrap();
 
         let page = rename_page(&core, &grace, renamed(&page, " Meeting notes ")).unwrap().output;
         let folder = rename_folder(&core, &grace, renamed(&folder, "Meeting notes")).unwrap().output;
@@ -502,7 +523,7 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let area = area(&core, &grace);
-        let page = create_page(&core, &grace, at_top(&area, "Notes")).unwrap().output;
+        let page = create_page(&core, &grace, at_top(&area, "Notes").into()).unwrap().output;
         let folder = create_folder(&core, &grace, at_top(&area, "Drafts")).unwrap().output;
         let writer = member(&core, "Ken", false);
         let reader = member(&core, "Dennis", false);
@@ -534,7 +555,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area = area(&core, &grace);
         let folder = create_folder(&core, &grace, at_top(&area, "Guides")).unwrap().output;
-        let page = create_page(&core, &grace, beneath(&area, &folder, "Setup")).unwrap().output;
+        let page = create_page(&core, &grace, beneath(&area, &folder, "Setup").into()).unwrap().output;
         let reader = member(&core, "Dennis", false);
         let outsider = member(&core, "Linus", false);
         give_role(&core, &area.id, &reader, Role::Read);
@@ -563,7 +584,7 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let area = area(&core, &grace);
-        let page = create_page(&core, &grace, at_top(&area, "Notes")).unwrap().output;
+        let page = create_page(&core, &grace, at_top(&area, "Notes").into()).unwrap().output;
 
         rename_page(&core, &grace, renamed(&page, "Minutes")).unwrap();
 
@@ -576,7 +597,7 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let area = area(&core, &grace);
-        let page = create_page(&core, &grace, at_top(&area, "Notes")).unwrap().output;
+        let page = create_page(&core, &grace, at_top(&area, "Notes").into()).unwrap().output;
         let writer = member(&core, "Ken", false);
         let reader = member(&core, "Dennis", false);
         let outsider = member(&core, "Linus", false);

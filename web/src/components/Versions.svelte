@@ -88,7 +88,7 @@
   {#if versions === null}
     <!-- Loading. -->
   {:else if versions.length === 0}
-    <p class="muted">No Versions yet. One is recorded when the last editor leaves, and every two minutes while editing goes on.</p>
+    <p class="muted">No Versions yet. One is recorded when the last editor leaves, every two minutes while editing goes on, and for each change an Agent makes.</p>
   {:else}
     <ol>
       {#each versions as listed (listed.number)}
