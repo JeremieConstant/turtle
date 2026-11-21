@@ -27,6 +27,19 @@ export type Member = {
   workspace_admin: boolean
 }
 
+export type MemberEntry = {
+  /** False once the Member has been deactivated. */
+  active: boolean
+  email: string
+  id: string
+  name: string
+  workspace_admin: boolean
+}
+
+export type MemberList = {
+  members: MemberEntry[]
+}
+
 export type Page = {
   /** The Area the Page is in. */
   area: Area
@@ -43,6 +56,14 @@ export type Session = {
   member?: Member | null
   /** True until the first account has been created. */
   setup_required: boolean
+}
+
+export type SingleUseLink = {
+  /** The address of the link, starting with a slash; it goes after the
+address Turtle is reached at. */
+  address: string
+  /** When the link stops working, in seconds since the Unix epoch. */
+  expires_at: number
 }
 
 export type Tree = {
@@ -79,6 +100,61 @@ export type Operations = {
   sign_out: {
     input: Record<string, never>
     output: null
+  }
+  /** Invites a person by email address and returns a single-use link for them that expires. Only for a Workspace Admin. */
+  invite_member: {
+    input: {
+      email: string
+    }
+    output: SingleUseLink
+  }
+  /** Accepts an invitation: the invited person sets name and password, becomes a Member and is signed in. */
+  accept_invitation: {
+    input: {
+      name: string
+      password: string
+      /** The secret at the end of the invitation link. */
+      secret: string
+    }
+    output: Member
+  }
+  /** Lists every Member by name, deactivated ones included. Only for a Workspace Admin. */
+  list_members: {
+    input: Record<string, never>
+    output: MemberList
+  }
+  /** Deactivates a Member: their sessions end at once and they can no longer sign in. Only for a Workspace Admin. */
+  deactivate_member: {
+    input: {
+      id: string
+    }
+    output: MemberEntry
+  }
+  /** Makes a Member Workspace Admin, or takes that away. The last Workspace Admin keeps it. Only for a Workspace Admin. */
+  set_workspace_admin: {
+    input: {
+      /** The Member's ID. */
+      id: string
+      /** Whether they are to be Workspace Admin. */
+      workspace_admin: boolean
+    }
+    output: MemberEntry
+  }
+  /** Creates a single-use link that lets a Member set a new password; it expires. Only for a Workspace Admin. */
+  create_password_reset: {
+    input: {
+      id: string
+    }
+    output: SingleUseLink
+  }
+  /** Sets a new password through a reset link, ends the Member's other sessions and signs them in. */
+  reset_password: {
+    input: {
+      password: string
+      /** The secret at the end of the reset link. */
+      secret: string
+    }
+    output: Member
   }
   /** Creates an Area. The caller becomes its Admin and is the only one with access. */
   create_area: {

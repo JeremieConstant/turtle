@@ -5,12 +5,22 @@ export type Route =
   | { screen: 'sign-in' }
   | { screen: 'area'; id: string }
   | { screen: 'page'; id: string }
+  | { screen: 'members' }
+  /** Where an invitation link leads; the secret is the link's last part. */
+  | { screen: 'invitation'; secret: string }
+  /** Where a password reset link leads. */
+  | { screen: 'password-reset'; secret: string }
   | { screen: 'not-found' }
 
 export function parseAddress(pathname: string): Route {
   if (pathname === '/') return { screen: 'home' }
   if (pathname === '/setup') return { screen: 'setup' }
   if (pathname === '/sign-in') return { screen: 'sign-in' }
+  if (pathname === '/settings/members') return { screen: 'members' }
+  const link = pathname.match(/^\/(join|reset-password)\/([^/]+)$/)
+  if (link) {
+    return link[1] === 'join' ? { screen: 'invitation', secret: link[2] } : { screen: 'password-reset', secret: link[2] }
+  }
   // The readable part is only decoration, so it is matched and ignored.
   const addressed = pathname.match(/^\/([ap])\/([^/]+)(?:\/[^/]*)?\/?$/)
   if (addressed) {

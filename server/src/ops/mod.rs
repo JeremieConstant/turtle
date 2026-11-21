@@ -7,6 +7,7 @@
 
 pub mod accounts;
 pub mod areas;
+pub mod members;
 pub mod permissions;
 pub mod tree;
 
@@ -236,6 +237,7 @@ pub fn catalogue() -> Catalogue {
         operations: Vec::new(),
     };
     accounts::register(&mut catalogue);
+    members::register(&mut catalogue);
     areas::register(&mut catalogue);
     tree::register(&mut catalogue);
     catalogue
@@ -267,8 +269,7 @@ pub(crate) mod testing {
         }
     }
 
-    /// A signed-in Member, created directly because inviting Members is not
-    /// an operation yet.
+    /// A signed-in Member, created directly so a test needs no invitation.
     pub fn member(core: &Core, name: &str, workspace_admin: bool) -> Principal {
         let id = format!("member-{}", name.to_lowercase());
         core.db()
@@ -327,6 +328,13 @@ mod tests {
             "create_first_account",
             "sign_in",
             "sign_out",
+            "invite_member",
+            "accept_invitation",
+            "list_members",
+            "deactivate_member",
+            "set_workspace_admin",
+            "create_password_reset",
+            "reset_password",
             "create_area",
             "get_area",
             "list_areas",

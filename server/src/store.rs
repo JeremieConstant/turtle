@@ -59,6 +59,18 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE nodes ADD COLUMN title TEXT NOT NULL DEFAULT '';
      ALTER TABLE nodes ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
      CREATE INDEX nodes_in_order ON nodes (parent_id, position);",
+    // A deactivated Member keeps their account but cannot sign in. Links for
+    // invitations and password resets are stored by a digest of their secret,
+    // and deleted once used.
+    "ALTER TABLE members ADD COLUMN deactivated_at INTEGER;
+     CREATE TABLE single_use_links (
+         id TEXT PRIMARY KEY,
+         kind TEXT NOT NULL CHECK (kind IN ('invitation', 'password_reset')),
+         email TEXT,
+         member_id TEXT REFERENCES members (id) ON DELETE CASCADE,
+         created_at INTEGER NOT NULL,
+         expires_at INTEGER NOT NULL
+     );",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

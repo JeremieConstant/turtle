@@ -13,6 +13,7 @@ Addresses are hard to change once people bookmark and share them:
 - `/p/{id}/{title}` for a Page and `/a/{id}/{name}` for an Area. A Page's address does not contain its Area, so moving it to another Area breaks no link.
 - The title part is only for readability. An address with an outdated or missing title still works and is redirected to the current one.
 - `/search`, `/settings/...` and `/setup` for the remaining screens.
+- `/join/{secret}` and `/reset-password/{secret}` for the single-use links a Workspace Admin passes on.
 
 ## Considered Options
 

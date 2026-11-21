@@ -68,3 +68,18 @@ test('a Page address with an outdated title still leads to the same Page', () =>
   expect(after).not.toBe(before)
   expect(parseAddress(before)).toEqual(parseAddress(after))
 })
+
+test('the Members screen has its own address', () => {
+  expect(parseAddress('/settings/members')).toEqual({ screen: 'members' })
+})
+
+test('an invitation link and a password reset link carry their secret', () => {
+  expect(parseAddress('/join/ab12')).toEqual({ screen: 'invitation', secret: 'ab12' })
+  expect(parseAddress('/reset-password/cd34')).toEqual({ screen: 'password-reset', secret: 'cd34' })
+})
+
+test('a link without a secret, or with more after it, is not found', () => {
+  for (const address of ['/join', '/join/', '/join/ab/cd', '/reset-password/', '/reset-password/ab/cd']) {
+    expect(parseAddress(address), address).toEqual({ screen: 'not-found' })
+  }
+})

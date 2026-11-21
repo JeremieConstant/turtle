@@ -10,6 +10,10 @@
     router.navigate('/')
   }
 
+  function goToMembers(event: MouseEvent) {
+    router.follow(event, '/settings/members')
+  }
+
   async function signOut() {
     await session.signOut()
     router.navigate('/sign-in')
@@ -19,6 +23,9 @@
 <header>
   <a class="brand" href="/" onclick={goHome}>Turtle</a>
   {@render children?.()}
+  {#if session.member?.workspace_admin}
+    <a class="members" href="/settings/members" onclick={goToMembers}>Members</a>
+  {/if}
   <button type="button" onclick={signOut}>Sign out</button>
 </header>
 
@@ -35,6 +42,14 @@
   .brand {
     font-weight: var(--weight-strong);
     text-decoration: none;
+  }
+
+  .members {
+    margin-left: auto;
+  }
+
+  .members + button {
+    margin-left: 0;
   }
 
   button {

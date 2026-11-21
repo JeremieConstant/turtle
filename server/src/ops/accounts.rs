@@ -100,26 +100,12 @@ pub fn create_first_account(
     _: &Principal,
     input: NewAccount,
 ) -> OpResult<Member> {
-    let name = input.name.trim();
-    if name.is_empty() {
-        return Err(OpError::InvalidInput("Enter a name.".into()));
-    }
-    let email = normalize_email(&input.email);
-    let well_formed = email
-        .split_once('@')
-        .is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.') && !email.contains(char::is_whitespace));
-    if !well_formed {
-        return Err(OpError::InvalidInput("Enter a valid email address.".into()));
-    }
-    let length = input.password.chars().count();
-    if !(MIN_PASSWORD_LENGTH..=MAX_PASSWORD_LENGTH).contains(&length) {
-        return Err(OpError::InvalidInput(format!(
-            "Choose a password of {MIN_PASSWORD_LENGTH} to {MAX_PASSWORD_LENGTH} characters."
-        )));
-    }
+    let name = valid_name(&input.name)?;
+    let email = valid_email(&input.email)?;
+    check_password(&input.password)?;
     let member = Member {
         id: random_hex(16)?,
-        name: name.to_string(),
+        name,
         email,
         workspace_admin: true,
     };
@@ -154,7 +140,8 @@ pub fn sign_in(core: &Core, _: &Principal, input: Credentials) -> OpResult<Membe
         return Err(refused());
     }
     let found = core.db().query_row(
-        "SELECT id, name, email, workspace_admin, password_hash FROM members WHERE email = ?1",
+        "SELECT id, name, email, workspace_admin, password_hash FROM members
+         WHERE email = ?1 AND deactivated_at IS NULL",
         [normalize_email(&input.email)],
         |row| Ok((read_member(row)?, row.get::<_, String>(4)?)),
     );
@@ -197,7 +184,8 @@ pub fn principal_for_session(core: &Core, secret: &str) -> Result<Principal, OpE
     let found = core.db().query_row(
         "SELECT members.id, members.workspace_admin
          FROM sessions JOIN members ON members.id = sessions.member_id
-         WHERE sessions.id = ?1 AND sessions.expires_at > ?2",
+         WHERE sessions.id = ?1 AND sessions.expires_at > ?2
+           AND members.deactivated_at IS NULL",
         rusqlite::params![session.0, core.now()],
         |row| Ok((row.get(0)?, row.get(1)?)),
     );
@@ -212,7 +200,36 @@ pub fn principal_for_session(core: &Core, secret: &str) -> Result<Principal, OpE
     }
 }
 
-fn read_member(row: &rusqlite::Row) -> rusqlite::Result<Member> {
+pub(super) fn valid_name(name: &str) -> Result<String, OpError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(OpError::InvalidInput("Enter a name.".into()));
+    }
+    Ok(name.to_string())
+}
+
+pub(super) fn valid_email(email: &str) -> Result<String, OpError> {
+    let email = normalize_email(email);
+    let well_formed = email
+        .split_once('@')
+        .is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.') && !email.contains(char::is_whitespace));
+    if !well_formed {
+        return Err(OpError::InvalidInput("Enter a valid email address.".into()));
+    }
+    Ok(email)
+}
+
+pub(super) fn check_password(password: &str) -> Result<(), OpError> {
+    let length = password.chars().count();
+    if !(MIN_PASSWORD_LENGTH..=MAX_PASSWORD_LENGTH).contains(&length) {
+        return Err(OpError::InvalidInput(format!(
+            "Choose a password of {MIN_PASSWORD_LENGTH} to {MAX_PASSWORD_LENGTH} characters."
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn read_member(row: &rusqlite::Row) -> rusqlite::Result<Member> {
     Ok(Member {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -227,7 +244,7 @@ fn any_member_exists(db: &Connection) -> rusqlite::Result<bool> {
 
 /// Starts a session for a Member and returns its secret. Only a hash of the
 /// secret is stored, so reading the database does not let anyone sign in.
-fn start_session(core: &Core, db: &Connection, member_id: &str) -> Result<String, OpError> {
+pub(super) fn start_session(core: &Core, db: &Connection, member_id: &str) -> Result<String, OpError> {
     let secret = random_hex(32)?;
     let now = core.now();
     db.execute(
@@ -238,10 +255,16 @@ fn start_session(core: &Core, db: &Connection, member_id: &str) -> Result<String
 }
 
 fn session_id(secret: &str) -> SessionId {
-    SessionId(hex(&Sha256::digest(secret.as_bytes())))
+    SessionId(digest(secret))
 }
 
-fn hash_password(password: &str) -> Result<String, OpError> {
+/// What is stored in place of a secret, so reading the database does not
+/// reveal the secret itself.
+pub(super) fn digest(secret: &str) -> String {
+    hex(&Sha256::digest(secret.as_bytes()))
+}
+
+pub(super) fn hash_password(password: &str) -> Result<String, OpError> {
     // The default is Argon2id.
     let hash = Argon2::default()
         .hash_password(password.as_bytes())
@@ -250,7 +273,7 @@ fn hash_password(password: &str) -> Result<String, OpError> {
 }
 
 /// Email addresses are compared without regard to case or surrounding spaces.
-fn normalize_email(email: &str) -> String {
+pub(super) fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
