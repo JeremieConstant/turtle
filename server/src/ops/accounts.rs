@@ -271,7 +271,7 @@ fn dummy_hash() -> &'static str {
     })
 }
 
-fn random_hex(bytes: usize) -> Result<String, OpError> {
+pub(super) fn random_hex(bytes: usize) -> Result<String, OpError> {
     let mut buffer = vec![0u8; bytes];
     getrandom::fill(&mut buffer).map_err(|error| anyhow!("no randomness available: {error}"))?;
     Ok(hex(&buffer))

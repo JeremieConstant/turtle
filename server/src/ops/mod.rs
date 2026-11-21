@@ -6,6 +6,8 @@
 //! MCP tools) are generated from it, so nothing can exist in only one of them.
 
 pub mod accounts;
+pub mod areas;
+pub mod permissions;
 
 use rusqlite::Connection;
 use schemars::JsonSchema;
@@ -233,6 +235,7 @@ pub fn catalogue() -> Catalogue {
         operations: Vec::new(),
     };
     accounts::register(&mut catalogue);
+    areas::register(&mut catalogue);
     catalogue
 }
 
@@ -262,6 +265,24 @@ pub(crate) mod testing {
         }
     }
 
+    /// A signed-in Member, created directly because inviting Members is not
+    /// an operation yet.
+    pub fn member(core: &Core, name: &str, workspace_admin: bool) -> Principal {
+        let id = format!("member-{}", name.to_lowercase());
+        core.db()
+            .execute(
+                "INSERT INTO members (id, email, name, password_hash, workspace_admin, created_at)
+                 VALUES (?1, ?2, ?3, 'no password', ?4, 0)",
+                rusqlite::params![id, format!("{id}@example.org"), name, workspace_admin],
+            )
+            .unwrap();
+        Principal::Member {
+            id,
+            workspace_admin,
+            session: None,
+        }
+    }
+
     pub fn fresh() -> TestCore {
         let dir = tempfile::tempdir().unwrap();
         let mut core = Core::open(&dir.path().join("turtle.db")).unwrap();
@@ -285,7 +306,17 @@ mod tests {
     fn every_operation_is_described_in_the_catalogue() {
         let catalogue = catalogue();
         let names: Vec<_> = catalogue.operations().iter().map(|op| op.name).collect();
-        for expected in ["get_session", "create_first_account", "sign_in", "sign_out"] {
+        let expected_names = [
+            "get_session",
+            "create_first_account",
+            "sign_in",
+            "sign_out",
+            "create_area",
+            "get_area",
+            "list_areas",
+            "rename_area",
+        ];
+        for expected in expected_names {
             assert!(names.contains(&expected), "{expected} is missing from {names:?}");
         }
         for operation in catalogue.operations() {

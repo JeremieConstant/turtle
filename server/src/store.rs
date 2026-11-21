@@ -31,6 +31,28 @@ const MIGRATIONS: &[&str] = &[
          created_at INTEGER NOT NULL,
          expires_at INTEGER NOT NULL
      );",
+    // An Area's tree hangs from a root node without a parent. Grants are given
+    // on nodes, so a Subtree can later carry its own (Inheritance).
+    "CREATE TABLE areas (
+         id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         created_at INTEGER NOT NULL
+     );
+     CREATE TABLE nodes (
+         id TEXT PRIMARY KEY,
+         area_id TEXT NOT NULL REFERENCES areas (id) ON DELETE CASCADE,
+         parent_id TEXT REFERENCES nodes (id) ON DELETE CASCADE,
+         kind TEXT NOT NULL,
+         created_at INTEGER NOT NULL
+     );
+     CREATE UNIQUE INDEX one_root_per_area ON nodes (area_id) WHERE parent_id IS NULL;
+     CREATE INDEX nodes_by_parent ON nodes (parent_id);
+     CREATE TABLE grants (
+         node_id TEXT NOT NULL REFERENCES nodes (id) ON DELETE CASCADE,
+         holder TEXT NOT NULL,
+         role TEXT NOT NULL CHECK (role IN ('read', 'write', 'admin')),
+         PRIMARY KEY (node_id, holder)
+     );",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

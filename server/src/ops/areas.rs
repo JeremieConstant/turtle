@@ -1,0 +1,361 @@
+//! Areas: creating them, listing the ones a principal can read, renaming them.
+
+use super::accounts::{random_hex, Nothing};
+use super::permissions::{self, Holder, Role};
+use super::{Catalogue, Core, OpError, OpResult, Principal};
+use rusqlite::{Connection, OptionalExtension};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+pub(super) fn register(catalogue: &mut Catalogue) {
+    catalogue.add(
+        "create_area",
+        "Creates an Area. The caller becomes its Admin and is the only one with access.",
+        create_area,
+    );
+    catalogue.add(
+        "get_area",
+        "Gets one Area by its ID. An Area the caller cannot read is reported as not found.",
+        get_area,
+    );
+    catalogue.add(
+        "list_areas",
+        "Lists the Areas the caller can read, by name.",
+        list_areas,
+    );
+    catalogue.add(
+        "rename_area",
+        "Renames an Area. Needs the Admin Role on it.",
+        rename_area,
+    );
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Area {
+    pub id: String,
+    pub name: String,
+    /// The Role the caller holds on the Area.
+    pub role: Role,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct AreaList {
+    pub areas: Vec<Area>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NewArea {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AreaId {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RenameArea {
+    pub id: String,
+    pub name: String,
+}
+
+/// Long enough for any sensible name, short enough to fit a list.
+const MAX_NAME_LENGTH: usize = 200;
+
+pub fn create_area(core: &Core, principal: &Principal, input: NewArea) -> OpResult<Area> {
+    let member_id = signed_in(principal)?;
+    let name = valid_name(&input.name)?;
+    let area_id = random_hex(16)?;
+    let root_id = random_hex(16)?;
+    let now = core.now();
+
+    let mut db = core.db();
+    let transaction = db.transaction()?;
+    transaction.execute(
+        "INSERT INTO areas (id, name, created_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![area_id, name, now],
+    )?;
+    transaction.execute(
+        "INSERT INTO nodes (id, area_id, parent_id, kind, created_at) VALUES (?1, ?2, NULL, 'root', ?3)",
+        rusqlite::params![root_id, area_id, now],
+    )?;
+    // A new Area is private: its creator's Grant is the only one.
+    permissions::grant(&transaction, &root_id, &Holder::Member(member_id.to_string()), Role::Admin)?;
+    transaction.commit()?;
+
+    Ok(Area {
+        id: area_id,
+        name,
+        role: Role::Admin,
+    }
+    .into())
+}
+
+pub fn get_area(core: &Core, principal: &Principal, input: AreaId) -> OpResult<Area> {
+    signed_in(principal)?;
+    Ok(readable_area(&core.db(), principal, &input.id)?.into())
+}
+
+pub fn rename_area(core: &Core, principal: &Principal, input: RenameArea) -> OpResult<Area> {
+    signed_in(principal)?;
+    let db = core.db();
+    // Access is checked before the input, so an unreadable Area stays hidden
+    // whatever name is sent.
+    let area = readable_area(&db, principal, &input.id)?;
+    if area.role < Role::Admin {
+        return Err(OpError::NotPermitted(
+            "Only an Admin of this Area can rename it.".into(),
+        ));
+    }
+    let name = valid_name(&input.name)?;
+    db.execute(
+        "UPDATE areas SET name = ?1 WHERE id = ?2",
+        rusqlite::params![name, area.id],
+    )?;
+    Ok(Area { name, ..area }.into())
+}
+
+/// An Area the principal can read. One they cannot read is reported exactly
+/// like one that does not exist, so its existence is not revealed.
+fn readable_area(db: &Connection, principal: &Principal, id: &str) -> Result<Area, OpError> {
+    let not_found = || OpError::NotFound("There is no such Area.".into());
+    let found = db
+        .query_row(
+            "SELECT areas.name, nodes.id
+             FROM areas JOIN nodes ON nodes.area_id = areas.id AND nodes.parent_id IS NULL
+             WHERE areas.id = ?1",
+            [id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let (name, root_id) = found.ok_or_else(not_found)?;
+    let role = permissions::role_on(db, principal, &root_id)?.ok_or_else(not_found)?;
+    Ok(Area {
+        id: id.to_string(),
+        name,
+        role,
+    })
+}
+
+pub fn list_areas(core: &Core, principal: &Principal, _: Nothing) -> OpResult<AreaList> {
+    signed_in(principal)?;
+    let db = core.db();
+    let mut statement = db.prepare(
+        "SELECT areas.id, areas.name, nodes.id
+         FROM areas JOIN nodes ON nodes.area_id = areas.id AND nodes.parent_id IS NULL
+         ORDER BY areas.name COLLATE NOCASE, areas.id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+    let mut areas = Vec::new();
+    for row in rows {
+        let (id, name, root_id) = row?;
+        if let Some(role) = permissions::role_on(&db, principal, &root_id)? {
+            areas.push(Area { id, name, role });
+        }
+    }
+    Ok(AreaList { areas }.into())
+}
+
+/// The acting Member's ID; nobody else may work with Areas.
+fn signed_in(principal: &Principal) -> Result<&str, OpError> {
+    match principal {
+        Principal::Member { id, .. } => Ok(id),
+        Principal::Anonymous => Err(OpError::NotPermitted("Sign in first.".into())),
+    }
+}
+
+fn valid_name(name: &str) -> Result<String, OpError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(OpError::InvalidInput("Enter a name for the Area.".into()));
+    }
+    if name.chars().count() > MAX_NAME_LENGTH {
+        return Err(OpError::InvalidInput(format!(
+            "Choose a name of at most {MAX_NAME_LENGTH} characters."
+        )));
+    }
+    Ok(name.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops::testing::{fresh, member};
+
+    fn named(name: &str) -> NewArea {
+        NewArea { name: name.into() }
+    }
+
+    fn names(core: &Core, principal: &Principal) -> Vec<String> {
+        let list = list_areas(core, principal, Nothing {}).unwrap().output;
+        list.areas.into_iter().map(|area| area.name).collect()
+    }
+
+    #[test]
+    fn a_member_creates_an_area_and_becomes_its_admin() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+
+        let area = create_area(&core, &grace, named("Engineering")).unwrap().output;
+
+        assert_eq!(area.name, "Engineering");
+        assert_eq!(area.role, Role::Admin);
+        assert_eq!(names(&core, &grace), ["Engineering"]);
+    }
+
+    #[test]
+    fn a_new_area_is_invisible_to_other_members() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let linus = member(&core, "Linus", false);
+
+        create_area(&core, &grace, named("Secret project")).unwrap();
+        create_area(&core, &linus, named("Kernel")).unwrap();
+
+        assert_eq!(names(&core, &grace), ["Secret project"]);
+        assert_eq!(names(&core, &linus), ["Kernel"]);
+    }
+
+    #[test]
+    fn a_workspace_admin_sees_every_area_as_its_admin() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let ada = member(&core, "Ada", true);
+        create_area(&core, &grace, named("Secret project")).unwrap();
+        create_area(&core, &grace, named("Handbook")).unwrap();
+
+        let list = list_areas(&core, &ada, Nothing {}).unwrap().output;
+
+        let seen: Vec<_> = list.areas.iter().map(|area| (area.name.as_str(), area.role)).collect();
+        assert_eq!(seen, [("Handbook", Role::Admin), ("Secret project", Role::Admin)]);
+    }
+
+    #[test]
+    fn an_area_one_can_read_is_found_by_its_id() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let ada = member(&core, "Ada", true);
+        let created = create_area(&core, &grace, named("Engineering")).unwrap().output;
+
+        let id = AreaId { id: created.id.clone() };
+        assert_eq!(get_area(&core, &grace, id).unwrap().output, created);
+        let id = AreaId { id: created.id.clone() };
+        assert_eq!(get_area(&core, &ada, id).unwrap().output.role, Role::Admin);
+    }
+
+    #[test]
+    fn an_area_one_cannot_read_answers_like_one_that_does_not_exist() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let linus = member(&core, "Linus", false);
+        let secret = create_area(&core, &grace, named("Secret project")).unwrap().output;
+
+        let hidden = get_area(&core, &linus, AreaId { id: secret.id }).unwrap_err();
+        let missing = get_area(&core, &linus, AreaId { id: "no-such-area".into() }).unwrap_err();
+
+        assert_eq!(hidden.kind(), "not_found");
+        assert_eq!(hidden.kind(), missing.kind());
+        assert_eq!(hidden.message(), missing.message());
+        assert!(!hidden.message().contains("Secret"));
+    }
+
+    /// Gives a Member a Role on an Area. Grants are not an operation yet.
+    fn give_role(core: &Core, area: &Area, with: &Principal, role: Role) {
+        let Principal::Member { id, .. } = with else { panic!("only Members get Grants") };
+        let db = core.db();
+        let root: String = db
+            .query_row(
+                "SELECT id FROM nodes WHERE area_id = ?1 AND parent_id IS NULL",
+                [&area.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        permissions::grant(&db, &root, &Holder::Member(id.clone()), role).unwrap();
+    }
+
+    #[test]
+    fn a_member_with_a_grant_sees_the_area_with_that_role() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let linus = member(&core, "Linus", false);
+        let area = create_area(&core, &grace, named("Engineering")).unwrap().output;
+
+        give_role(&core, &area, &linus, Role::Read);
+
+        let list = list_areas(&core, &linus, Nothing {}).unwrap().output;
+        assert_eq!(list.areas, [Area { role: Role::Read, ..area }]);
+    }
+
+    #[test]
+    fn only_an_admin_of_the_area_can_rename_it() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area = create_area(&core, &grace, named("Engineering")).unwrap().output;
+        let ada = member(&core, "Ada", true);
+        let admin = member(&core, "Barbara", false);
+        let writer = member(&core, "Ken", false);
+        let reader = member(&core, "Dennis", false);
+        let outsider = member(&core, "Linus", false);
+        give_role(&core, &area, &admin, Role::Admin);
+        give_role(&core, &area, &writer, Role::Write);
+        give_role(&core, &area, &reader, Role::Read);
+
+        let table = [
+            (&grace, Ok(())),
+            (&ada, Ok(())),
+            (&admin, Ok(())),
+            (&writer, Err("not_permitted")),
+            (&reader, Err("not_permitted")),
+            (&outsider, Err("not_found")),
+            (&Principal::Anonymous, Err("not_permitted")),
+        ];
+        for (index, (principal, expected)) in table.into_iter().enumerate() {
+            let name = format!("Engineering {index}");
+            let input = RenameArea { id: area.id.clone(), name: name.clone() };
+            let outcome = rename_area(&core, principal, input);
+            match expected {
+                Ok(()) => assert_eq!(outcome.unwrap().output.name, name, "{principal:?}"),
+                Err(kind) => assert_eq!(outcome.unwrap_err().kind(), kind, "{principal:?}"),
+            }
+        }
+        let current = get_area(&core, &grace, AreaId { id: area.id }).unwrap().output;
+        assert_eq!(current.name, "Engineering 2");
+    }
+
+    #[test]
+    fn a_rename_needs_a_valid_name() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area = create_area(&core, &grace, named("Engineering")).unwrap().output;
+
+        let refused = rename_area(&core, &grace, RenameArea { id: area.id.clone(), name: " ".into() });
+        assert_eq!(refused.unwrap_err().kind(), "invalid_input");
+        assert_eq!(names(&core, &grace), ["Engineering"]);
+    }
+
+    #[test]
+    fn nobody_signed_in_can_create_or_list_areas() {
+        let core = fresh();
+        let refused = create_area(&core, &Principal::Anonymous, named("Engineering")).unwrap_err();
+        assert_eq!(refused.kind(), "not_permitted");
+        let refused = list_areas(&core, &Principal::Anonymous, Nothing {}).unwrap_err();
+        assert_eq!(refused.kind(), "not_permitted");
+    }
+
+    #[test]
+    fn an_area_needs_a_name_of_sensible_length() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let too_long = "x".repeat(MAX_NAME_LENGTH + 1);
+        for name in ["", "   ", too_long.as_str()] {
+            let refused = create_area(&core, &grace, named(name)).unwrap_err();
+            assert_eq!(refused.kind(), "invalid_input", "{name:?}");
+        }
+        assert!(names(&core, &grace).is_empty());
+
+        let area = create_area(&core, &grace, named("  Engineering  ")).unwrap().output;
+        assert_eq!(area.name, "Engineering");
+    }
+}

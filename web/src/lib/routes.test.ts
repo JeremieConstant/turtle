@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { pageAddress, parseAddress } from './routes'
+import { areaAddress, pageAddress, parseAddress } from './routes'
 
 test('a Page address carries the ID and a readable title', () => {
   expect(parseAddress('/p/abc123/release-notes')).toEqual({ screen: 'page', id: 'abc123' })
@@ -42,4 +42,22 @@ test('a built Page address leads back to the same Page', () => {
 test('the setup and sign-in screens have their own addresses', () => {
   expect(parseAddress('/setup')).toEqual({ screen: 'setup' })
   expect(parseAddress('/sign-in')).toEqual({ screen: 'sign-in' })
+})
+
+test('an Area address carries the ID and a readable name, which is optional', () => {
+  expect(parseAddress('/a/xyz789/engineering')).toEqual({ screen: 'area', id: 'xyz789' })
+  expect(parseAddress('/a/xyz789')).toEqual({ screen: 'area', id: 'xyz789' })
+  expect(parseAddress('/a/xyz789/')).toEqual({ screen: 'area', id: 'xyz789' })
+})
+
+test('an Area address is built like a Page address and leads back to the same Area', () => {
+  expect(areaAddress('xyz789', 'Engineering & Ops')).toBe('/a/xyz789/engineering-ops')
+  expect(areaAddress('xyz789', '')).toBe('/a/xyz789')
+  expect(parseAddress(areaAddress('a/b c', 'Some Name'))).toEqual({ screen: 'area', id: 'a/b c' })
+})
+
+test('broken Area addresses are not found', () => {
+  for (const address of ['/a', '/a/', '/a/xyz/name/more', '/a/%E0%A4%A/x']) {
+    expect(parseAddress(address), address).toEqual({ screen: 'not-found' })
+  }
 })

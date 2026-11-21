@@ -1,7 +1,9 @@
 <script lang="ts">
   import { router } from './lib/router.svelte'
-  import { pageAddress, type Route } from './lib/routes'
+  import type { Route } from './lib/routes'
   import { session } from './lib/session.svelte'
+  import AreaScreen from './screens/AreaScreen.svelte'
+  import AreasScreen from './screens/AreasScreen.svelte'
   import NotFoundScreen from './screens/NotFoundScreen.svelte'
   import PageScreen from './screens/PageScreen.svelte'
   import SetupScreen from './screens/SetupScreen.svelte'
@@ -22,8 +24,6 @@
     if (route.screen === 'setup') return session.member ? '/' : '/sign-in'
     if (!session.member) return route.screen === 'sign-in' ? null : '/sign-in'
     if (route.screen === 'sign-in') return '/'
-    // Until there is a list of Areas to land on, the start address opens the demo Page.
-    if (route.screen === 'home') return pageAddress('demo', 'demo')
     return null
   }
 
@@ -44,6 +44,12 @@
   <SetupScreen />
 {:else if route.screen === 'sign-in'}
   <SignInScreen {returnTo} />
+{:else if route.screen === 'home'}
+  <AreasScreen />
+{:else if route.screen === 'area'}
+  {#key route.id}
+    <AreaScreen id={route.id} />
+  {/key}
 {:else if route.screen === 'page'}
   {#key route.id}
     <PageScreen id={route.id} />
