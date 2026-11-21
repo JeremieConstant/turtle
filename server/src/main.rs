@@ -1,5 +1,6 @@
 //! Turtle server: one binary with the web app inside and one data directory.
 
+mod diff;
 mod http_api;
 mod markdown;
 mod model;
@@ -212,16 +213,18 @@ async fn read_markdown(
     Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], markdown).into_response())
 }
 
-/// Replaces the Page with the given Markdown. Connected editors see the change at once.
+/// Makes the Page say what the given Markdown says, changing only what
+/// differs. Connected editors see the change at once.
 async fn write_markdown(
     State(app): State<Arc<App>>,
     Path(page_id): Path<String>,
     body: String,
 ) -> Result<StatusCode, Failure> {
     let page = app.open_page(&page_id)?;
-    let update = ydoc::write(&page.doc, &markdown::from_markdown(&body));
-    page.unsaved.store(true, Ordering::SeqCst);
-    let _ = page.frames.send((0, frame(FRAME_UPDATE, &update)));
+    if let Some(update) = ydoc::write(&page.doc, &markdown::from_markdown(&body)) {
+        page.unsaved.store(true, Ordering::SeqCst);
+        let _ = page.frames.send((0, frame(FRAME_UPDATE, &update)));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

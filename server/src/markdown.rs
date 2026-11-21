@@ -596,7 +596,88 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
 }
 
 #[cfg(test)]
+pub(crate) mod testing {
+    use crate::model::{Block, Inline, Marks};
+
+    // A small deterministic generator, so the property tests need no extra
+    // dependency and failures are reproducible from the seed.
+    pub struct Rng(pub u64);
+
+    impl Rng {
+        pub fn next(&mut self, bound: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % bound
+        }
+
+        pub fn text(&mut self) -> String {
+            const ALPHABET: &[&str] = &[
+                "a", "b", "word", " ", " ", "  ", "*", "_", "`", "[", "]", "(", ")", "<", ">", "&",
+                "~", "#", "-", "+", "=", "1", ".", "\\", "!", "|", ":", "\"", "é", "ü", "\t",
+            ];
+            let len = 1 + self.next(8);
+            (0..len).map(|_| ALPHABET[self.next(ALPHABET.len())]).collect()
+        }
+
+        pub fn inlines(&mut self) -> Vec<Inline> {
+            let len = self.next(5);
+            (0..len)
+                .map(|_| {
+                    if self.next(8) == 0 {
+                        return Inline::HardBreak;
+                    }
+                    let marks = Marks {
+                        bold: self.next(4) == 0,
+                        italic: self.next(4) == 0,
+                        strike: self.next(6) == 0,
+                        code: self.next(8) == 0,
+                        link: (self.next(8) == 0).then(|| format!("https://x.org/{}", self.text())),
+                    };
+                    Inline::Text {
+                        text: self.text(),
+                        marks,
+                    }
+                })
+                .collect()
+        }
+
+        pub fn blocks(&mut self, depth: usize) -> Vec<Block> {
+            let len = self.next(4);
+            (0..len).map(|_| self.block(depth)).collect()
+        }
+
+        pub fn block(&mut self, depth: usize) -> Block {
+            let kinds = if depth >= 3 { 4 } else { 7 };
+            match self.next(kinds) {
+                0 => Block::Paragraph(self.inlines()),
+                1 => Block::Heading {
+                    level: 1 + self.next(6) as u8,
+                    content: self.inlines(),
+                },
+                2 => Block::CodeBlock {
+                    language: (self.next(2) == 0).then(|| "rs".to_string()),
+                    text: (0..self.next(4))
+                        .map(|_| self.text())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                },
+                3 => Block::HorizontalRule,
+                4 => Block::Blockquote(self.blocks(depth + 1)),
+                5 => Block::BulletList((0..1 + self.next(3)).map(|_| self.blocks(depth + 1)).collect()),
+                _ => Block::OrderedList {
+                    start: self.next(12) as u64,
+                    items: (0..1 + self.next(3)).map(|_| self.blocks(depth + 1)).collect(),
+                },
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::testing::Rng;
     use super::*;
 
     fn text(s: &str) -> Inline {
@@ -774,81 +855,6 @@ mod tests {
         assert_round_trip(vec![para(vec![marked("link <with> (odd) &chars;", |m| {
             m.link = Some("https://example.org/?a=1&b=<2>\\".into())
         })])]);
-    }
-
-    // A small deterministic generator, so the property test needs no extra
-    // dependency and failures are reproducible from the seed.
-    struct Rng(u64);
-
-    impl Rng {
-        fn next(&mut self, bound: usize) -> usize {
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            ((self.0 >> 33) as usize) % bound
-        }
-
-        fn text(&mut self) -> String {
-            const ALPHABET: &[&str] = &[
-                "a", "b", "word", " ", " ", "  ", "*", "_", "`", "[", "]", "(", ")", "<", ">", "&",
-                "~", "#", "-", "+", "=", "1", ".", "\\", "!", "|", ":", "\"", "é", "ü", "\t",
-            ];
-            let len = 1 + self.next(8);
-            (0..len).map(|_| ALPHABET[self.next(ALPHABET.len())]).collect()
-        }
-
-        fn inlines(&mut self) -> Vec<Inline> {
-            let len = self.next(5);
-            (0..len)
-                .map(|_| {
-                    if self.next(8) == 0 {
-                        return Inline::HardBreak;
-                    }
-                    let marks = Marks {
-                        bold: self.next(4) == 0,
-                        italic: self.next(4) == 0,
-                        strike: self.next(6) == 0,
-                        code: self.next(8) == 0,
-                        link: (self.next(8) == 0).then(|| format!("https://x.org/{}", self.text())),
-                    };
-                    Inline::Text {
-                        text: self.text(),
-                        marks,
-                    }
-                })
-                .collect()
-        }
-
-        fn blocks(&mut self, depth: usize) -> Vec<Block> {
-            let len = self.next(4);
-            (0..len).map(|_| self.block(depth)).collect()
-        }
-
-        fn block(&mut self, depth: usize) -> Block {
-            let kinds = if depth >= 3 { 4 } else { 7 };
-            match self.next(kinds) {
-                0 => Block::Paragraph(self.inlines()),
-                1 => Block::Heading {
-                    level: 1 + self.next(6) as u8,
-                    content: self.inlines(),
-                },
-                2 => Block::CodeBlock {
-                    language: (self.next(2) == 0).then(|| "rs".to_string()),
-                    text: (0..self.next(4))
-                        .map(|_| self.text())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                },
-                3 => Block::HorizontalRule,
-                4 => Block::Blockquote(self.blocks(depth + 1)),
-                5 => Block::BulletList((0..1 + self.next(3)).map(|_| self.blocks(depth + 1)).collect()),
-                _ => Block::OrderedList {
-                    start: self.next(12) as u64,
-                    items: (0..1 + self.next(3)).map(|_| self.blocks(depth + 1)).collect(),
-                },
-            }
-        }
     }
 
     const SEEDS: u64 = 20_000;
