@@ -74,6 +74,9 @@ fn table() -> Vec<Row> {
             |f| json!({"area_id": f.area_id, "holder": {"kind": "member", "member_id": f.ken_id}}),
             [OK, REFUSED, REFUSED, HIDDEN, OK],
         ),
+        ("create_token", |f| json!({"name": "Agent", "area_ids": [f.area_id]}), [OK, OK, OK, HIDDEN, OK]),
+        ("list_tokens", |_| json!({}), [OK; 5]),
+        ("revoke_token", |_| json!({"id": "made-up"}), [HIDDEN; 5]),
         ("list_versions", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("get_version", |f| json!({"page_id": f.page_id, "number": 1}), [OK, OK, OK, HIDDEN, OK]),
         (

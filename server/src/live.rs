@@ -287,9 +287,10 @@ impl Pages {
         Ok(Some(number))
     }
 
-    /// Writes every changed Page to the database, and calls `saved` with the
-    /// ID of each.
-    pub fn save_changed(&self, saved: impl Fn(&str)) -> anyhow::Result<()> {
+    /// Writes every changed Page to the database, calls `saved` with the ID
+    /// of each, and returns how many there were.
+    pub fn save_changed(&self, saved: impl Fn(&str)) -> anyhow::Result<usize> {
+        let mut count = 0;
         each_open(self.all_open(), |id, page| {
             if !std::mem::take(&mut page.state.lock().unwrap().unsaved) {
                 return Ok(());
@@ -306,8 +307,10 @@ impl Pages {
                 return Err(error.into());
             }
             saved(id);
+            count += 1;
             Ok(())
-        })
+        })?;
+        Ok(count)
     }
 
     fn all_open(&self) -> Vec<(String, Arc<OpenPage>)> {

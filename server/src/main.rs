@@ -4,6 +4,7 @@ mod diff;
 mod http_api;
 mod live;
 mod markdown;
+mod mcp;
 mod model;
 mod ops;
 mod search;
@@ -81,14 +82,25 @@ async fn main() -> anyhow::Result<()> {
         next_connection: AtomicU64::new(1),
     });
 
+    // For load tests and for an operator who wants to see whether saving
+    // keeps up: one line per save that wrote anything.
+    let log_saves = std::env::var_os("TURTLE_LOG_SAVES").is_some_and(|value| !value.is_empty());
     let saver = core.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SAVE_INTERVAL);
         loop {
             tick.tick().await;
             let core = saver.clone();
+            let started = std::time::Instant::now();
             match tokio::task::spawn_blocking(move || core.save_changed_pages()).await {
-                Ok(Ok(())) => {}
+                Ok(Ok(0)) => {}
+                Ok(Ok(pages)) => {
+                    if log_saves {
+                        let took = started.elapsed().as_secs_f64() * 1000.0;
+                        let noun = if pages == 1 { "Page" } else { "Pages" };
+                        println!("Saved {pages} {noun} in {took:.3} ms.");
+                    }
+                }
                 Ok(Err(error)) => eprintln!("saving pages failed: {error:#}"),
                 Err(error) => eprintln!("saving pages panicked: {error}"),
             }
@@ -117,7 +129,8 @@ async fn main() -> anyhow::Result<()> {
             get(read_markdown).put(write_markdown),
         )
         .with_state(app.clone())
-        .merge(http_api::router(core))
+        .merge(http_api::router(core.clone()))
+        .merge(mcp::router(core))
         .merge(web_app::router(web_app::EMBEDDED));
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
@@ -208,7 +221,7 @@ async fn page_for(
             let member_id = ops::areas::signed_in(&principal)?.to_string();
             Ok(Opened { page, member_id })
         });
-        Ok::<_, ops::OpError>(opened.map_err(|error| (principal == ops::Principal::Anonymous, error)))
+        Ok::<_, http_api::Refusal>(opened.map_err(|error| (principal == ops::Principal::Anonymous, error)))
     })
     .await;
     match outcome {
@@ -216,7 +229,8 @@ async fn page_for(
         Ok(Ok(Err((true, ops::OpError::NotPermitted(message))))) => {
             Err((StatusCode::UNAUTHORIZED, message).into_response())
         }
-        Ok(Ok(Err((_, error)))) | Ok(Err(error)) => Err(http_api::error_response(error)),
+        Ok(Ok(Err((_, error)))) => Err(http_api::error_response(error)),
+        Ok(Err(no_caller)) => Err(no_caller.into_response()),
         Err(error) => Err(http_api::error_response(ops::OpError::Internal(error.into()))),
     }
 }

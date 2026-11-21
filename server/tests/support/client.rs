@@ -48,7 +48,13 @@ struct Shared {
     others: Mutex<HashMap<u64, (u64, String)>>,
     /// This client's own presence: (clock, JSON state).
     own_presence: Mutex<Option<(u64, String)>>,
+    /// Told of every update from the server once it is applied.
+    observer: Mutex<Option<Observer>>,
 }
+
+/// Called with, for each client whose changes an update carries, the clock
+/// its last change in it ends at.
+type Observer = Box<dyn Fn(&[(u64, u32)]) + Send>;
 
 pub struct TestClient {
     shared: Arc<Shared>,
@@ -81,6 +87,7 @@ impl TestClient {
             doc: Doc::new(),
             others: Mutex::new(HashMap::new()),
             own_presence: Mutex::new(None),
+            observer: Mutex::new(None),
         });
         let (outgoing, mut queue) = mpsc::unbounded_channel::<Message>();
 
@@ -105,11 +112,21 @@ impl TestClient {
                     match kind {
                         FRAME_UPDATE => {
                             let update = Update::decode_v1(payload).expect("the server sent an unreadable update");
+                            let reaches: Vec<(u64, u32)> = update
+                                .insertions(true)
+                                .iter()
+                                .filter_map(|(client, ranges)| {
+                                    Some((client.get(), ranges.iter().map(|range| range.end).max()?))
+                                })
+                                .collect();
                             shared
                                 .doc
                                 .transact_mut()
                                 .apply_update(update)
                                 .expect("the server sent an update that does not apply");
+                            if let Some(observe) = shared.observer.lock().unwrap().as_ref() {
+                                observe(&reaches);
+                            }
                             if let Some(loaded) = loaded.take() {
                                 let _ = loaded.send(());
                             }
@@ -142,6 +159,19 @@ impl TestClient {
     /// This client's id in the document and in presence.
     pub fn client_id(&self) -> u64 {
         self.shared.doc.client_id().get()
+    }
+
+    /// The clock this client's latest change ends at; `on_update` tells
+    /// another client when an update with it arrives.
+    pub fn own_clock(&self) -> u32 {
+        self.shared.doc.transact().state_vector().get(&self.shared.doc.client_id())
+    }
+
+    /// Calls `observe` for each update from the server, right after it is
+    /// applied, with the senders whose changes it carries: (client id, clock
+    /// their last change in it ends at), as `own_clock` gives on the sender.
+    pub fn on_update(&self, observe: impl Fn(&[(u64, u32)]) + Send + 'static) {
+        *self.shared.observer.lock().unwrap() = Some(Box::new(observe));
     }
 
     /// Adds a paragraph at the end of the Page.

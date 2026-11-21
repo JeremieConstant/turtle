@@ -6,10 +6,12 @@ use serde_json::Value;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
+use tokio::sync::Mutex;
 
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -19,25 +21,94 @@ pub struct TestServer {
     process: Option<Child>,
     addr: SocketAddr,
     data_dir: TempDir,
+    /// When the server reports each save (`TURTLE_LOG_SAVES`): the saves
+    /// it reported that nobody has taken yet.
+    saves: Option<Arc<Mutex<Vec<Save>>>>,
+}
+
+/// One round of saving changed Pages, as the server reports it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Save {
+    /// How many Pages were written.
+    pub pages: usize,
+    pub took: Duration,
 }
 
 impl TestServer {
     /// Starts a server with an empty data directory of its own.
     pub async fn start() -> TestServer {
+        TestServer::start_with(None).await
+    }
+
+    /// Starts a server that reports each save it makes; `next_save` and
+    /// `take_saves` return them.
+    pub async fn start_reporting_saves() -> TestServer {
+        TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new())))).await
+    }
+
+    async fn start_with(saves: Option<Arc<Mutex<Vec<Save>>>>) -> TestServer {
         let data_dir = tempfile::tempdir().expect("creating a temporary data directory");
-        let (process, addr) = launch(data_dir.path()).await;
+        let (process, addr) = launch(data_dir.path(), saves.clone()).await;
         TestServer {
             process: Some(process),
             addr,
             data_dir,
+            saves,
         }
     }
 
-    /// Where the server listens, for clients that connect without `connect`
-    /// (the load test).
-    #[allow(dead_code)]
+    fn reported_saves(&self) -> &Mutex<Vec<Save>> {
+        self.saves.as_ref().expect("the server was not started reporting saves")
+    }
+
+    /// Where the server listens, for clients that connect without `connect`.
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// Waits for the next save the server reports. Panics with `what` if
+    /// none comes within a few save intervals.
+    pub async fn next_save(&self, what: &str) -> Save {
+        let saves = self.reported_saves();
+        let deadline = tokio::time::Instant::now() + SAVE_WAIT_TIMEOUT;
+        loop {
+            {
+                let mut saves = saves.lock().await;
+                if !saves.is_empty() {
+                    return saves.remove(0);
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!("timed out waiting until {what}");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Every save reported since the last call.
+    pub async fn take_saves(&self) -> Vec<Save> {
+        std::mem::take(&mut *self.reported_saves().lock().await)
+    }
+
+    /// Something that reads the memory the server process holds at that
+    /// moment (its resident set), for sampling while the server works.
+    pub fn memory_reader(&self) -> impl Fn() -> u64 + Send + 'static {
+        let pid = self
+            .process
+            .as_ref()
+            .and_then(Child::id)
+            .expect("the server is not running");
+        move || {
+            let output = std::process::Command::new("ps")
+                .args(["-o", "rss=", "-p", &pid.to_string()])
+                .output()
+                .expect("running ps");
+            let kilobytes: u64 = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .expect("ps reports the resident set in kilobytes");
+            kilobytes * 1024
+        }
     }
 
     /// Opens a Page the way the editor does, as the signed-in Member, and
@@ -130,14 +201,20 @@ impl TestServer {
         if self.process.is_some() {
             self.stop().await;
         }
-        let (process, addr) = launch(self.data_dir.path()).await;
+        let (process, addr) = launch(self.data_dir.path(), self.saves.clone()).await;
         self.process = Some(process);
         self.addr = addr;
     }
 }
 
-async fn launch(data_dir: &Path) -> (Child, SocketAddr) {
-    let mut process = Command::new(env!("CARGO_BIN_EXE_turtle"))
+async fn launch(data_dir: &Path, saves: Option<Arc<Mutex<Vec<Save>>>>) -> (Child, SocketAddr) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_turtle"));
+    if saves.is_some() {
+        command.env("TURTLE_LOG_SAVES", "1");
+    } else {
+        command.env_remove("TURTLE_LOG_SAVES");
+    }
+    let mut process = command
         .env("TURTLE_DATA", data_dir)
         // Port 0: the system picks a free one, and the server says which.
         .env("TURTLE_PORT", "0")
@@ -163,7 +240,13 @@ async fn launch(data_dir: &Path) -> (Child, SocketAddr) {
     .expect("the server did not start within the timeout");
 
     // Keep reading, so the server never blocks on a full pipe.
-    tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
+    tokio::spawn(async move {
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let (Some(saves), Some(save)) = (&saves, reported_save(&line)) {
+                saves.lock().await.push(save);
+            }
+        }
+    });
 
     (process, SocketAddr::from(([127, 0, 0, 1], port)))
 }
@@ -174,6 +257,20 @@ fn announced_port(line: &str) -> Option<u16> {
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok().filter(|&port| port != 0)
 }
+
+/// A save from "Saved 3 Pages in 1.234 ms." (or "1 Page"), the line
+/// `server/src/main.rs` prints; the live-sync test notices if they part.
+fn reported_save(line: &str) -> Option<Save> {
+    let rest = line.strip_prefix("Saved ")?;
+    let (pages, rest) = rest.split_once(' ')?;
+    let millis = rest.split_once(" in ")?.1.strip_suffix(" ms.")?;
+    Some(Save {
+        pages: pages.parse().ok()?,
+        took: Duration::from_secs_f64(millis.parse::<f64>().ok()? / 1000.0),
+    })
+}
+
+const SAVE_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 const EMAIL: &str = "ada@example.org";
 const PASSWORD: &str = "correct horse battery";

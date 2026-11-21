@@ -23,11 +23,13 @@ pub(super) fn register(catalogue: &mut Catalogue) {
             accept_invitation,
         )
         .browser_only = true;
-    catalogue.add(
-        "list_members",
-        "Lists every Member by name, deactivated ones included. Only for a Workspace Admin.",
-        list_members,
-    );
+    catalogue
+        .add(
+            "list_members",
+            "Lists every Member by name, deactivated ones included. Only for a Workspace Admin.",
+            list_members,
+        )
+        .changes = false;
     catalogue.add(
         "deactivate_member",
         "Deactivates a Member: their sessions end at once and they can no longer sign in. Only for a Workspace Admin.",
@@ -370,14 +372,12 @@ fn unusable_link() -> OpError {
 
 /// Only a Workspace Admin manages Members.
 fn require_workspace_admin(principal: &Principal) -> Result<(), OpError> {
-    match principal {
-        Principal::Member {
-            workspace_admin: true,
-            ..
-        } => Ok(()),
-        _ => Err(OpError::NotPermitted(
+    if principal.acts_as_workspace_admin() {
+        Ok(())
+    } else {
+        Err(OpError::NotPermitted(
             "Only a Workspace Admin can manage Members.".into(),
-        )),
+        ))
     }
 }
 

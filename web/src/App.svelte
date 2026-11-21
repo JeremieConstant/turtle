@@ -11,6 +11,7 @@
   import PasswordResetScreen from './screens/PasswordResetScreen.svelte'
   import SetupScreen from './screens/SetupScreen.svelte'
   import SignInScreen from './screens/SignInScreen.svelte'
+  import TokensScreen from './screens/TokensScreen.svelte'
 
   const route = $derived(router.route)
 
@@ -61,6 +62,8 @@
   {/key}
 {:else if route.screen === 'members'}
   <MembersScreen />
+{:else if route.screen === 'tokens'}
+  <TokensScreen />
 {:else if route.screen === 'invitation'}
   {#key route.secret}
     <InvitationScreen secret={route.secret} />

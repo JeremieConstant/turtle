@@ -38,6 +38,7 @@ Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you t
 | --- | --- | --- |
 | `TURTLE_DATA` | `turtle-data` in the directory Turtle is started from | The data directory. It is created on the first start and holds the database, `turtle.db`. |
 | `TURTLE_PORT` | `4100` | The port Turtle listens on. |
+| `TURTLE_LOG_SAVES` | unset | When set, Turtle prints a line for each save of changed Pages and how long it took, to see whether saving keeps up. |
 
 Settings are environment variables:
 
@@ -46,6 +47,12 @@ TURTLE_DATA=/var/lib/turtle TURTLE_PORT=8080 ./server/target/release/turtle
 ```
 
 When a newer Turtle starts on an existing data directory, it brings the database up to date by itself. To back up Turtle, stop it and copy the data directory.
+
+## Connect an Agent
+
+Every Member creates Tokens under **Tokens** in the header. A Token can be limited to reading, to chosen Areas and to an expiry date, and never has more access than its owner. Its value is shown once.
+
+An Agent connects to Turtle's built-in MCP endpoint, `/mcp` on the address Turtle is reached at (Streamable HTTP), and sends the Token as `Authorization: Bearer <token>`. It finds one tool for every operation except the few that only make sense in a browser, such as signing in and managing Tokens. The same header works for the HTTP API, `POST /api/<operation>`.
 
 ## Develop
 
@@ -66,5 +73,7 @@ A debug build embeds whatever `web/dist` holds when it is compiled, and starts w
 ```bash
 git config core.hooksPath .githooks
 ```
+
+`scripts/load-test.sh` runs the load test on demand: 500 people editing at the same time against a release build, with a report on how fast changes reach the others, memory and saving. The last recorded run is in [docs/load-test.md](docs/load-test.md).
 
 Licensed under [AGPL-3.0](LICENSE).

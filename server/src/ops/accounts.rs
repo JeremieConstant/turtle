@@ -12,11 +12,13 @@ use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
 
 pub(super) fn register(catalogue: &mut Catalogue) {
-    catalogue.add(
-        "get_session",
-        "Says who is signed in, and whether this installation still needs its first account.",
-        get_session,
-    );
+    catalogue
+        .add(
+            "get_session",
+            "Says who is signed in, and whether this installation still needs its first account.",
+            get_session,
+        )
+        .changes = false;
     catalogue
         .add(
             "create_first_account",
@@ -195,6 +197,7 @@ pub fn principal_for_session(core: &Core, secret: &str) -> Result<Principal, OpE
             id,
             workspace_admin,
             session: Some(session),
+            token: None,
         }),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Principal::Anonymous),
         Err(error) => Err(error.into()),

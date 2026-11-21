@@ -10,19 +10,23 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "create_area",
-        "Creates an Area. The caller becomes its Admin and is the only one with access.",
+        "Creates an Area. The caller becomes its Admin and is the only one with access. A Token limited to chosen Areas cannot.",
         create_area,
     );
-    catalogue.add(
-        "get_area",
-        "Gets one Area by its ID. An Area the caller cannot read is reported as not found.",
-        get_area,
-    );
-    catalogue.add(
-        "list_areas",
-        "Lists the Areas the caller can read, by name.",
-        list_areas,
-    );
+    catalogue
+        .add(
+            "get_area",
+            "Gets one Area by its ID. An Area the caller cannot read is reported as not found.",
+            get_area,
+        )
+        .changes = false;
+    catalogue
+        .add(
+            "list_areas",
+            "Lists the Areas the caller can read, by name.",
+            list_areas,
+        )
+        .changes = false;
     catalogue.add(
         "rename_area",
         "Renames an Area. Needs the Admin Role on it.",
@@ -64,6 +68,11 @@ const MAX_NAME_LENGTH: usize = 200;
 
 pub fn create_area(core: &Core, principal: &Principal, input: NewArea) -> OpResult<Area> {
     let member_id = signed_in(principal)?;
+    if principal.token().is_some_and(|token| token.areas.is_some()) {
+        return Err(OpError::NotPermitted(
+            "This Token is limited to chosen Areas, so it cannot create a new one.".into(),
+        ));
+    }
     let name = valid_name(&input.name)?;
     let area_id = random_hex(16)?;
     let root_id = random_hex(16)?;

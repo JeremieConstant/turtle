@@ -13,6 +13,7 @@ pub mod grants;
 pub mod members;
 pub mod permissions;
 pub mod search;
+pub mod tokens;
 pub mod tree;
 pub mod versions;
 
@@ -90,9 +91,9 @@ impl Core {
         &self.live
     }
 
-    /// Writes every changed open Page to the database, and records a
-    /// Version of each whose changes have waited long enough.
-    pub fn save_changed_pages(&self) -> anyhow::Result<()> {
+    /// Writes every changed open Page to the database and returns how many,
+    /// and records a Version of each whose changes have waited long enough.
+    pub fn save_changed_pages(&self) -> anyhow::Result<usize> {
         // Recording does not wait for saving: a Version holds its own content.
         let saved = self.live.save_changed(|id| self.page_changed(id));
         self.live.record_due()?;
@@ -143,7 +144,40 @@ pub enum Principal {
         workspace_admin: bool,
         /// The session this Member is acting through, if any.
         session: Option<SessionId>,
+        /// The Token this Member is acting through, if any, with its limits.
+        token: Option<TokenLimits>,
     },
+}
+
+/// What a Token takes away from its owner's access. It never adds any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenLimits {
+    pub id: String,
+    /// Nothing can be changed through it.
+    pub read_only: bool,
+    /// The only Areas it reaches; every Area its owner reaches if `None`.
+    pub areas: Option<Vec<String>>,
+}
+
+impl Principal {
+    /// The limits of the Token the caller acts through, if any.
+    pub fn token(&self) -> Option<&TokenLimits> {
+        match self {
+            Principal::Member { token, .. } => token.as_ref(),
+            Principal::Anonymous => None,
+        }
+    }
+
+    /// Whether the caller may manage Members. A Token limited to chosen Areas
+    /// does not carry Workspace Admin standing, which reaches beyond them.
+    pub fn acts_as_workspace_admin(&self) -> bool {
+        match self {
+            Principal::Member { workspace_admin, token, .. } => {
+                *workspace_admin && token.as_ref().is_none_or(|token| token.areas.is_none())
+            }
+            Principal::Anonymous => false,
+        }
+    }
 }
 
 /// Identifies a session in the database. Not the secret the browser holds.
@@ -232,6 +266,9 @@ pub struct Operation {
     pub description: &'static str,
     /// Only makes sense with a browser session, so it gets no MCP tool.
     pub browser_only: bool,
+    /// Changes something, so a read-only Token cannot call it. Operations
+    /// that only read say so when they are registered.
+    pub changes: bool,
     pub input_schema: Value,
     pub output_schema: Value,
     run: Run,
@@ -258,6 +295,7 @@ impl Catalogue {
                     "name": operation.name,
                     "description": operation.description,
                     "browser_only": operation.browser_only,
+                    "changes": operation.changes,
                     "input": operation.input_schema,
                     "output": operation.output_schema,
                 })
@@ -279,6 +317,20 @@ impl Catalogue {
             .iter()
             .find(|operation| operation.name == name)
             .ok_or_else(|| OpError::NotFound(format!("There is no operation named {name}.")))?;
+        if let Some(token) = principal.token() {
+            // Browser-only operations include managing Tokens, so a Token can
+            // never make another that reaches further.
+            if operation.browser_only {
+                return Err(OpError::NotPermitted(
+                    "This can only be done signed in to Turtle in a browser, not with a Token.".into(),
+                ));
+            }
+            if token.read_only && operation.changes {
+                return Err(OpError::NotPermitted(
+                    "This Token is read-only, so it cannot change anything.".into(),
+                ));
+            }
+        }
         (operation.run)(core, principal, input)
     }
 
@@ -300,6 +352,7 @@ impl Catalogue {
             name,
             description,
             browser_only: false,
+            changes: true,
             input_schema: schemars::schema_for!(I).to_value(),
             output_schema: schemars::schema_for!(O).to_value(),
             run: Box::new(move |core, principal, input| {
@@ -328,6 +381,7 @@ pub fn catalogue() -> Catalogue {
     tree::register(&mut catalogue);
     search::register(&mut catalogue);
     versions::register(&mut catalogue);
+    tokens::register(&mut catalogue);
     catalogue
 }
 
@@ -371,6 +425,7 @@ pub(crate) mod testing {
             id,
             workspace_admin,
             session: None,
+            token: None,
         }
     }
 
