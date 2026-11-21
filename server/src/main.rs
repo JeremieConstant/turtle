@@ -282,8 +282,11 @@ async fn connect(
     let core = app.core.clone();
     Ok(upgrade.on_upgrade(move |socket| async move {
         core.live().connected(&page);
-        if let Err(error) = serve_connection(socket, page.clone(), connection, access).await {
-            eprintln!("connection {connection} ended with an error: {error:#}");
+        match serve_connection(socket, page.clone(), connection, access).await {
+            Err(error) if !went_away(&error) => {
+                eprintln!("connection {connection} ended with an error: {error:#}");
+            }
+            _ => {}
         }
         // Recording a Version writes to the database.
         let left = tokio::task::spawn_blocking(move || core.live().disconnected(&page)).await;
@@ -458,6 +461,24 @@ fn presence_entries(mut data: &[u8]) -> Vec<(u64, u64)> {
     entries
 }
 
+/// Whether a connection ended because the editor dropped it without saying
+/// goodbye, as a closed tab or a lost network does. That is how editing
+/// sessions usually end, not a failure.
+fn went_away(error: &anyhow::Error) -> bool {
+    use std::io::ErrorKind;
+    use tungstenite::error::ProtocolError;
+    error.chain().any(|cause| {
+        let dropped = cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(io.kind(), ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe)
+        });
+        let reset = matches!(
+            cause.downcast_ref::<tungstenite::Error>(),
+            Some(tungstenite::Error::Protocol(ProtocolError::ResetWithoutClosingHandshake))
+        );
+        dropped || reset
+    })
+}
+
 fn read_varuint(data: &mut &[u8]) -> Option<u64> {
     let mut value = 0u64;
     for shift in (0..64).step_by(7) {
@@ -482,6 +503,20 @@ fn write_varuint(out: &mut Vec<u8>, mut value: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_editor_that_drops_the_connection_has_gone_away_but_a_bad_update_has_not() {
+        use std::io::{Error, ErrorKind};
+        for kind in [ErrorKind::ConnectionReset, ErrorKind::ConnectionAborted, ErrorKind::BrokenPipe] {
+            // Wrapped the way axum hands it over.
+            let dropped = anyhow::Error::from(axum::Error::new(tungstenite::Error::Io(Error::from(kind))));
+            assert!(went_away(&dropped), "{kind:?}");
+        }
+        let reset = tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake);
+        assert!(went_away(&anyhow::Error::from(axum::Error::new(reset))), "reset without a closing handshake");
+        assert!(!went_away(&anyhow::anyhow!("unreadable update")));
+        assert!(!went_away(&anyhow::Error::from(Error::from(ErrorKind::PermissionDenied))));
+    }
 
     #[test]
     fn presence_entries_are_read_without_their_states() {
