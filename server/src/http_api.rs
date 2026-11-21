@@ -14,11 +14,11 @@ use std::sync::Arc;
 const SESSION_COOKIE: &str = "turtle_session";
 
 struct Api {
-    core: Core,
+    core: Arc<Core>,
     catalogue: Catalogue,
 }
 
-pub fn router(core: Core) -> Router {
+pub fn router(core: Arc<Core>) -> Router {
     let api = Arc::new(Api {
         core,
         catalogue: ops::catalogue(),
@@ -53,15 +53,10 @@ async fn call(
             Err(error) => return error_response(OpError::InvalidInput(error.to_string())),
         }
     };
-    let secret = session_secret(&headers);
-
     // Operations hash passwords and wait for the database, so they run off
     // the async workers.
     let outcome = tokio::task::spawn_blocking(move || {
-        let principal = match secret {
-            Some(secret) => ops::accounts::principal_for_session(&api.core, &secret)?,
-            None => Principal::Anonymous,
-        };
+        let principal = principal(&api.core, &headers)?;
         api.catalogue.call(&api.core, &principal, &operation, input)
     })
     .await;
@@ -84,6 +79,15 @@ async fn call(
     }
 }
 
+/// Who is calling, by the session cookie the request carries. Without one,
+/// or with one that is unknown or expired, that is nobody.
+pub fn principal(core: &Core, headers: &HeaderMap) -> Result<Principal, OpError> {
+    match session_secret(headers) {
+        Some(secret) => ops::accounts::principal_for_session(core, &secret),
+        None => Ok(Principal::Anonymous),
+    }
+}
+
 fn session_secret(headers: &HeaderMap) -> Option<String> {
     headers
         .get_all(header::COOKIE)
@@ -103,7 +107,7 @@ fn session_cookie(secret: &str, max_age: i64) -> HeaderValue {
     .expect("a session secret is plain hex")
 }
 
-fn error_response(error: OpError) -> Response {
+pub fn error_response(error: OpError) -> Response {
     let status = match &error {
         OpError::NotFound(_) => StatusCode::NOT_FOUND,
         OpError::NotPermitted(_) => StatusCode::FORBIDDEN,

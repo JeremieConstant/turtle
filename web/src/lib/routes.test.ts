@@ -61,3 +61,10 @@ test('broken Area addresses are not found', () => {
     expect(parseAddress(address), address).toEqual({ screen: 'not-found' })
   }
 })
+
+test('a Page address with an outdated title still leads to the same Page', () => {
+  const before = pageAddress('abc123', 'Release notes')
+  const after = pageAddress('abc123', 'Changelog')
+  expect(after).not.toBe(before)
+  expect(parseAddress(before)).toEqual(parseAddress(after))
+})

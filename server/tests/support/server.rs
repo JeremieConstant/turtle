@@ -1,6 +1,8 @@
 //! Runs the real `turtle` binary on a free port with its own data directory.
 
+use super::http;
 use super::TestClient;
+use serde_json::Value;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
@@ -38,9 +40,29 @@ impl TestServer {
         self.addr
     }
 
-    /// Opens a Page the way the editor does and waits for its content.
-    pub async fn connect(&self, page: &str) -> TestClient {
-        TestClient::connect(self.addr, page).await
+    /// Opens a Page the way the editor does, as the signed-in Member, and
+    /// waits for its content.
+    pub async fn connect(&self, member: &Member, page: &str) -> TestClient {
+        TestClient::connect(self.addr, page, Some(&member.cookie)).await
+    }
+
+    /// Creates the first account of the installation and signs it in.
+    pub async fn sign_up(&self) -> Member {
+        let response = http::request(
+            self.addr,
+            "POST",
+            "/api/create_first_account",
+            &[("Content-Type", "application/json")],
+            r#"{"name":"Ada","email":"ada@example.org","password":"correct horse battery"}"#,
+        )
+        .await;
+        assert_eq!(response.status, 200, "signing up: {}", response.body);
+        let cookie = response
+            .header("set-cookie")
+            .and_then(|value| value.split(';').next())
+            .expect("signing up sets the session cookie")
+            .to_string();
+        Member { addr: self.addr, cookie }
     }
 
     /// Stops the server the way an operator does and waits until it has exited.
@@ -109,4 +131,36 @@ fn announced_port(line: &str) -> Option<u16> {
     let rest = line.split_once("listening on http://127.0.0.1:")?.1;
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok().filter(|&port| port != 0)
+}
+
+/// A signed-in Member, calling operations as the web app does.
+pub struct Member {
+    addr: SocketAddr,
+    /// `name=value` of the session cookie.
+    pub cookie: String,
+}
+
+impl Member {
+    /// Calls an operation and returns its output. Panics if it fails.
+    pub async fn call(&self, operation: &str, input: Value) -> Value {
+        let response = http::request(
+            self.addr,
+            "POST",
+            &format!("/api/{operation}"),
+            &[("Content-Type", "application/json"), ("Cookie", &self.cookie)],
+            &input.to_string(),
+        )
+        .await;
+        assert_eq!(response.status, 200, "{operation}: {}", response.body);
+        serde_json::from_str(&response.body).expect("an operation answers with JSON")
+    }
+
+    /// Creates an Area with a Page at its top, and returns the Page's ID.
+    pub async fn create_page(&self, title: &str) -> String {
+        let area = self.call("create_area", serde_json::json!({ "name": "Engineering" })).await;
+        let page = self
+            .call("create_page", serde_json::json!({ "area_id": area["id"], "title": title }))
+            .await;
+        page["id"].as_str().expect("a Page has an ID").to_string()
+    }
 }

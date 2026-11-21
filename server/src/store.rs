@@ -53,6 +53,12 @@ const MIGRATIONS: &[&str] = &[
          role TEXT NOT NULL CHECK (role IN ('read', 'write', 'admin')),
          PRIMARY KEY (node_id, holder)
      );",
+    // Pages and Folders are nodes too. Siblings are kept in the order of
+    // their position; titles need not be unique. A Page's content stays in
+    // `pages`, under the ID of its node.
+    "ALTER TABLE nodes ADD COLUMN title TEXT NOT NULL DEFAULT '';
+     ALTER TABLE nodes ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+     CREATE INDEX nodes_in_order ON nodes (parent_id, position);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

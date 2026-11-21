@@ -117,7 +117,7 @@ pub fn rename_area(core: &Core, principal: &Principal, input: RenameArea) -> OpR
 
 /// An Area the principal can read. One they cannot read is reported exactly
 /// like one that does not exist, so its existence is not revealed.
-fn readable_area(db: &Connection, principal: &Principal, id: &str) -> Result<Area, OpError> {
+pub(super) fn readable_area(db: &Connection, principal: &Principal, id: &str) -> Result<Area, OpError> {
     let not_found = || OpError::NotFound("There is no such Area.".into());
     let found = db
         .query_row(
@@ -159,7 +159,7 @@ pub fn list_areas(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Ar
 }
 
 /// The acting Member's ID; nobody else may work with Areas.
-fn signed_in(principal: &Principal) -> Result<&str, OpError> {
+pub(super) fn signed_in(principal: &Principal) -> Result<&str, OpError> {
     match principal {
         Principal::Member { id, .. } => Ok(id),
         Principal::Anonymous => Err(OpError::NotPermitted("Sign in first.".into())),
@@ -182,7 +182,7 @@ fn valid_name(name: &str) -> Result<String, OpError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::testing::{fresh, member};
+    use crate::ops::testing::{fresh, give_role, member};
 
     fn named(name: &str) -> NewArea {
         NewArea { name: name.into() }
@@ -261,20 +261,6 @@ mod tests {
         assert!(!hidden.message().contains("Secret"));
     }
 
-    /// Gives a Member a Role on an Area. Grants are not an operation yet.
-    fn give_role(core: &Core, area: &Area, with: &Principal, role: Role) {
-        let Principal::Member { id, .. } = with else { panic!("only Members get Grants") };
-        let db = core.db();
-        let root: String = db
-            .query_row(
-                "SELECT id FROM nodes WHERE area_id = ?1 AND parent_id IS NULL",
-                [&area.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        permissions::grant(&db, &root, &Holder::Member(id.clone()), role).unwrap();
-    }
-
     #[test]
     fn a_member_with_a_grant_sees_the_area_with_that_role() {
         let core = fresh();
@@ -282,7 +268,7 @@ mod tests {
         let linus = member(&core, "Linus", false);
         let area = create_area(&core, &grace, named("Engineering")).unwrap().output;
 
-        give_role(&core, &area, &linus, Role::Read);
+        give_role(&core, &area.id, &linus, Role::Read);
 
         let list = list_areas(&core, &linus, Nothing {}).unwrap().output;
         assert_eq!(list.areas, [Area { role: Role::Read, ..area }]);
@@ -298,9 +284,9 @@ mod tests {
         let writer = member(&core, "Ken", false);
         let reader = member(&core, "Dennis", false);
         let outsider = member(&core, "Linus", false);
-        give_role(&core, &area, &admin, Role::Admin);
-        give_role(&core, &area, &writer, Role::Write);
-        give_role(&core, &area, &reader, Role::Read);
+        give_role(&core, &area.id, &admin, Role::Admin);
+        give_role(&core, &area.id, &writer, Role::Write);
+        give_role(&core, &area.id, &reader, Role::Read);
 
         let table = [
             (&grace, Ok(())),

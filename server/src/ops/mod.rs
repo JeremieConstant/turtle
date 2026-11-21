@@ -8,6 +8,7 @@
 pub mod accounts;
 pub mod areas;
 pub mod permissions;
+pub mod tree;
 
 use rusqlite::Connection;
 use schemars::JsonSchema;
@@ -236,6 +237,7 @@ pub fn catalogue() -> Catalogue {
     };
     accounts::register(&mut catalogue);
     areas::register(&mut catalogue);
+    tree::register(&mut catalogue);
     catalogue
 }
 
@@ -283,6 +285,20 @@ pub(crate) mod testing {
         }
     }
 
+    /// Gives a Member a Role on an Area. Grants are not an operation yet.
+    pub fn give_role(core: &Core, area_id: &str, with: &Principal, role: permissions::Role) {
+        let Principal::Member { id, .. } = with else { panic!("only Members get Grants") };
+        let db = core.db();
+        let root: String = db
+            .query_row(
+                "SELECT id FROM nodes WHERE area_id = ?1 AND parent_id IS NULL",
+                [area_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        permissions::grant(&db, &root, &permissions::Holder::Member(id.clone()), role).unwrap();
+    }
+
     pub fn fresh() -> TestCore {
         let dir = tempfile::tempdir().unwrap();
         let mut core = Core::open(&dir.path().join("turtle.db")).unwrap();
@@ -315,6 +331,12 @@ mod tests {
             "get_area",
             "list_areas",
             "rename_area",
+            "create_page",
+            "create_folder",
+            "rename_page",
+            "rename_folder",
+            "get_page",
+            "get_tree",
         ];
         for expected in expected_names {
             assert!(names.contains(&expected), "{expected} is missing from {names:?}");

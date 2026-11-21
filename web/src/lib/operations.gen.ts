@@ -7,6 +7,19 @@ export type Area = {
   role: Role
 }
 
+export type AreaList = {
+  areas: Area[]
+}
+
+export type Entry = {
+  children: Entry[]
+  id: string
+  kind: Kind
+  title: string
+}
+
+export type Kind = "page" | "folder"
+
 export type Member = {
   email: string
   id: string
@@ -14,19 +27,36 @@ export type Member = {
   workspace_admin: boolean
 }
 
+export type Page = {
+  /** The Area the Page is in. */
+  area: Area
+  id: string
+  /** The Role the caller holds on the Page. */
+  role: Role
+  title: string
+}
+
 export type Role = "read" | "write" | "admin"
+
+export type Session = {
+  /** The signed-in Member, if anyone is signed in. */
+  member?: Member | null
+  /** True until the first account has been created. */
+  setup_required: boolean
+}
+
+export type Tree = {
+  area: Area
+  /** The top of the Area, in order. */
+  entries: Entry[]
+}
 
 /** Every operation, with its input and output. */
 export type Operations = {
   /** Says who is signed in, and whether this installation still needs its first account. */
   get_session: {
     input: Record<string, never>
-    output: {
-      /** The signed-in Member, if anyone is signed in. */
-      member?: Member | null
-      /** True until the first account has been created. */
-      setup_required: boolean
-    }
+    output: Session
   }
   /** Creates the first Member of a fresh installation, makes them Workspace Admin and signs them in. */
   create_first_account: {
@@ -35,12 +65,7 @@ export type Operations = {
       name: string
       password: string
     }
-    output: {
-      email: string
-      id: string
-      name: string
-      workspace_admin: boolean
-    }
+    output: Member
   }
   /** Signs a Member in with email and password. */
   sign_in: {
@@ -48,12 +73,7 @@ export type Operations = {
       email: string
       password: string
     }
-    output: {
-      email: string
-      id: string
-      name: string
-      workspace_admin: boolean
-    }
+    output: Member
   }
   /** Ends the caller's session. */
   sign_out: {
@@ -65,31 +85,19 @@ export type Operations = {
     input: {
       name: string
     }
-    output: {
-      id: string
-      name: string
-      /** The Role the caller holds on the Area. */
-      role: Role
-    }
+    output: Area
   }
   /** Gets one Area by its ID. An Area the caller cannot read is reported as not found. */
   get_area: {
     input: {
       id: string
     }
-    output: {
-      id: string
-      name: string
-      /** The Role the caller holds on the Area. */
-      role: Role
-    }
+    output: Area
   }
   /** Lists the Areas the caller can read, by name. */
   list_areas: {
     input: Record<string, never>
-    output: {
-      areas: Area[]
-    }
+    output: AreaList
   }
   /** Renames an Area. Needs the Admin Role on it. */
   rename_area: {
@@ -97,11 +105,56 @@ export type Operations = {
       id: string
       name: string
     }
-    output: {
-      id: string
-      name: string
-      /** The Role the caller holds on the Area. */
-      role: Role
+    output: Area
+  }
+  /** Creates a Page at the end of its parent: the top of an Area, or beneath a Page or Folder. Needs the Write Role. */
+  create_page: {
+    input: {
+      area_id: string
+      /** The Page or Folder to create it beneath; at the top of the Area if absent. */
+      parent_id?: string | null
+      title: string
     }
+    output: Entry
+  }
+  /** Creates a Folder, which groups Pages and Folders and has no content, at the end of its parent: the top of an Area, or beneath a Page or Folder. Needs the Write Role. */
+  create_folder: {
+    input: {
+      area_id: string
+      /** The Page or Folder to create it beneath; at the top of the Area if absent. */
+      parent_id?: string | null
+      title: string
+    }
+    output: Entry
+  }
+  /** Renames a Page. Its address keeps working. Needs the Write Role. */
+  rename_page: {
+    input: {
+      id: string
+      title: string
+    }
+    output: Entry
+  }
+  /** Renames a Folder. Needs the Write Role. */
+  rename_folder: {
+    input: {
+      id: string
+      title: string
+    }
+    output: Entry
+  }
+  /** Gets a Page by its ID, with its Area and the caller's Role on it. A Page the caller cannot read is reported as not found. */
+  get_page: {
+    input: {
+      id: string
+    }
+    output: Page
+  }
+  /** Gets the tree of Pages and Folders of an Area, each in the order of its siblings. */
+  get_tree: {
+    input: {
+      area_id: string
+    }
+    output: Tree
   }
 }

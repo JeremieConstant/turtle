@@ -1,8 +1,10 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
   import AppHeader from '../components/AppHeader.svelte'
+  import TitleForm, { ADD_ACTIONS } from '../components/TitleForm.svelte'
+  import TreeEntry from '../components/TreeEntry.svelte'
   import { call, OperationError } from '../lib/ops'
-  import type { Area } from '../lib/operations.gen'
+  import type { Area, Entry, Kind } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { areaAddress } from '../lib/routes'
   import NotFoundScreen from './NotFoundScreen.svelte'
@@ -22,12 +24,28 @@
   let busy = $state(false)
   let error = $state<string | null>(null)
 
-  call('get_area', { id })
-    .then(found => (area = found))
-    .catch(caught => {
+  /** The top of the tree, in order. */
+  let entries = $state.raw<Entry[] | null>(null)
+  const writable = $derived(area !== null && area.role !== 'read')
+
+  /** Loads the Area and its tree; again after anything in the tree changed. */
+  async function load() {
+    try {
+      const tree = await call('get_tree', { area_id: id })
+      area = tree.area
+      entries = tree.entries
+    } catch (caught) {
       if (caught instanceof OperationError && caught.kind === 'not_found') missing = true
       else loadFailed = true
-    })
+    }
+  }
+  void load()
+
+  async function addAtTop(title: string, kind: Kind) {
+    const input = { area_id: id, title }
+    await call(kind === 'folder' ? 'create_folder' : 'create_page', input)
+    await load()
+  }
 
   $effect(() => {
     if (area) document.title = `${area.name} · Turtle`
@@ -91,7 +109,22 @@
           {/if}
         </div>
       {/if}
-      <p class="muted">Your Role here: {area.role}. This Area has no Pages yet.</p>
+      <p class="muted">Your Role here: {area.role}.</p>
+      {#if entries && entries.length > 0}
+        <ul class="tree">
+          {#each entries as entry (entry.id)}
+            <TreeEntry {entry} areaId={id} {writable} onchange={load} />
+          {/each}
+        </ul>
+      {:else if entries}
+        <p class="muted">This Area has no Pages yet.</p>
+      {/if}
+      {#if writable}
+        <section>
+          <h2>Add to the top of this Area</h2>
+          <TitleForm label="Title of the new entry" actions={ADD_ACTIONS} onsubmit={addAtTop} />
+        </section>
+      {/if}
     {/if}
   </main>
 {/if}
@@ -117,6 +150,18 @@
   input {
     flex: 1;
     min-width: 0;
+  }
+
+  .tree {
+    margin: var(--space-4) 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  h2 {
+    margin-bottom: 0;
+    font-size: var(--text-base);
+    line-height: var(--leading-tight);
   }
 
   .muted {

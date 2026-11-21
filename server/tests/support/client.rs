@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest, Message};
 use yrs::types::text::YChange;
 use yrs::updates::decoder::Decode;
 use yrs::{
@@ -58,13 +58,23 @@ pub struct TestClient {
 }
 
 impl TestClient {
+    /// Tries to open a Page with the given session cookie (`name=value`) and
+    /// returns the HTTP status the server answered the upgrade with.
+    pub async fn try_connect(addr: SocketAddr, page: &str, cookie: Option<&str>) -> u16 {
+        match tokio::time::timeout(CONNECT_TIMEOUT, open_socket(addr, page, cookie)).await {
+            Err(_) => panic!("connecting to {page} timed out"),
+            Ok(Ok((_, response))) => response.status().as_u16(),
+            Ok(Err(tungstenite::Error::Http(response))) => response.status().as_u16(),
+            Ok(Err(error)) => panic!("connecting to {page}: {error}"),
+        }
+    }
+
     /// Connects to a Page and returns once the stored content has arrived.
-    pub async fn connect(addr: SocketAddr, page: &str) -> TestClient {
-        let url = format!("ws://{addr}/ws/{page}");
-        let (socket, _) = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
+    pub async fn connect(addr: SocketAddr, page: &str, cookie: Option<&str>) -> TestClient {
+        let (socket, _) = tokio::time::timeout(CONNECT_TIMEOUT, open_socket(addr, page, cookie))
             .await
-            .unwrap_or_else(|_| panic!("connecting to {url} timed out"))
-            .unwrap_or_else(|error| panic!("connecting to {url}: {error}"));
+            .unwrap_or_else(|_| panic!("connecting to {page} timed out"))
+            .unwrap_or_else(|error| panic!("connecting to {page}: {error}"));
         let (mut sink, mut stream) = socket.split();
 
         let shared = Arc::new(Shared {
@@ -248,6 +258,22 @@ impl Drop for TestClient {
         self.reader.abort();
         self.writer.abort();
     }
+}
+
+type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn open_socket(
+    addr: SocketAddr,
+    page: &str,
+    cookie: Option<&str>,
+) -> Result<(Socket, tungstenite::handshake::client::Response), tungstenite::Error> {
+    let mut request = format!("ws://{addr}/ws/{page}").into_client_request()?;
+    if let Some(cookie) = cookie {
+        request
+            .headers_mut()
+            .insert("Cookie", cookie.parse().expect("a cookie is a valid header"));
+    }
+    tokio_tungstenite::connect_async(request).await
 }
 
 fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {

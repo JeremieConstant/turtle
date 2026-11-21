@@ -13,11 +13,12 @@ use anyhow::Context;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
+use ops::permissions::Role;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -51,6 +52,8 @@ struct OpenPage {
 }
 
 struct App {
+    /// Decides who may open which Page.
+    core: Arc<ops::Core>,
     db: Mutex<rusqlite::Connection>,
     pages: Mutex<HashMap<String, Arc<OpenPage>>>,
     next_connection: AtomicU64,
@@ -141,10 +144,11 @@ async fn main() -> anyhow::Result<()> {
     // Opening the core brings the schema up to date; the Page store gets its
     // own connection so live editing does not wait behind operations.
     let db_path = store::database_in(&data_dir)?;
-    let core = ops::Core::open(&db_path)?;
+    let core = Arc::new(ops::Core::open(&db_path)?);
     let db = store::open(&db_path)?;
 
     let app = Arc::new(App {
+        core: core.clone(),
         db: Mutex::new(db),
         pages: Mutex::new(HashMap::new()),
         next_connection: AtomicU64::new(1),
@@ -227,10 +231,37 @@ impl<E: Into<anyhow::Error>> From<E> for Failure {
     }
 }
 
+/// The Role the caller holds on a Page, or the response that turns them
+/// away: 401 when nobody is signed in, 404 for anything but a Page they can
+/// read (a Folder, a Page of the first slice without an Area).
+async fn page_role(app: &Arc<App>, headers: HeaderMap, page_id: &str) -> Result<Role, Response> {
+    let core = app.core.clone();
+    let page_id = page_id.to_string();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let principal = http_api::principal(&core, &headers)?;
+        if principal == ops::Principal::Anonymous {
+            return Ok(None);
+        }
+        let page = ops::tree::get_page(&core, &principal, ops::tree::PageId { id: page_id })?;
+        Ok(Some(page.output.role))
+    })
+    .await;
+    match outcome {
+        Ok(Ok(Some(role))) => Ok(role),
+        Ok(Ok(None)) => Err((StatusCode::UNAUTHORIZED, "Sign in first.").into_response()),
+        Ok(Err(error)) => Err(http_api::error_response(error)),
+        Err(error) => Err(http_api::error_response(ops::OpError::Internal(error.into()))),
+    }
+}
+
 async fn read_markdown(
     State(app): State<Arc<App>>,
     Path(page_id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Response, Failure> {
+    if let Err(refused) = page_role(&app, headers, &page_id).await {
+        return Ok(refused);
+    }
     let page = app.open_page(&page_id)?;
     let markdown = markdown::to_markdown(&ydoc::read(&page.doc));
     Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], markdown).into_response())
@@ -241,25 +272,40 @@ async fn read_markdown(
 async fn write_markdown(
     State(app): State<Arc<App>>,
     Path(page_id): Path<String>,
+    headers: HeaderMap,
     body: String,
-) -> Result<StatusCode, Failure> {
+) -> Result<Response, Failure> {
+    match page_role(&app, headers, &page_id).await {
+        Ok(role) if role >= Role::Write => {}
+        Ok(_) => {
+            let message = "Only someone with the Write Role can change this Page.";
+            return Ok((StatusCode::FORBIDDEN, message).into_response());
+        }
+        Err(refused) => return Ok(refused),
+    }
     let page = app.open_page(&page_id)?;
     if let Some(update) = ydoc::write(&page.doc, &markdown::from_markdown(&body)) {
         page.unsaved.store(true, Ordering::SeqCst);
         let _ = page.frames.send((0, frame(FRAME_UPDATE, &update)));
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn connect(
     State(app): State<Arc<App>>,
     Path(page_id): Path<String>,
+    headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Failure> {
+    let role = match page_role(&app, headers, &page_id).await {
+        Ok(role) => role,
+        Err(refused) => return Ok(refused),
+    };
     let page = app.open_page(&page_id)?;
     let connection = app.next_connection.fetch_add(1, Ordering::SeqCst);
+    let may_edit = role >= Role::Write;
     Ok(upgrade.on_upgrade(move |socket| async move {
-        if let Err(error) = serve_connection(socket, page, connection).await {
+        if let Err(error) = serve_connection(socket, page, connection, may_edit).await {
             eprintln!("connection {connection} ended with an error: {error:#}");
         }
     }))
@@ -276,6 +322,9 @@ async fn serve_connection(
     socket: WebSocket,
     page: Arc<OpenPage>,
     connection: u64,
+    // Without the Write Role, edits are dropped: someone who can only read
+    // follows the Page but never changes it.
+    may_edit: bool,
 ) -> anyhow::Result<()> {
     let (mut outgoing, mut incoming) = socket.split();
 
@@ -304,6 +353,7 @@ async fn serve_connection(
                     Some(Err(error)) => break Err(error.into()),
                 };
                 match data.first() {
+                    Some(&FRAME_UPDATE) if !may_edit => {}
                     Some(&FRAME_UPDATE) => {
                         let applied = Update::decode_v1(&data[1..])
                             .context("unreadable update")

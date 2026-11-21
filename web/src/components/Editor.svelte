@@ -11,12 +11,15 @@
     doc,
     connection,
     person,
+    editable = true,
     onready,
   }: {
     doc: Y.Doc
     /** Where the cursors of the others come from. */
     connection: { awareness: Awareness }
     person: Person
+    /** False for someone who can only read the Page. */
+    editable?: boolean
     /** Called with the editor once it runs. It lives exactly as long as this component. */
     onready: (editor: Editor) => void
   } = $props()
@@ -34,7 +37,8 @@
         Collaboration.configure({ document: doc }),
         CollaborationCaret.configure({ provider: connection, user: person }),
       ],
-      autofocus: true,
+      editable,
+      autofocus: editable,
     })
     onready(editor)
     return () => editor.destroy()
