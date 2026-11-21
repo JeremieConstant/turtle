@@ -2,6 +2,10 @@
 
 `scripts/check.sh` is the definition of done: it runs everything CI runs. Coding standards for review are in `CODING_STANDARDS.md`.
 
+## Commits
+
+The commit that finishes an issue ends its message with `Closes #N`. A bare `(#N)` in the title does not close the issue on push. Commits for an unfinished issue use `Refs #N`.
+
 ## Agent skills
 
 ### Issue tracker
