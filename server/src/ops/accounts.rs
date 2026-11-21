@@ -170,6 +170,7 @@ pub fn sign_out(core: &Core, principal: &Principal, _: Nothing) -> OpResult<()> 
     {
         core.db()
             .execute("DELETE FROM sessions WHERE id = ?1", [&session.0])?;
+        core.access_changed();
     }
     Ok(Reply {
         output: (),

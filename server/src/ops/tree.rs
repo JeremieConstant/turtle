@@ -293,7 +293,7 @@ impl Kind {
 }
 
 /// The hidden root an Area's tree hangs from.
-fn root_of(db: &Connection, area_id: &str) -> Result<String, OpError> {
+pub(super) fn root_of(db: &Connection, area_id: &str) -> Result<String, OpError> {
     Ok(db.query_row(
         "SELECT id FROM nodes WHERE area_id = ?1 AND parent_id IS NULL",
         [area_id],

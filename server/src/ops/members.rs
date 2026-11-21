@@ -138,6 +138,7 @@ pub fn deactivate_member(core: &Core, principal: &Principal, input: MemberId) ->
         transaction.execute("DELETE FROM single_use_links WHERE member_id = ?1", [&target.id])?;
     }
     transaction.commit()?;
+    core.access_changed();
     Ok(MemberEntry {
         active: false,
         ..target
@@ -175,6 +176,7 @@ pub fn set_workspace_admin(
         rusqlite::params![input.workspace_admin, target.id],
     )?;
     transaction.commit()?;
+    core.access_changed();
     Ok(MemberEntry {
         workspace_admin: input.workspace_admin,
         ..target
@@ -324,6 +326,7 @@ pub fn reset_password(core: &Core, _: &Principal, input: NewPassword) -> OpResul
     transaction.execute("DELETE FROM sessions WHERE member_id = ?1", [&member.id])?;
     let secret = start_session(core, &transaction, &member.id)?;
     transaction.commit()?;
+    core.access_changed();
     Ok(Reply {
         output: member,
         session: SessionChange::Start(secret),

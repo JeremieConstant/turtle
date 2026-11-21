@@ -18,6 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
+use ops::permissions::Role;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -316,15 +317,20 @@ async fn connect(
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Failure> {
-    if let Err(refused) = page_for(&app.core, headers.clone(), &page_id, Use::Read).await {
-        return Ok(refused);
-    }
+    // Watched before access is checked, so a change in between is noticed.
+    let access_changes = app.core.watch_access();
+    let role = match page_for(&app.core, headers.clone(), &page_id, Use::Read).await {
+        Ok(opened) => opened.role,
+        Err(refused) => return Ok(refused),
+    };
     let page = app.open_page(&page_id)?;
     let connection = app.next_connection.fetch_add(1, Ordering::SeqCst);
     let access = Access {
         core: app.core.clone(),
         headers,
         page_id,
+        role,
+        changes: access_changes,
     };
     Ok(upgrade.on_upgrade(move |socket| async move {
         if let Err(error) = serve_connection(socket, page, connection, access).await {
@@ -334,14 +340,28 @@ async fn connect(
 }
 
 /// What an open editing connection needs to check its access again: the
-/// request it was opened with and the Page it is for.
+/// request it was opened with, the Page it is for and the Role it was opened
+/// with.
 struct Access {
     core: Arc<ops::Core>,
     headers: HeaderMap,
     page_id: String,
+    role: Role,
+    /// Fires whenever someone's access may have changed.
+    changes: tokio::sync::watch::Receiver<u64>,
 }
 
 impl Access {
+    /// Whether the connection still holds the Role it was opened with. Once
+    /// it does not, it is closed: the editor opens the Page again and gets
+    /// its new Role, or finds it can no longer read it.
+    async fn still_holds_role(&self) -> bool {
+        match page_for(&self.core, self.headers.clone(), &self.page_id, Use::Read).await {
+            Ok(page) => page.role == self.role,
+            Err(_) => false,
+        }
+    }
+
     /// Whether the connection may still use the Page that way now. It may
     /// not once the session ended or expired, the Page can no longer be
     /// read, or, for a change, the Write Role is gone.
@@ -364,7 +384,7 @@ async fn serve_connection(
     socket: WebSocket,
     page: Arc<OpenPage>,
     connection: u64,
-    access: Access,
+    mut access: Access,
 ) -> anyhow::Result<()> {
     let (mut outgoing, mut incoming) = socket.split();
 
@@ -390,7 +410,12 @@ async fn serve_connection(
     let result = loop {
         tokio::select! {
             _ = recheck.tick() => {
-                if access.allows(Use::Read).await.is_err() {
+                if !access.still_holds_role().await {
+                    break Ok(());
+                }
+            }
+            changed = access.changes.changed() => {
+                if changed.is_err() || !access.still_holds_role().await {
                     break Ok(());
                 }
             }

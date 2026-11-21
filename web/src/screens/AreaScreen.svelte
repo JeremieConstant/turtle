@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
   import AppHeader from '../components/AppHeader.svelte'
+  import Grants from '../components/Grants.svelte'
   import TitleForm, { ADD_ACTIONS } from '../components/TitleForm.svelte'
   import TreeEntry from '../components/TreeEntry.svelte'
   import { call, OperationError } from '../lib/ops'
@@ -140,6 +141,12 @@
           <h2>Add to the top of this Area</h2>
           <TitleForm label="Title of the new Page or Folder" actions={ADD_ACTIONS} onsubmit={addAtTop} />
         </section>
+      {/if}
+      {#if area.role === 'admin'}
+        <!-- Created anew whenever the Role changes, so it never shows a stale list. -->
+        {#key area.role}
+          <Grants areaId={id} onrolechange={reload} />
+        {/key}
       {/if}
     {/if}
   </main>

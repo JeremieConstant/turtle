@@ -7,6 +7,9 @@
 
 pub mod accounts;
 pub mod areas;
+#[cfg(test)]
+mod every_operation;
+pub mod grants;
 pub mod members;
 pub mod permissions;
 pub mod tree;
@@ -24,6 +27,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct Core {
     db: Mutex<Connection>,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// Counts the changes that may have taken access away or changed a Role,
+    /// so open editors check theirs again at once.
+    access: tokio::sync::watch::Sender<u64>,
 }
 
 impl Core {
@@ -35,11 +41,23 @@ impl Core {
                     .duration_since(UNIX_EPOCH)
                     .map_or(0, |since| since.as_secs() as i64)
             }),
+            access: tokio::sync::watch::Sender::new(0),
         })
     }
 
     pub fn db(&self) -> MutexGuard<'_, Connection> {
         self.db.lock().unwrap()
+    }
+
+    /// Says that someone's access may have changed: a Grant, a session, or
+    /// whether a Member is active or Workspace Admin.
+    pub fn access_changed(&self) {
+        self.access.send_modify(|changes| *changes += 1);
+    }
+
+    /// Notices every `access_changed` from now on.
+    pub fn watch_access(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.access.subscribe()
     }
 
     /// Seconds since the Unix epoch.
@@ -239,6 +257,7 @@ pub fn catalogue() -> Catalogue {
     accounts::register(&mut catalogue);
     members::register(&mut catalogue);
     areas::register(&mut catalogue);
+    grants::register(&mut catalogue);
     tree::register(&mut catalogue);
     catalogue
 }

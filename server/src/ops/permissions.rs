@@ -29,6 +29,15 @@ impl Role {
         }
     }
 
+    fn from_stored(stored: &str) -> Option<Role> {
+        match stored {
+            "read" => Some(Role::Read),
+            "write" => Some(Role::Write),
+            "admin" => Some(Role::Admin),
+            _ => None,
+        }
+    }
+
     fn from_rank(rank: i64) -> Option<Role> {
         match rank {
             1 => Some(Role::Read),
@@ -53,6 +62,14 @@ impl Holder {
             Holder::AllMembers => "all_members".into(),
         }
     }
+
+    fn from_stored(stored: &str) -> Option<Holder> {
+        match stored.split_once(':') {
+            Some(("member", id)) => Some(Holder::Member(id.to_string())),
+            None if stored == "all_members" => Some(Holder::AllMembers),
+            _ => None,
+        }
+    }
 }
 
 /// Gives a holder a Role on a node, replacing any Role they held there.
@@ -63,6 +80,28 @@ pub fn grant(db: &Connection, node_id: &str, holder: &Holder, role: Role) -> rus
         rusqlite::params![node_id, holder.stored(), role.stored()],
     )?;
     Ok(())
+}
+
+/// Takes away the Grant a holder has on a node. Says whether there was one.
+pub fn revoke(db: &Connection, node_id: &str, holder: &Holder) -> rusqlite::Result<bool> {
+    let removed = db.execute(
+        "DELETE FROM grants WHERE node_id = ?1 AND holder = ?2",
+        rusqlite::params![node_id, holder.stored()],
+    )?;
+    Ok(removed > 0)
+}
+
+/// The Grants given on a node itself, not the ones it inherits.
+pub fn grants_on(db: &Connection, node_id: &str) -> anyhow::Result<Vec<(Holder, Role)>> {
+    let mut statement = db.prepare("SELECT holder, role FROM grants WHERE node_id = ?1")?;
+    let rows = statement.query_map([node_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    let mut grants = Vec::new();
+    for row in rows {
+        let (holder, role) = row?;
+        let parsed = Holder::from_stored(&holder).zip(Role::from_stored(&role));
+        grants.push(parsed.ok_or_else(|| anyhow::anyhow!("node {node_id} has the unreadable Grant {holder} {role}"))?);
+    }
+    Ok(grants)
 }
 
 /// The Role a principal holds on a node, or `None` for no access. A node that

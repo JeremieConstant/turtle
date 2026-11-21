@@ -25,7 +25,11 @@
       else loadFailed = true
     })
 
-  /** When the last check after a lost connection began; the editor retries every second. */
+  /**
+   * When the last check that could not reach Turtle began; the editor retries
+   * every second. A check that got an answer does not hold back the next one,
+   * so a Role that changes twice in quick succession still reaches the editor.
+   */
   let lastCheck = 0
   const CHECK_INTERVAL = 5000
 
@@ -42,6 +46,7 @@
       await session.load()
       if (!session.member) return
       page = await call('get_page', { id })
+      lastCheck = 0
     } catch (caught) {
       if (caught instanceof OperationError && caught.kind === 'not_found') missing = true
       // Otherwise Turtle cannot be reached; the editor keeps retrying.

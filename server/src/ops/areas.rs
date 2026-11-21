@@ -101,18 +101,28 @@ pub fn rename_area(core: &Core, principal: &Principal, input: RenameArea) -> OpR
     let db = core.db();
     // Access is checked before the input, so an unreadable Area stays hidden
     // whatever name is sent.
-    let area = readable_area(&db, principal, &input.id)?;
-    if area.role < Role::Admin {
-        return Err(OpError::NotPermitted(
-            "Only an Admin of this Area can rename it.".into(),
-        ));
-    }
+    let area = administered_area(&db, principal, &input.id, "Only an Admin of this Area can rename it.")?;
     let name = valid_name(&input.name)?;
     db.execute(
         "UPDATE areas SET name = ?1 WHERE id = ?2",
         rusqlite::params![name, area.id],
     )?;
     Ok(Area { name, ..area }.into())
+}
+
+/// An Area the principal is Admin of. One they cannot read is not found; one
+/// they can read without being Admin is refused with `refusal`.
+pub(super) fn administered_area(
+    db: &Connection,
+    principal: &Principal,
+    id: &str,
+    refusal: &str,
+) -> Result<Area, OpError> {
+    let area = readable_area(db, principal, id)?;
+    if area.role < Role::Admin {
+        return Err(OpError::NotPermitted(refusal.into()));
+    }
+    Ok(area)
 }
 
 /// An Area the principal can read. One they cannot read is reported exactly

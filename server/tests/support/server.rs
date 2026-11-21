@@ -74,6 +74,25 @@ impl TestServer {
         self.signed_in(response)
     }
 
+    /// Has `admin`, a Workspace Admin, invite a new Member, who accepts the
+    /// invitation and is signed in.
+    pub async fn invite(&self, admin: &Member, name: &str) -> Member {
+        let email = format!("{}@example.org", name.to_lowercase());
+        let link = admin.call("invite_member", serde_json::json!({ "email": email })).await;
+        let address = link["address"].as_str().expect("an invitation has an address");
+        let secret = address.rsplit('/').next().unwrap();
+        let response = http::request(
+            self.addr,
+            "POST",
+            "/api/accept_invitation",
+            &[("Content-Type", "application/json")],
+            &serde_json::json!({ "secret": secret, "name": name, "password": PASSWORD }).to_string(),
+        )
+        .await;
+        assert_eq!(response.status, 200, "accepting an invitation: {}", response.body);
+        self.signed_in(response)
+    }
+
     fn signed_in(&self, response: http::Response) -> Member {
         let cookie = response
             .header("set-cookie")
@@ -174,6 +193,25 @@ impl Member {
         .await;
         assert_eq!(response.status, 200, "{operation}: {}", response.body);
         serde_json::from_str(&response.body).expect("an operation answers with JSON")
+    }
+
+    /// The Member's ID.
+    pub async fn id(&self) -> String {
+        let session = self.call("get_session", serde_json::json!({})).await;
+        session["member"]["id"].as_str().expect("signed in").to_string()
+    }
+
+    /// Calls an operation and returns the HTTP status and the body.
+    pub async fn try_call(&self, operation: &str, input: Value) -> (u16, String) {
+        let response = http::request(
+            self.addr,
+            "POST",
+            &format!("/api/{operation}"),
+            &[("Content-Type", "application/json"), ("Cookie", &self.cookie)],
+            &input.to_string(),
+        )
+        .await;
+        (response.status, response.body)
     }
 
     /// Creates an Area with a Page at its top, and returns the Page's ID.

@@ -18,6 +18,33 @@ export type Entry = {
   title: string
 }
 
+export type Grant = {
+  holder: GrantHolder
+  /** The Member's name, or "All Members". */
+  name: string
+  role: Role
+}
+
+export type GrantableMember = {
+  id: string
+  name: string
+}
+
+export type GrantHolder = {
+  kind: "member"
+  member_id: string
+} | {
+  kind: "all_members"
+}
+
+export type GrantList = {
+  area: Area
+  /** All Members first, then each Member by name. */
+  grants: Grant[]
+  /** Every active Member by name, to choose whom to give a Role. */
+  members: GrantableMember[]
+}
+
 export type Kind = "page" | "folder"
 
 export type Member = {
@@ -50,6 +77,11 @@ export type Page = {
 }
 
 export type Role = "read" | "write" | "admin"
+
+export type RoleAfterwards = {
+  /** The Role the caller now holds on the Area; absent once they have none. */
+  role?: Role | null
+}
 
 export type Session = {
   /** The signed-in Member, if anyone is signed in. */
@@ -182,6 +214,30 @@ export type Operations = {
       name: string
     }
     output: Area
+  }
+  /** Lists the Grants of an Area, and the active Members one can be given to. Needs the Admin Role on the Area. */
+  list_grants: {
+    input: {
+      area_id: string
+    }
+    output: GrantList
+  }
+  /** Gives a Member, or all Members at once, a Role on an Area, replacing the Role they held there. Someone holding several Grants gets the highest Role. The last Admin of an Area keeps that Role. Needs the Admin Role on the Area. */
+  set_grant: {
+    input: {
+      area_id: string
+      holder: GrantHolder
+      role: Role
+    }
+    output: RoleAfterwards
+  }
+  /** Takes away the Grant of a Member, or of all Members, on an Area. The last Admin of an Area keeps that Role. Needs the Admin Role on the Area. */
+  remove_grant: {
+    input: {
+      area_id: string
+      holder: GrantHolder
+    }
+    output: RoleAfterwards
   }
   /** Creates a Page at the end of its parent: the top of an Area, or beneath a Page or Folder. Needs the Write Role. */
   create_page: {
