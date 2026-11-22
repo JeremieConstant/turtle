@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { areaAddress, inShell, pageAddress, parseAddress } from './routes'
+import { areaAddress, inShell, pageAddress, parseAddress, searchAddress } from './routes'
 
 test('a Page address carries the ID and a readable title', () => {
   expect(parseAddress('/p/abc123/release-notes')).toEqual({ screen: 'page', id: 'abc123' })
@@ -102,4 +102,27 @@ test('setup, signing in and the links someone was given stay outside the shell',
   for (const address of ['/setup', '/sign-in', '/join/s3cret', '/reset-password/s3cret']) {
     expect(inShell(parseAddress(address)), address).toBe(false)
   }
+})
+
+test('the search screen carries its query in the address', () => {
+  expect(parseAddress('/search', '?q=rollback')).toEqual({ screen: 'search', query: 'rollback' })
+  expect(parseAddress('/search', '?q=release%20notes')).toEqual({ screen: 'search', query: 'release notes' })
+  expect(parseAddress('/search', '?q=a+b')).toEqual({ screen: 'search', query: 'a b' })
+})
+
+test('the search screen without a query has an empty one', () => {
+  expect(parseAddress('/search', '')).toEqual({ screen: 'search', query: '' })
+  expect(parseAddress('/search')).toEqual({ screen: 'search', query: '' })
+})
+
+test('a search address is built from the query and leads back to it', () => {
+  expect(searchAddress('rollback')).toBe('/search?q=rollback')
+  expect(searchAddress('größe & co?')).toBe('/search?q=gr%C3%B6%C3%9Fe%20%26%20co%3F')
+  expect(searchAddress('')).toBe('/search')
+  const [pathname, query] = searchAddress('a+b = c#d').split('?')
+  expect(parseAddress(pathname, `?${query}`)).toEqual({ screen: 'search', query: 'a+b = c#d' })
+})
+
+test('the search screen sits in the shell', () => {
+  expect(inShell(parseAddress('/search', '?q=x'))).toBe(true)
 })

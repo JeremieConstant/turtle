@@ -23,13 +23,13 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "list_areas",
-            "Lists the Areas the caller can read, by name.",
+            "Lists the Areas the caller can read: their own Personal Area first, then the others by name.",
             list_areas,
         )
         .changes = false;
     catalogue.add(
         "rename_area",
-        "Renames an Area. Needs the Admin Role on it.",
+        "Renames an Area. Needs the Admin Role on it. A Personal Area cannot be renamed.",
         rename_area,
     );
 }
@@ -40,6 +40,9 @@ pub struct Area {
     pub name: String,
     /// The Role the caller holds on the Area.
     pub role: Role,
+    /// Whether this is the caller's Personal Area: theirs alone, never
+    /// granted, renamed or deleted. Nobody else ever sees it.
+    pub personal: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -100,8 +103,27 @@ pub fn create_area(core: &Core, principal: &Principal, input: NewArea) -> OpResu
         id: area_id,
         name,
         role: Role::Admin,
+        personal: false,
     }
     .into())
+}
+
+/// What every Personal Area is called.
+const PERSONAL_AREA_NAME: &str = "Personal";
+
+/// Gives a new Member their Personal Area (ADR-0008). It carries no Grants:
+/// `permissions` lets its Member in and nobody else.
+pub(super) fn create_personal_area(db: &Connection, member_id: &str, now: i64) -> Result<(), OpError> {
+    let area_id = random_hex(16)?;
+    db.execute(
+        "INSERT INTO areas (id, name, created_at, personal_member_id) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![area_id, PERSONAL_AREA_NAME, now, member_id],
+    )?;
+    db.execute(
+        "INSERT INTO nodes (id, area_id, parent_id, kind, created_at) VALUES (?1, ?2, NULL, 'root', ?3)",
+        rusqlite::params![random_hex(16)?, area_id, now],
+    )?;
+    Ok(())
 }
 
 pub fn get_area(core: &Core, principal: &Principal, input: AreaId) -> OpResult<Area> {
@@ -123,8 +145,10 @@ pub fn rename_area(core: &Core, principal: &Principal, input: RenameArea) -> OpR
     Ok(Area { name, ..area }.into())
 }
 
-/// An Area the principal is Admin of. One they cannot read is not found; one
-/// they can read without being Admin is refused with `refusal`.
+/// An Area the principal is Admin of, to rename it or manage its Grants. One
+/// they cannot read is not found; one they can read without being Admin is
+/// refused with `refusal`. Their own Personal Area is refused too: it can be
+/// neither renamed nor granted.
 pub(super) fn administered_area(
     db: &Connection,
     principal: &Principal,
@@ -135,6 +159,11 @@ pub(super) fn administered_area(
     if area.role < Role::Admin {
         return Err(OpError::NotPermitted(refusal.into()));
     }
+    if area.personal {
+        return Err(OpError::NotPermitted(
+            "Your Personal Area is yours alone: it keeps its name, and nobody else can be given a Role on it. To share Pages, create another Area.".into(),
+        ));
+    }
     Ok(area)
 }
 
@@ -144,19 +173,20 @@ pub(super) fn readable_area(db: &Connection, principal: &Principal, id: &str) ->
     let not_found = || OpError::NotFound("There is no such Area.".into());
     let found = db
         .query_row(
-            "SELECT areas.name, nodes.id
+            "SELECT areas.name, nodes.id, areas.personal_member_id IS NOT NULL
              FROM areas JOIN nodes ON nodes.area_id = areas.id AND nodes.parent_id IS NULL
              WHERE areas.id = ?1",
             [id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, bool>(2)?)),
         )
         .optional()?;
-    let (name, root_id) = found.ok_or_else(not_found)?;
+    let (name, root_id, personal) = found.ok_or_else(not_found)?;
     let role = permissions::role_on(db, principal, &root_id)?.ok_or_else(not_found)?;
     Ok(Area {
         id: id.to_string(),
         name,
         role,
+        personal,
     })
 }
 
@@ -164,18 +194,18 @@ pub fn list_areas(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Ar
     signed_in(principal)?;
     let db = core.db();
     let mut statement = db.prepare(
-        "SELECT areas.id, areas.name, nodes.id
+        "SELECT areas.id, areas.name, nodes.id, areas.personal_member_id IS NOT NULL
          FROM areas JOIN nodes ON nodes.area_id = areas.id AND nodes.parent_id IS NULL
-         ORDER BY areas.name COLLATE NOCASE, areas.id",
+         ORDER BY areas.personal_member_id IS NULL, areas.name COLLATE NOCASE, areas.id",
     )?;
     let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, bool>(3)?))
     })?;
     let mut areas = Vec::new();
     for row in rows {
-        let (id, name, root_id) = row?;
+        let (id, name, root_id, personal) = row?;
         if let Some(role) = permissions::role_on(&db, principal, &root_id)? {
-            areas.push(Area { id, name, role });
+            areas.push(Area { id, name, role, personal });
         }
     }
     Ok(AreaList { areas }.into())
@@ -215,15 +245,20 @@ fn valid_name(name: &str) -> Result<String, OpError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::testing::{fresh, give_role, member};
+    use crate::ops::testing::{fresh, give_role, member, personal_area};
 
     fn named(name: &str) -> NewArea {
         NewArea { name: name.into() }
     }
 
-    fn names(core: &Core, principal: &Principal) -> Vec<String> {
+    /// The Areas listed for the principal, leaving out their Personal Area.
+    fn shared(core: &Core, principal: &Principal) -> Vec<Area> {
         let list = list_areas(core, principal, Nothing {}).unwrap().output;
-        list.areas.into_iter().map(|area| area.name).collect()
+        list.areas.into_iter().filter(|area| !area.personal).collect()
+    }
+
+    fn names(core: &Core, principal: &Principal) -> Vec<String> {
+        shared(core, principal).into_iter().map(|area| area.name).collect()
     }
 
     #[test]
@@ -259,9 +294,9 @@ mod tests {
         create_area(&core, &grace, named("Secret project")).unwrap();
         create_area(&core, &grace, named("Handbook")).unwrap();
 
-        let list = list_areas(&core, &ada, Nothing {}).unwrap().output;
+        let list = shared(&core, &ada);
 
-        let seen: Vec<_> = list.areas.iter().map(|area| (area.name.as_str(), area.role)).collect();
+        let seen: Vec<_> = list.iter().map(|area| (area.name.as_str(), area.role)).collect();
         assert_eq!(seen, [("Handbook", Role::Admin), ("Secret project", Role::Admin)]);
     }
 
@@ -303,8 +338,7 @@ mod tests {
 
         give_role(&core, &area.id, &linus, Role::Read);
 
-        let list = list_areas(&core, &linus, Nothing {}).unwrap().output;
-        assert_eq!(list.areas, [Area { role: Role::Read, ..area }]);
+        assert_eq!(shared(&core, &linus), [Area { role: Role::Read, ..area }]);
     }
 
     #[test]
@@ -352,6 +386,52 @@ mod tests {
         let refused = rename_area(&core, &grace, RenameArea { id: area.id.clone(), name: " ".into() });
         assert_eq!(refused.unwrap_err().kind(), "invalid_input");
         assert_eq!(names(&core, &grace), ["Engineering"]);
+    }
+
+    fn listed(core: &Core, principal: &Principal) -> Vec<(String, bool, Role)> {
+        let list = list_areas(core, principal, Nothing {}).unwrap().output;
+        list.areas.into_iter().map(|area| (area.name, area.personal, area.role)).collect()
+    }
+
+    #[test]
+    fn the_first_account_comes_with_a_personal_area_listed_before_the_others() {
+        let core = fresh();
+        let account = crate::ops::accounts::NewAccount {
+            name: "Ada".into(),
+            email: "ada@example.org".into(),
+            password: "a long enough password".into(),
+        };
+        let created = crate::ops::accounts::create_first_account(&core, &Principal::Anonymous, account).unwrap();
+        let ada = Principal::Member { id: created.output.id, workspace_admin: true, session: None, token: None };
+        create_area(&core, &ada, named("Engineering")).unwrap();
+        create_area(&core, &ada, named("Archive")).unwrap();
+
+        assert_eq!(
+            listed(&core, &ada),
+            [
+                ("Personal".into(), true, Role::Admin),
+                ("Archive".into(), false, Role::Admin),
+                ("Engineering".into(), false, Role::Admin),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_personal_area_is_seen_by_its_member_alone_not_even_by_a_workspace_admin() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let linus = member(&core, "Linus", false);
+        let ada = member(&core, "Ada", true);
+        let personal = personal_area(&core, &grace);
+
+        let seen = get_area(&core, &grace, AreaId { id: personal.clone() }).unwrap().output;
+        assert_eq!(seen, Area { id: personal.clone(), name: "Personal".into(), role: Role::Admin, personal: true });
+        for other in [&linus, &ada] {
+            assert_eq!(listed(&core, other), [("Personal".into(), true, Role::Admin)], "{other:?}");
+            let hidden = get_area(&core, other, AreaId { id: personal.clone() }).unwrap_err();
+            let missing = get_area(&core, other, AreaId { id: "no-such-area".into() }).unwrap_err();
+            assert_eq!((hidden.kind(), hidden.message()), (missing.kind(), missing.message()), "{other:?}");
+        }
     }
 
     #[test]

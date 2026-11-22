@@ -5,6 +5,8 @@ export type Route =
   | { screen: 'sign-in' }
   | { screen: 'area'; id: string }
   | { screen: 'page'; id: string }
+  /** Every result for a query. The query is part of the address, so a search can be shared. */
+  | { screen: 'search'; query: string }
   | { screen: 'members' }
   | { screen: 'tokens' }
   | { screen: 'agents' }
@@ -14,8 +16,10 @@ export type Route =
   | { screen: 'password-reset'; secret: string }
   | { screen: 'not-found' }
 
-export function parseAddress(pathname: string): Route {
+/** Reads an address: its path, and its query part as the address bar holds it, with the question mark. */
+export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/') return { screen: 'home' }
+  if (pathname === '/search') return { screen: 'search', query: new URLSearchParams(query).get('q') ?? '' }
   if (pathname === '/setup') return { screen: 'setup' }
   if (pathname === '/sign-in') return { screen: 'sign-in' }
   if (pathname === '/settings/members') return { screen: 'members' }
@@ -46,6 +50,11 @@ export function areaAddress(id: string, name: string): string {
 /** The address of a Page: its ID, then its title in a readable form. */
 export function pageAddress(id: string, title: string): string {
   return address('p', id, title)
+}
+
+/** The address that shows every result for a query. */
+export function searchAddress(query: string): string {
+  return query ? `/search?q=${encodeURIComponent(query)}` : '/search'
 }
 
 function address(prefix: 'a' | 'p', id: string, label: string): string {

@@ -34,50 +34,19 @@
   }
 </script>
 
-<main>
-  <strong class="brand">Turtle</strong>
-  <h1>{heading}</h1>
-  <p class="intro">{intro}</p>
-  <form onsubmit={submit}>
-    {@render children()}
-    {#if error}
-      <p class="error" role="alert">{error}</p>
-    {/if}
-    <button type="submit" disabled={busy}>{submitLabel}</button>
-  </form>
+<main class="standalone">
+  <div class="standalone-card">
+    <div>
+      <strong class="wordmark">Turtle</strong>
+      <h1>{heading}</h1>
+      <p class="muted">{intro}</p>
+    </div>
+    <form class="stack" onsubmit={submit}>
+      {@render children()}
+      {#if error}
+        <p class="error" role="alert">{error}</p>
+      {/if}
+      <button type="submit" class="btn primary" disabled={busy}>{submitLabel}</button>
+    </form>
+  </div>
 </main>
-
-<style>
-  main {
-    max-width: var(--width-form);
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-4);
-  }
-
-  .brand {
-    color: var(--color-focus);
-  }
-
-  h1 {
-    line-height: var(--leading-tight);
-  }
-
-  .intro {
-    color: var(--color-muted);
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .error {
-    margin: 0;
-    color: var(--color-danger);
-  }
-
-  button {
-    align-self: flex-start;
-  }
-</style>

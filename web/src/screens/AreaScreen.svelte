@@ -119,11 +119,15 @@
     {:else if area}
       <div class="head">
         <h1>{area.name}</h1>
-        {#if area.role === 'admin'}
+        {#if area.role === 'admin' && !area.personal}
           <button type="button" class="btn" onclick={() => renameDialog?.open(area?.name)}>Rename</button>
         {/if}
       </div>
-      <p class="sub">{ROLE_SENTENCES[area.role]}</p>
+      {#if area.personal}
+        <p class="sub">Only you can see this Area. To share Pages, create them in another Area.</p>
+      {:else}
+        <p class="sub">{ROLE_SENTENCES[area.role]}</p>
+      {/if}
 
       {#if entries && entries.length > 0}
         <ul class="entries" aria-label="Pages and Folders at the top of {area.name}">
@@ -156,7 +160,7 @@
         </div>
       {/if}
 
-      {#if area.role === 'admin'}
+      {#if area.role === 'admin' && !area.personal}
         <!-- Created anew whenever the Role changes, so it never shows a stale list. -->
         {#key area.role}
           <Grants areaId={id} onrolechange={rolesChanged} />

@@ -1,5 +1,6 @@
 <script lang="ts">
   import TokenManager from '../components/TokenManager.svelte'
+  import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { AgentEntry } from '../lib/operations.gen'
 
@@ -65,8 +66,14 @@
     })
   }
 
-  function deactivate(agent: AgentEntry) {
-    if (!confirm(`Deactivate ${agent.name}? Its Tokens stop working at once.`)) return
+  async function deactivate(agent: AgentEntry) {
+    const sure = await ask({
+      title: `Deactivate ${agent.name}?`,
+      message: 'Its Tokens stop working at once.',
+      action: 'Deactivate',
+      destructive: true,
+    })
+    if (!sure) return
     return attempt(async () => {
       changed(await call('deactivate_agent', { id: agent.id }))
       if (openTokens === agent.id) openTokens = null
@@ -74,137 +81,66 @@
   }
 </script>
 
-<main>
+<main class="screen">
   <h1>Agents</h1>
-  <p class="muted">
+  <p class="lede">
     A standalone Agent acts with its own name and Tokens, not as any person. Admins of an Area give it a Role there like a Member;
     a Role given to all Members does not include it.
   </p>
   {#if loadError}
     <p class="muted">{loadError}</p>
   {:else if agents !== null}
-    <form class="row" onsubmit={create}>
-      <input aria-label="Name of the new Agent" placeholder="Name, e.g. Release notes writer" required autocomplete="off" bind:value={name} />
-      <button type="submit" disabled={busy}>Create Agent</button>
+    <form class="controls" onsubmit={create}>
+      <input class="input grow" aria-label="Name of the new Agent" placeholder="Name, e.g. Release notes writer" required autocomplete="off" bind:value={name} />
+      <button type="submit" class="btn primary" disabled={busy}>Create Agent</button>
     </form>
 
     {#if error}
-      <p class="error" role="alert">{error}</p>
+      <p class="error section" role="alert">{error}</p>
     {/if}
 
     {#if agents.length === 0}
-      <p class="muted">There are no Agents yet.</p>
-    {/if}
-    <ul>
-      {#each agents as agent (agent.id)}
-        <li class:inactive={!agent.active}>
-          {#if renaming?.id === agent.id}
-            <form class="row" onsubmit={rename}>
-              <input aria-label="New name of {agent.name}" required autocomplete="off" bind:value={renaming.name} />
-              <button type="submit" disabled={busy}>Save</button>
-              <button type="button" onclick={() => (renaming = null)}>Cancel</button>
-            </form>
-          {:else}
-            <div>
-              <span>{agent.name}</span>
-              <small class="muted">{agent.active ? 'Agent' : 'Agent · Deactivated'}</small>
-            </div>
-            {#if agent.active}
-              <div class="actions">
-                <button type="button" aria-expanded={openTokens === agent.id} onclick={() => (openTokens = openTokens === agent.id ? null : agent.id)}>
-                  Tokens
-                </button>
-                <button type="button" disabled={busy} onclick={() => (renaming = { id: agent.id, name: agent.name })}>Rename</button>
-                <button type="button" disabled={busy} onclick={() => deactivate(agent)}>Deactivate</button>
+      <p class="muted section">There are no Agents yet.</p>
+    {:else}
+      <ul class="list section">
+        {#each agents as agent (agent.id)}
+          <li class:inactive={!agent.active}>
+            {#if renaming?.id === agent.id}
+              <form class="controls" onsubmit={rename}>
+                <input class="input grow" aria-label="New name of {agent.name}" required autocomplete="off" bind:value={renaming.name} />
+                <button type="submit" class="btn primary" disabled={busy}>Save</button>
+                <button type="button" class="btn" onclick={() => (renaming = null)}>Cancel</button>
+              </form>
+            {:else}
+              <div class="item">
+                <span class="item-name">{agent.name}</span>
+                <small class="hint">{agent.active ? 'Agent' : 'Agent · Deactivated'}</small>
+              </div>
+              {#if agent.active}
+                <div class="controls">
+                  <button
+                    type="button"
+                    class="btn"
+                    aria-expanded={openTokens === agent.id}
+                    onclick={() => (openTokens = openTokens === agent.id ? null : agent.id)}
+                  >
+                    Tokens
+                  </button>
+                  <button type="button" class="btn" disabled={busy} onclick={() => (renaming = { id: agent.id, name: agent.name })}>Rename</button>
+                  <button type="button" class="btn" disabled={busy} onclick={() => deactivate(agent)}>Deactivate</button>
+                </div>
+              {/if}
+            {/if}
+            {#if openTokens === agent.id && agent.active}
+              <div class="detail">
+                {#key agent.id}
+                  <TokenManager agentId={agent.id} />
+                {/key}
               </div>
             {/if}
-          {/if}
-          {#if openTokens === agent.id && agent.active}
-            <div class="tokens">
-              {#key agent.id}
-                <TokenManager agentId={agent.id} />
-              {/key}
-            </div>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 </main>
-
-<style>
-  main {
-    max-width: var(--width-content);
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-4);
-  }
-
-  h1 {
-    line-height: var(--leading-tight);
-  }
-
-  .row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .row input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  ul {
-    padding: 0;
-    list-style: none;
-  }
-
-  li {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-2) var(--space-3);
-    padding: var(--space-2) 0;
-    border-bottom: var(--line) solid var(--color-line);
-  }
-
-  li > div:first-child {
-    display: flex;
-    flex-direction: column;
-  }
-
-  li > form {
-    flex: 1;
-  }
-
-  .inactive span {
-    color: var(--color-muted);
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .tokens {
-    flex-basis: 100%;
-    padding: var(--space-3);
-    border: var(--line) solid var(--color-line);
-    border-radius: var(--radius-m);
-  }
-
-  .muted {
-    color: var(--color-muted);
-    font-size: var(--text-m);
-  }
-
-  small.muted {
-    font-size: var(--text-s);
-  }
-
-  .error {
-    color: var(--color-danger);
-  }
-</style>

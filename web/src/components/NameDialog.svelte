@@ -2,16 +2,22 @@
   import { tick } from 'svelte'
   import { OperationError } from '../lib/ops'
 
-  /** A small dialog that asks for one name and acts on it: a new Area, Page or Folder, or a new name for one. */
+  /** A small dialog that asks for one value and acts on it: the name of a new Area, Page or Folder, a new name for one, or a link address. */
   const {
     label,
     action,
+    hint,
+    optional = false,
     onsubmit,
   }: {
-    /** What the name is for. */
+    /** What the value is for. */
     label: string
     /** What the button says. */
     action: string
+    /** Shown under the field. */
+    hint?: string
+    /** Lets the button act on an empty value too, as when an empty link address removes the link. */
+    optional?: boolean
     /** Runs the operation. If it fails the dialog stays open and says why. */
     onsubmit: (name: string) => Promise<void>
   } = $props()
@@ -22,7 +28,7 @@
   let busy = $state(false)
   let error = $state<string | null>(null)
 
-  /** Opens the dialog. A name given here is filled in and selected, so typing replaces it. */
+  /** Opens the dialog. A value given here is filled in and selected, so typing replaces it. */
   export async function open(initial = '') {
     name = initial
     error = null
@@ -48,44 +54,24 @@
 </script>
 
 <dialog bind:this={dialog} closedby="any">
-  <form onsubmit={submit}>
+  <form class="dialog-body" onsubmit={submit}>
     <label>
       <span>{label}</span>
       <!-- svelte-ignore a11y_autofocus -->
       <input bind:this={input} bind:value={name} autocomplete="off" autofocus />
+      {#if hint}<small class="hint">{hint}</small>{/if}
     </label>
     {#if error}
       <p class="error" role="alert">{error}</p>
     {/if}
-    <div class="actions">
+    <div class="dialog-actions">
       <button type="button" class="btn" onclick={() => dialog.close()}>Cancel</button>
-      <button type="submit" class="btn primary" disabled={busy || !name.trim()}>{action}</button>
+      <button type="submit" class="btn primary" disabled={busy || (!optional && !name.trim())}>{action}</button>
     </div>
   </form>
 </dialog>
 
 <style>
-  dialog {
-    width: min(var(--width-form), var(--width-floating-max));
-  }
-
-  dialog[open] {
-    animation: pop var(--dur-base) var(--ease-out);
-  }
-
-  @keyframes pop {
-    from {
-      opacity: 0;
-      transform: translateY(var(--space-1)) scale(var(--press-scale));
-    }
-  }
-
-  form {
-    display: grid;
-    gap: var(--space-4);
-    padding: var(--space-4);
-  }
-
   label {
     display: grid;
     gap: var(--space-2);
@@ -108,11 +94,5 @@
     margin: 0;
     color: var(--color-danger);
     font-size: var(--text-m);
-  }
-
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
   }
 </style>
