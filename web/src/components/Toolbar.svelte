@@ -6,7 +6,7 @@
    * away from the text.
    */
   import type { Editor } from '@tiptap/core'
-  import { BLOCKS, LISTS, MARKS, STYLES, shortcut, type Format } from '../lib/format'
+  import { BLOCKS, CALLOUTS, LISTS, MARKS, STYLES, shortcut, type Format } from '../lib/format'
   import { liveSearch } from '../lib/liveSearch.svelte'
   import { menuKeys, openMenu } from '../lib/menu'
   import { pageIdOf } from '../lib/pageLink'
@@ -27,7 +27,7 @@
         current = {
           style: STYLES.find(f => f.active?.(watched)) ?? null,
           active: new Set(
-            [...MARKS, ...LISTS, ...BLOCKS, LINK].filter(f => f.active?.(watched)).map(f => f.id),
+            [...MARKS, ...LISTS, ...BLOCKS, ...CALLOUTS, LINK].filter(f => f.active?.(watched)).map(f => f.id),
           ),
           undo: watched.can().undo(),
           redo: watched.can().redo(),
@@ -50,6 +50,15 @@
 
   function chooseStyle(f: Format) {
     styleMenu?.hidePopover()
+    f.run(editor)
+  }
+
+  let calloutButton = $state<HTMLButtonElement>()
+  let calloutMenu = $state<HTMLDivElement>()
+  const inCallout = $derived(CALLOUTS.some(f => current.active.has(f.id)))
+
+  function chooseCallout(f: Format) {
+    calloutMenu?.hidePopover()
     f.run(editor)
   }
 
@@ -191,6 +200,33 @@
   {#each LISTS as f (f.id)}{@render button(f)}{/each}
   <span class="separator" aria-hidden="true"></span>
   {#each BLOCKS as f (f.id)}{@render button(f)}{/each}
+  <!-- Like the text style, a menu: it takes the focus and hands it back to the text. -->
+  <button
+    type="button"
+    class="tool"
+    class:on={inCallout}
+    bind:this={calloutButton}
+    aria-haspopup="menu"
+    aria-label="Callout"
+    title="Callout"
+    onclick={() => calloutMenu && calloutButton && openMenu(calloutMenu, calloutButton)}
+  >
+    <Icon name="callout" />
+  </button>
+  <div class="menu" popover role="menu" tabindex="-1" aria-label="Callout" bind:this={calloutMenu} onkeydown={menuKeys}>
+    {#each CALLOUTS as f (f.id)}
+      <button
+        type="button"
+        class="menu-item style-item callout-item {f.id}"
+        role="menuitemcheckbox"
+        aria-checked={current.active.has(f.id)}
+        onclick={() => chooseCallout(f)}
+      >
+        <Icon name={f.icon} />
+        <span class="label">{f.label}</span>
+      </button>
+    {/each}
+  </div>
 </div>
 
 <dialog bind:this={linkDialog} closedby="any" onclose={() => editor.commands.focus()}>
@@ -337,6 +373,23 @@
 
   .style-item[aria-checked='true'] {
     font-weight: var(--weight-medium);
+  }
+
+  /* Each kind shows in its own colour, as the callout will. */
+  .callout-item.callout-note :global(svg) {
+    color: var(--color-callout-note);
+  }
+
+  .callout-item.callout-tip :global(svg) {
+    color: var(--color-callout-tip);
+  }
+
+  .callout-item.callout-warning :global(svg) {
+    color: var(--color-callout-warning);
+  }
+
+  .callout-item.callout-danger :global(svg) {
+    color: var(--color-callout-danger);
   }
 
   .label {

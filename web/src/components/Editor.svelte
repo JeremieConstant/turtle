@@ -2,10 +2,12 @@
   import { Editor } from '@tiptap/core'
   import Collaboration from '@tiptap/extension-collaboration'
   import CollaborationCaret from '@tiptap/extension-collaboration-caret'
+  import { TaskItem, TaskList } from '@tiptap/extension-list'
   import StarterKit from '@tiptap/starter-kit'
   import type { Awareness } from 'y-protocols/awareness'
   import type * as Y from 'yjs'
   import { AgentChanges } from '../lib/agent-changes'
+  import { Callout } from '../lib/callout'
   import { PageLink } from '../lib/pageLink'
   import { personColor, type Person } from '../lib/person'
 
@@ -62,6 +64,10 @@
         }),
         AgentChanges,
         PageLink,
+        TaskList,
+        // A task may hold more than a line, as it can in Markdown.
+        TaskItem.configure({ nested: true }),
+        Callout,
       ],
       editable,
       autofocus: editable,
@@ -202,6 +208,87 @@
 
   .editor :global(.tiptap li p) {
     margin: var(--space-list-item) 0;
+  }
+
+  /* A task list shows checkboxes instead of bullets. */
+  .editor :global(.tiptap ul[data-type='taskList']) {
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .editor :global(.tiptap li[data-checked]) {
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap-task);
+  }
+
+  .editor :global(.tiptap li[data-checked] > label) {
+    flex: none;
+    user-select: none;
+  }
+
+  .editor :global(.tiptap li[data-checked] > label input) {
+    margin: 0;
+    accent-color: var(--color-text);
+    cursor: pointer;
+  }
+
+  .readonly :global(.tiptap li[data-checked] > label input) {
+    cursor: default;
+  }
+
+  .editor :global(.tiptap li[data-checked] > div) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* What is done steps back, but stays readable. */
+  .editor :global(.tiptap li[data-checked='true'] > div > p) {
+    color: var(--color-muted);
+  }
+
+  /* A callout is tinted in the colour of its kind and names it above its content. */
+  .editor :global(.tiptap .callout) {
+    --callout: var(--color-callout-note);
+    --callout-soft: var(--color-callout-note-soft);
+    padding: var(--space-3) var(--space-4);
+    border-left: var(--line-quote) solid var(--callout);
+    border-radius: var(--radius-m);
+    background: var(--callout-soft);
+  }
+
+  .editor :global(.tiptap .callout[data-callout='tip']) {
+    --callout: var(--color-callout-tip);
+    --callout-soft: var(--color-callout-tip-soft);
+  }
+
+  .editor :global(.tiptap .callout[data-callout='warning']) {
+    --callout: var(--color-callout-warning);
+    --callout-soft: var(--color-callout-warning-soft);
+  }
+
+  .editor :global(.tiptap .callout[data-callout='danger']) {
+    --callout: var(--color-callout-danger);
+    --callout-soft: var(--color-callout-danger-soft);
+  }
+
+  .editor :global(.tiptap .callout::before) {
+    content: attr(aria-label);
+    display: block;
+    margin-bottom: var(--space-1);
+    color: var(--callout);
+    font-size: var(--text-s);
+    font-weight: var(--weight-strong);
+    user-select: none;
+  }
+
+  .editor :global(.tiptap .callout > *) {
+    margin-top: 0;
+    margin-bottom: var(--space-block);
+  }
+
+  .editor :global(.tiptap .callout > :last-child) {
+    margin-bottom: 0;
   }
 
   .editor :global(.tiptap hr) {

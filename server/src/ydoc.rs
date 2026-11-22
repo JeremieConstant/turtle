@@ -5,7 +5,7 @@
 //! attributes on text ranges.
 
 use crate::diff::{align, common_edges, text_hunks, Fit, Step};
-use crate::model::{normalize, Block, Inline, Marks};
+use crate::model::{normalize, Block, CalloutKind, Inline, Marks, TaskItem};
 use std::collections::HashMap;
 use std::sync::Arc;
 use yrs::types::text::YChange;
@@ -20,6 +20,13 @@ const FRAGMENT: &str = "default";
 /// The element a Page link is stored as, and its attribute naming the Page.
 const PAGE_LINK: &str = "pageLink";
 const PAGE_ID: &str = "pageId";
+/// The elements a task list and its items are stored as, and whether an item is checked.
+const TASK_LIST: &str = "taskList";
+const TASK_ITEM: &str = "taskItem";
+const CHECKED: &str = "checked";
+/// The element a callout is stored as, and its attribute naming the kind.
+const CALLOUT: &str = "callout";
+const KIND: &str = "kind";
 
 /// The content of a Page from its stored state.
 pub fn read_state(state: &[u8]) -> anyhow::Result<Vec<Block>> {
@@ -86,11 +93,21 @@ fn read_blocks<T: ReadTxn>(txn: &T, nodes: impl Iterator<Item = XmlOut>) -> Vec<
                     .collect(),
             }),
             "blockquote" => blocks.push(Block::Blockquote(read_blocks(txn, element.children(txn)))),
-            "bulletList" => blocks.push(Block::BulletList(read_items(txn, &element))),
+            CALLOUT => blocks.push(Block::Callout {
+                kind: callout_kind(txn, &element),
+                content: read_blocks(txn, element.children(txn)),
+            }),
+            "bulletList" => blocks.push(Block::BulletList(blocks_of(read_items(txn, &element)))),
             "orderedList" => blocks.push(Block::OrderedList {
                 start: number_attribute(txn, &element, "start").unwrap_or(1),
-                items: read_items(txn, &element),
+                items: blocks_of(read_items(txn, &element)),
             }),
+            TASK_LIST => blocks.push(Block::TaskList(
+                read_items(txn, &element)
+                    .into_iter()
+                    .map(|(checked, content)| TaskItem { checked, content })
+                    .collect(),
+            )),
             "horizontalRule" => blocks.push(Block::HorizontalRule),
             // An element this version does not know keeps its content.
             _ => blocks.extend(read_blocks(txn, element.children(txn))),
@@ -99,13 +116,35 @@ fn read_blocks<T: ReadTxn>(txn: &T, nodes: impl Iterator<Item = XmlOut>) -> Vec<
     blocks
 }
 
-fn read_items<T: ReadTxn>(txn: &T, list: &XmlElementRef) -> Vec<Vec<Block>> {
-    list.children(txn)
-        .map(|item| match item {
-            XmlOut::Element(item) => read_blocks(txn, item.children(txn)),
-            other => read_blocks(txn, std::iter::once(other)),
-        })
-        .collect()
+/// The items of a list, each with whether it is checked and what it holds.
+fn read_items<T: ReadTxn>(txn: &T, list: &XmlElementRef) -> Vec<(bool, Vec<Block>)> {
+    list.children(txn).map(|item| read_item(txn, &item)).collect()
+}
+
+fn read_item<T: ReadTxn>(txn: &T, item: &XmlOut) -> (bool, Vec<Block>) {
+    match item {
+        XmlOut::Element(item) => (is_checked(txn, item), read_blocks(txn, item.children(txn))),
+        other => (false, read_blocks(txn, std::iter::once(other.clone()))),
+    }
+}
+
+/// The kind of a callout; one of a kind this version does not know is a note.
+fn callout_kind<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> CalloutKind {
+    string_attribute(txn, element, KIND)
+        .and_then(|name| CalloutKind::named(&name))
+        .unwrap_or(CalloutKind::Note)
+}
+
+fn blocks_of(items: Vec<(bool, Vec<Block>)>) -> Vec<Vec<Block>> {
+    items.into_iter().map(|(_, blocks)| blocks).collect()
+}
+
+fn is_checked<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> bool {
+    match element.get_attribute(txn, CHECKED) {
+        Some(Out::Any(Any::Bool(checked))) => checked,
+        Some(Out::Any(Any::String(s))) => s.as_ref() == "true",
+        _ => false,
+    }
 }
 
 fn read_inlines<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Inline> {
@@ -245,8 +284,10 @@ fn tag_for(block: &Block) -> &'static str {
         Block::Heading { .. } => "heading",
         Block::CodeBlock { .. } => "codeBlock",
         Block::Blockquote(_) => "blockquote",
+        Block::Callout { .. } => CALLOUT,
         Block::BulletList(_) => "bulletList",
         Block::OrderedList { .. } => "orderedList",
+        Block::TaskList(_) => TASK_LIST,
         Block::HorizontalRule => "horizontalRule",
     }
 }
@@ -273,10 +314,11 @@ fn plain_text(blocks: &[Block]) -> Vec<char> {
                     }
                 }
                 Block::CodeBlock { text, .. } => out.extend(text.chars()),
-                Block::Blockquote(children) => collect(children, out),
+                Block::Blockquote(children) | Block::Callout { content: children, .. } => collect(children, out),
                 Block::BulletList(items) | Block::OrderedList { items, .. } => {
                     items.iter().for_each(|item| collect(item, out))
                 }
+                Block::TaskList(items) => items.iter().for_each(|item| collect(&item.content, out)),
                 Block::HorizontalRule => {}
             }
             out.push('\n');
@@ -323,37 +365,64 @@ fn update_block(txn: &mut TransactionMut, element: &XmlElementRef, block: &Block
                 element.push_back(txn, XmlElementPrelim::empty("paragraph"));
             }
         }
-        Block::BulletList(items) => diff_items(txn, element, items),
+        Block::Callout { kind, content } => {
+            if string_attribute(txn, element, KIND).as_deref() != Some(kind.name()) {
+                element.insert_attribute(txn, KIND, Any::from(kind.name()));
+            }
+            diff_blocks(txn, element, content);
+            if element.len(txn) == 0 {
+                element.push_back(txn, XmlElementPrelim::empty("paragraph"));
+            }
+        }
+        Block::BulletList(items) => diff_items(txn, element, &list_items(items)),
         Block::OrderedList { start, items } => {
             if number_attribute(txn, element, "start") != Some(*start) {
                 element.insert_attribute(txn, "start", Any::from(*start as f64));
             }
-            diff_items(txn, element, items);
+            diff_items(txn, element, &list_items(items));
         }
+        Block::TaskList(items) => diff_items(txn, element, &task_items(items)),
         Block::HorizontalRule => {}
     }
 }
 
+/// An item of a list as it is to be written: whether it is a task and
+/// checked, and what it holds.
+type ItemTarget<'a> = (Option<bool>, &'a [Block]);
+
+fn list_items(items: &[Vec<Block>]) -> Vec<ItemTarget<'_>> {
+    items.iter().map(|item| (None, item.as_slice())).collect()
+}
+
+fn task_items(items: &[TaskItem]) -> Vec<ItemTarget<'_>> {
+    items.iter().map(|item| (Some(item.checked), item.content.as_slice())).collect()
+}
+
 /// Turns the items of a list into `target`, the way `diff_blocks` does for blocks.
-fn diff_items(txn: &mut TransactionMut, list: &XmlElementRef, target: &[Vec<Block>]) {
+fn diff_items(txn: &mut TransactionMut, list: &XmlElementRef, target: &[ItemTarget]) {
+    let tag = item_tag(target.first().and_then(|(checked, _)| *checked));
     let nodes: Vec<XmlOut> = list.children(txn).collect();
-    let current: Vec<Vec<Block>> = nodes
+    let current: Vec<(bool, Vec<Block>)> = nodes
         .iter()
-        .map(|node| match node {
-            XmlOut::Element(item) => normalize(read_blocks(txn, item.children(txn))),
-            other => normalize(read_blocks(txn, std::iter::once(other.clone()))),
+        .map(|node| {
+            let (checked, blocks) = read_item(txn, node);
+            (checked, normalize(blocks))
         })
         .collect();
-    let old_text: Vec<Vec<char>> = current.iter().map(|blocks| plain_text(blocks)).collect();
-    let new_text: Vec<Vec<char>> = target.iter().map(|blocks| plain_text(blocks)).collect();
+    let old_text: Vec<Vec<char>> = current.iter().map(|(_, blocks)| plain_text(blocks)).collect();
+    let new_text: Vec<Vec<char>> = target.iter().map(|(_, blocks)| plain_text(blocks)).collect();
+    let same = |i: usize, j: usize| {
+        let (checked, blocks) = &current[i];
+        blocks.as_slice() == target[j].1 && target[j].0.is_none_or(|wanted| wanted == *checked)
+    };
 
     let steps = align(
         nodes.len(),
         target.len(),
         |i, j| {
-            if current[i] == target[j] {
+            if same(i, j) {
                 Fit::Same(2 + new_text[j].len() as u32)
-            } else if tag_of(&nodes[i]) == Some("listItem") {
+            } else if tag_of(&nodes[i]) == Some(tag) {
                 Fit::Similar(1 + common_edges(&old_text[i], &new_text[j]) as u32)
             } else {
                 Fit::No
@@ -366,8 +435,12 @@ fn diff_items(txn: &mut TransactionMut, list: &XmlElementRef, target: &[Vec<Bloc
     for step in steps {
         match step {
             Step::Keep(i, j) => {
-                if let (false, XmlOut::Element(item)) = (current[i] == target[j], &nodes[i]) {
-                    diff_blocks(txn, item, &target[j]);
+                if let (false, XmlOut::Element(item)) = (same(i, j), &nodes[i]) {
+                    let (checked, blocks) = target[j];
+                    if let Some(checked) = checked.filter(|checked| *checked != current[i].0) {
+                        item.insert_attribute(txn, CHECKED, Any::Bool(checked));
+                    }
+                    diff_blocks(txn, item, blocks);
                     let starts_with_paragraph = matches!(
                         item.get(txn, 0),
                         Some(XmlOut::Element(first)) if first.tag().as_ref() == "paragraph"
@@ -381,10 +454,19 @@ fn diff_items(txn: &mut TransactionMut, list: &XmlElementRef, target: &[Vec<Bloc
             }
             Step::Remove(_) => list.remove_range(txn, at, 1),
             Step::Add(j) => {
-                insert_item(txn, list, at, &target[j]);
+                insert_item(txn, list, at, target[j]);
                 at += 1;
             }
         }
+    }
+}
+
+/// The element an item is stored as: a task item when it has a checkbox.
+fn item_tag(checked: Option<bool>) -> &'static str {
+    if checked.is_some() {
+        TASK_ITEM
+    } else {
+        "listItem"
     }
 }
 
@@ -648,31 +730,42 @@ fn insert_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, index: u32
                 element.push_back(txn, XmlTextPrelim::new(text.as_str()));
             }
         }
-        Block::Blockquote(children) => {
-            for (at, child) in children.iter().enumerate() {
-                insert_block(txn, &element, at as u32, child);
-            }
-            if children.is_empty() {
-                element.push_back(txn, XmlElementPrelim::empty("paragraph"));
-            }
+        Block::Blockquote(children) => insert_children(txn, &element, children),
+        Block::Callout { kind, content } => {
+            element.insert_attribute(txn, KIND, Any::from(kind.name()));
+            insert_children(txn, &element, content);
         }
-        Block::BulletList(items) => {
-            for (at, item) in items.iter().enumerate() {
-                insert_item(txn, &element, at as u32, item);
-            }
-        }
+        Block::BulletList(items) => insert_items(txn, &element, &list_items(items)),
         Block::OrderedList { start, items } => {
             element.insert_attribute(txn, "start", Any::from(*start as f64));
-            for (at, item) in items.iter().enumerate() {
-                insert_item(txn, &element, at as u32, item);
-            }
+            insert_items(txn, &element, &list_items(items));
         }
+        Block::TaskList(items) => insert_items(txn, &element, &task_items(items)),
         Block::HorizontalRule => {}
     }
 }
 
-fn insert_item(txn: &mut TransactionMut, list: &XmlElementRef, index: u32, item: &[Block]) {
-    let element = list.insert(txn, index, XmlElementPrelim::empty("listItem"));
+/// Fills a quote or callout, which the editor requires to hold at least one block.
+fn insert_children(txn: &mut TransactionMut, element: &XmlElementRef, children: &[Block]) {
+    for (at, child) in children.iter().enumerate() {
+        insert_block(txn, element, at as u32, child);
+    }
+    if children.is_empty() {
+        element.push_back(txn, XmlElementPrelim::empty("paragraph"));
+    }
+}
+
+fn insert_items(txn: &mut TransactionMut, list: &XmlElementRef, items: &[ItemTarget]) {
+    for (at, item) in items.iter().enumerate() {
+        insert_item(txn, list, at as u32, *item);
+    }
+}
+
+fn insert_item(txn: &mut TransactionMut, list: &XmlElementRef, index: u32, (checked, item): ItemTarget) {
+    let element = list.insert(txn, index, XmlElementPrelim::empty(item_tag(checked)));
+    if let Some(checked) = checked {
+        element.insert_attribute(txn, CHECKED, Any::Bool(checked));
+    }
     // The editor requires every list item to start with a paragraph.
     if !matches!(item.first(), Some(Block::Paragraph(_))) {
         element.push_back(txn, XmlElementPrelim::empty("paragraph"));
@@ -747,6 +840,77 @@ mod tests {
         assert_eq!(string_attribute(&txn, &link, "pageId").as_deref(), Some("a1b2"));
         drop(txn);
         assert_eq!(read(&doc), blocks);
+    }
+
+    #[test]
+    fn a_task_list_is_stored_as_the_editors_task_items_with_their_checkboxes() {
+        let blocks = from_markdown("- [ ] open\n- [x] done\n");
+        let doc = Doc::new();
+        write(&doc, &blocks);
+
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = doc.transact();
+        let Some(XmlOut::Element(list)) = fragment.get(&txn, 0) else { panic!("no list") };
+        assert_eq!(list.tag().as_ref(), "taskList");
+        let checked: Vec<_> = list
+            .children(&txn)
+            .map(|item| match item {
+                XmlOut::Element(item) => (item.tag().to_string(), item.get_attribute(&txn, "checked")),
+                _ => panic!("an item is not an element"),
+            })
+            .collect();
+        assert_eq!(
+            checked,
+            vec![
+                ("taskItem".to_string(), Some(Out::Any(Any::Bool(false)))),
+                ("taskItem".to_string(), Some(Out::Any(Any::Bool(true)))),
+            ]
+        );
+        drop(txn);
+        assert_eq!(read(&doc), blocks);
+    }
+
+    #[test]
+    fn a_callout_is_stored_as_the_editors_callout_naming_its_kind() {
+        let doc = Doc::new();
+        write(&doc, &from_markdown("> [!WARNING]\n> Mind the gap.\n"));
+        let kind = |doc: &Doc| {
+            let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+            let txn = doc.transact();
+            let Some(XmlOut::Element(callout)) = fragment.get(&txn, 0) else { panic!("no callout") };
+            (callout.tag().to_string(), string_attribute(&txn, &callout, "kind"))
+        };
+        assert_eq!(kind(&doc), ("callout".to_string(), Some("warning".to_string())));
+        let before = block_ids(&doc);
+
+        write(&doc, &from_markdown("> [!DANGER]\n> Mind the gap.\n"));
+
+        assert_eq!(kind(&doc), ("callout".to_string(), Some("danger".to_string())));
+        assert_eq!(block_ids(&doc), before, "the kind changes in place");
+        assert_eq!(read(&doc), from_markdown("> [!DANGER]\n> Mind the gap.\n"));
+    }
+
+    #[test]
+    fn checking_an_item_changes_only_its_checkbox() {
+        let doc = Doc::new();
+        write(&doc, &from_markdown("- [ ] open\n- [ ] also open\n"));
+        let elsewhere = replica(&doc);
+        let text = |doc: &Doc| {
+            let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+            let txn = doc.transact();
+            let Some(XmlOut::Element(list)) = fragment.get(&txn, 0) else { panic!("no list") };
+            let Some(XmlOut::Element(item)) = list.get(&txn, 1) else { panic!("no item") };
+            let Some(XmlOut::Element(paragraph)) = item.get(&txn, 0) else { panic!("no paragraph") };
+            let Some(XmlOut::Text(text)) = paragraph.get(&txn, 0) else { panic!("no text") };
+            text
+        };
+        let before = text(&doc);
+
+        let update = write(&doc, &from_markdown("- [ ] open\n- [x] also open\n")).unwrap();
+        apply(&elsewhere, &update);
+
+        assert_eq!(text(&doc), before);
+        assert_eq!(read(&elsewhere), from_markdown("- [ ] open\n- [x] also open\n"));
     }
 
     #[test]
@@ -977,6 +1141,10 @@ mod tests {
                 text: format!("{text}{}", rng.text()),
             },
             Block::Blockquote(children) => Block::Blockquote(mutate(rng, children)),
+            Block::Callout { kind, content } => Block::Callout {
+                kind: if rng.next(4) == 0 { CalloutKind::Danger } else { *kind },
+                content: mutate(rng, content),
+            },
             Block::BulletList(items) => {
                 Block::BulletList(items.iter().map(|item| mutate(rng, item)).collect())
             }
@@ -984,6 +1152,15 @@ mod tests {
                 start: *start,
                 items: items.iter().map(|item| mutate(rng, item)).collect(),
             },
+            Block::TaskList(items) => Block::TaskList(
+                items
+                    .iter()
+                    .map(|item| TaskItem {
+                        checked: item.checked != (rng.next(4) == 0),
+                        content: mutate(rng, &item.content),
+                    })
+                    .collect(),
+            ),
             Block::HorizontalRule => Block::HorizontalRule,
         }
     }

@@ -42,6 +42,14 @@ _Avoid_: Subsite, Subbereich, sub-area, branch
 A heading of a Page with everything after it up to the next heading of the same or a higher level.
 _Avoid_: Chapter, block, Abschnitt
 
+**Task list**:
+A list in a Page's content whose items each have a checkbox that anyone who can write the Page checks or unchecks. In Markdown its items start with `[ ]` or `[x]`.
+_Avoid_: Checklist, to-do list, todo
+
+**Callout**:
+A highlighted passage in a Page's content of one of four kinds: note, tip, warning or danger. In Markdown it is a quote whose first line is the kind's marker alone, such as `[!NOTE]`.
+_Avoid_: Admonition, alert, info box, panel
+
 **Attachment**:
 An image or file that belongs to a Page.
 _Avoid_: Upload, asset, media

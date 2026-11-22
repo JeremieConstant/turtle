@@ -9,7 +9,8 @@
  *
  * The palette is monochrome. Colour appears only where it means something:
  * focus and the drop target (--color-focus), the people editing a Page
- * (--color-person-*), and an Agent's change (--color-agent).
+ * (--color-person-*), an Agent's change (--color-agent), and the kind of a
+ * callout (--color-callout-*).
  */
 :root {
   /* Each colour is light-dark(light, dark): the browser picks by color-scheme,
@@ -54,6 +55,15 @@
   /* Text on one of the colours above, and on the danger colour. */
   --color-on-color: light-dark(#ffffff, #191918);
   --color-danger: light-dark(#b42318, #ff8a80);
+  /* Each kind of callout: its rule and label, and the tint behind it. */
+  --color-callout-note: light-dark(#2f6bdc, #6b9bf5);
+  --color-callout-note-soft: light-dark(rgb(47 107 220 / 0.07), rgb(107 155 245 / 0.1));
+  --color-callout-tip: light-dark(#2f7d32, #7cc47f);
+  --color-callout-tip-soft: light-dark(rgb(47 125 50 / 0.07), rgb(124 196 127 / 0.1));
+  --color-callout-warning: light-dark(#a15c07, #f0a64a);
+  --color-callout-warning-soft: light-dark(rgb(161 92 7 / 0.08), rgb(240 166 74 / 0.1));
+  --color-callout-danger: light-dark(#b42318, #ff8a80);
+  --color-callout-danger-soft: light-dark(rgb(180 35 24 / 0.07), rgb(255 138 128 / 0.1));
   /* What lies over the page behind a dialog and behind the drawer. */
   --color-backdrop: light-dark(rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.5));
   --color-scrim: light-dark(rgb(0 0 0 / 0.2), rgb(0 0 0 / 0.5));
@@ -107,6 +117,8 @@
   --space-heading-below: 0.5em;
   --space-list-item: 0.2em;
   --indent-list: 1.4em;
+  /* The gap between a task's checkbox and its text. */
+  --gap-task: 0.5em;
   /* How far a cursor's name sits above the line it is on. */
   --offset-caret-label: -1.4em;
   --leading-tight: 1.2;
