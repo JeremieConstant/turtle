@@ -192,6 +192,11 @@ const MIGRATIONS: &[&str] = &[
      INSERT INTO nodes (id, area_id, parent_id, kind, created_at)
          SELECT lower(hex(randomblob(16))), id, NULL, 'root', created_at
          FROM areas WHERE personal_member_id IS NOT NULL;",
+    // A Quick Note is a Page that stays known as its Member's wherever it is
+    // moved, so the mark is on the node rather than on the Personal Area.
+    "ALTER TABLE nodes ADD COLUMN quick_note_member_id TEXT REFERENCES members (id);
+     CREATE INDEX quick_notes_by_member ON nodes (quick_note_member_id, created_at)
+         WHERE quick_note_member_id IS NOT NULL;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
@@ -333,7 +338,8 @@ mod tests {
         {
             // As the database was before Personal Areas.
             let old = Connection::open(&path).unwrap();
-            let before_personal_areas = MIGRATIONS.len() - 1;
+            // Personal Areas arrived with the tenth migration.
+            let before_personal_areas = 9;
             for migration in &MIGRATIONS[..before_personal_areas] {
                 old.execute_batch(migration).unwrap();
             }

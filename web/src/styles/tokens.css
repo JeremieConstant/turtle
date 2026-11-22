@@ -115,6 +115,9 @@
   --width-side: 280px;
   --width-text: 46rem;
   --width-start: 40rem;
+  /* The Quick Note box: three lines when empty, and grows up to about twelve. */
+  --height-quick-note: 88px;
+  --height-quick-note-max: 320px;
   --height-row: 28px;
   /* A row on the Area screen: roomier than the sidebar's. */
   --height-row-l: 40px;

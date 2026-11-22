@@ -14,6 +14,7 @@ mod every_operation;
 pub mod grants;
 pub mod members;
 pub mod permissions;
+pub mod quick_notes;
 pub mod search;
 pub mod tokens;
 pub mod tree;
@@ -395,6 +396,7 @@ pub fn catalogue() -> Catalogue {
     areas::register(&mut catalogue);
     grants::register(&mut catalogue);
     tree::register(&mut catalogue);
+    quick_notes::register(&mut catalogue);
     search::register(&mut catalogue);
     versions::register(&mut catalogue);
     content::register(&mut catalogue);
@@ -469,6 +471,18 @@ pub(crate) mod testing {
             )
             .unwrap();
         permissions::grant(&db, &root, &permissions::Holder::Member(id.clone()), role).unwrap();
+    }
+
+    /// Puts an Entry at the top of another Area, as a move will. Moving is
+    /// not an operation yet.
+    pub fn move_to_top_of(core: &Core, entry_id: &str, area_id: &str) {
+        let db = core.db();
+        let root = tree::root_of(&db, area_id).unwrap();
+        db.execute(
+            "UPDATE nodes SET area_id = ?1, parent_id = ?2 WHERE id = ?3",
+            rusqlite::params![area_id, root, entry_id],
+        )
+        .unwrap();
     }
 
     pub fn fresh() -> TestCore {
