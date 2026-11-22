@@ -122,12 +122,16 @@
       {:else}
         <div class="row">
           <h1>{area.name}</h1>
-          {#if area.role === 'admin'}
+          {#if area.role === 'admin' && !area.personal}
             <button type="button" onclick={startRenaming}>Rename</button>
           {/if}
         </div>
       {/if}
-      <p class="muted">Your Role here: {area.role}.</p>
+      {#if area.personal}
+        <p class="muted">Only you can see this Area. To share Pages, create them in another Area.</p>
+      {:else}
+        <p class="muted">Your Role here: {area.role}.</p>
+      {/if}
       {#if entries && entries.length > 0}
         <ul class="tree">
           {#each entries as entry (entry.id)}
@@ -143,7 +147,7 @@
           <TitleForm label="Title of the new Page or Folder" actions={ADD_ACTIONS} onsubmit={addAtTop} />
         </section>
       {/if}
-      {#if area.role === 'admin'}
+      {#if area.role === 'admin' && !area.personal}
         <!-- Created anew whenever the Role changes, so it never shows a stale list. -->
         {#key area.role}
           <Grants areaId={id} onrolechange={rolesChanged} />
