@@ -57,6 +57,11 @@ export function searchAddress(query: string): string {
   return query ? `/search?q=${encodeURIComponent(query)}` : '/search'
 }
 
+/** The address of the search for the Pages that carry a Tag. */
+export function tagSearchAddress(tag: string): string {
+  return searchAddress(`#${tag}`)
+}
+
 function address(prefix: 'a' | 'p', id: string, label: string): string {
   const readable = label
     .toLowerCase()

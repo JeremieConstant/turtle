@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { areaAddress, inShell, pageAddress, parseAddress, searchAddress } from './routes'
+import { areaAddress, inShell, pageAddress, parseAddress, searchAddress, tagSearchAddress } from './routes'
 
 test('a Page address carries the ID and a readable title', () => {
   expect(parseAddress('/p/abc123/release-notes')).toEqual({ screen: 'page', id: 'abc123' })
@@ -121,6 +121,11 @@ test('a search address is built from the query and leads back to it', () => {
   expect(searchAddress('')).toBe('/search')
   const [pathname, query] = searchAddress('a+b = c#d').split('?')
   expect(parseAddress(pathname, `?${query}`)).toEqual({ screen: 'search', query: 'a+b = c#d' })
+})
+
+test('a Tag leads to the search for it', () => {
+  expect(tagSearchAddress('release-notes')).toBe('/search?q=%23release-notes')
+  expect(parseAddress('/search', '?q=%23release-notes')).toEqual({ screen: 'search', query: '#release-notes' })
 })
 
 test('the search screen sits in the shell', () => {

@@ -120,6 +120,7 @@ fn change_tags(
     change(&db)?;
     let tags = tags_of(&db, page_id)?;
     core.live().tags_changed(page_id, &tags);
+    core.page_changed(page_id);
     Ok(PageTags { tags }.into())
 }
 
@@ -130,14 +131,20 @@ pub fn tags_of(db: &Connection, page_id: &str) -> rusqlite::Result<Vec<String>> 
     tags.collect()
 }
 
+/// The Tag as it is stored: in lower case, without a leading #, with each run
+/// of spaces turned into one hyphen, so "#Release Notes" is "release-notes".
+/// Empty when nothing is left of it.
+pub(super) fn stored_form(tag: &str) -> String {
+    let words: Vec<String> = tag.trim().trim_start_matches('#').split_whitespace().map(str::to_lowercase).collect();
+    words.join("-")
+}
+
 /// Long enough for any sensible Tag, short enough to sit beside a title.
 const MAX_TAG_LENGTH: usize = 50;
 
-/// The Tag as it is stored: in lower case, without a leading #, with each run
-/// of spaces turned into one hyphen, so "#Release Notes" is "release-notes".
+/// The Tag as it is stored, refused when it is blank or too long.
 fn valid_tag(tag: &str) -> Result<String, OpError> {
-    let words: Vec<String> = tag.trim().trim_start_matches('#').split_whitespace().map(str::to_lowercase).collect();
-    let tag = words.join("-");
+    let tag = stored_form(tag);
     if tag.is_empty() {
         return Err(OpError::InvalidInput("Enter a Tag.".into()));
     }
