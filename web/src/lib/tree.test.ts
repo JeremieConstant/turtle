@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { Entry } from './operations.gen'
-import { above, foldable, visibleRows } from './tree'
+import { above, findEntry, foldable, visibleRows } from './tree'
 
 const page = (id: string, children: Entry[] = []): Entry => ({ id, kind: 'page', title: id, children })
 const folder = (id: string, children: Entry[] = []): Entry => ({ id, kind: 'folder', title: id, children })
@@ -38,4 +38,9 @@ test('the Entries above one are named from the top down', () => {
 
 test('an Entry that is not in the tree has nothing above it', () => {
   expect(above(tree, 'elsewhere')).toEqual([])
+})
+
+test('an Entry is found wherever it sits in the tree', () => {
+  expect(findEntry(tree, 'rollback')?.title).toBe('rollback')
+  expect(findEntry(tree, 'elsewhere')).toBeUndefined()
 })

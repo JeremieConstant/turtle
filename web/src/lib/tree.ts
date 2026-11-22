@@ -47,5 +47,15 @@ export function above(entries: Entry[], id: string): string[] {
 }
 
 function contains(entries: Entry[], id: string): boolean {
-  return entries.some(entry => entry.id === id || contains(entry.children, id))
+  return findEntry(entries, id) !== undefined
+}
+
+/** The Entry with an ID, wherever it sits in the tree; `undefined` when it is not in it. */
+export function findEntry(entries: Entry[], id: string): Entry | undefined {
+  for (const entry of entries) {
+    if (entry.id === id) return entry
+    const found = findEntry(entry.children, id)
+    if (found) return found
+  }
+  return undefined
 }
