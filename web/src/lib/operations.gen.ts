@@ -520,7 +520,7 @@ export type Operations = {
     }
     output: Tree
   }
-  /** Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. Pages the caller cannot read never appear. */
+  /** Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear. */
   search: {
     input: {
       /** The Area to search in; everything the caller can read if absent. */
@@ -529,7 +529,9 @@ export type Operations = {
 outside that range counts as the nearest one inside it. */
       limit?: number | null
       /** What to look for, as typed. The last word also matches words it is
-the beginning of, so results can be shown while typing. */
+the beginning of, so results can be shown while typing. A word that
+begins with # names a Tag the Page must carry, whatever its case, as
+in "deploy #runbook"; a Tag with spaces is written with hyphens. */
       query: string
     }
     output: SearchResults

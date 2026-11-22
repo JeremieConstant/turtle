@@ -3,6 +3,7 @@
 
 use super::areas;
 use super::permissions;
+use super::tags;
 use super::{Catalogue, Core, OpResult, Principal};
 use crate::search::{Changes, Fragment, PageDocument, Pending};
 use rusqlite::{Connection, OptionalExtension};
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "search",
-        "Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. Pages the caller cannot read never appear.",
+        "Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear.",
         search,
     );
 }
@@ -25,7 +26,9 @@ const MAX_LIMIT: u32 = 100;
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchQuery {
     /// What to look for, as typed. The last word also matches words it is
-    /// the beginning of, so results can be shown while typing.
+    /// the beginning of, so results can be shown while typing. A word that
+    /// begins with # names a Tag the Page must carry, whatever its case, as
+    /// in "deploy #runbook"; a Tag with spaces is written with hyphens.
     pub query: String,
     /// The Area to search in; everything the caller can read if absent.
     #[serde(default)]
@@ -75,8 +78,10 @@ pub fn search(core: &Core, principal: &Principal, input: SearchQuery) -> OpResul
     // never among the hits, not even to be dropped later.
     let limit = input.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT) as usize;
     // One more than is returned, which is how to know that there is more.
+    let (words, tags) = words_and_tags(&input.query);
     let mut hits = core.search.search(&crate::search::Search {
-        text: &input.query,
+        text: &words,
+        tags: &tags,
         area_id: input.area_id.as_deref(),
         readable: Some(&readable),
         limit: limit + 1,
@@ -103,6 +108,23 @@ pub fn search(core: &Core, principal: &Principal, input: SearchQuery) -> OpResul
         results.push(SearchResult { page_id: hit.page_id, title, area_id, area_name, path, snippet: hit.snippet });
     }
     Ok(SearchResults { results, more }.into())
+}
+
+/// The ordinary words of a query, and the Tags it names with a leading #.
+fn words_and_tags(query: &str) -> (String, Vec<String>) {
+    let (mut words, mut tags) = (Vec::new(), Vec::new());
+    for piece in query.split_whitespace() {
+        if !piece.starts_with('#') {
+            words.push(piece);
+            continue;
+        }
+        let tag = tags::stored_form(piece);
+        // A lone # names no Tag and is no word either.
+        if !tag.is_empty() && !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    (words.join(" "), tags)
 }
 
 /// The titles above a node, from the top of its Area down.
@@ -162,7 +184,8 @@ fn document(db: &Connection, page_id: &str) -> anyhow::Result<Option<PageDocumen
         Some(state) => crate::model::plain_text(&crate::ydoc::read_state(&state)?),
         None => String::new(),
     };
-    Ok(Some(PageDocument { page_id: page_id.to_string(), area_id, access, title, text }))
+    let tags = tags::tags_of(db, page_id)?;
+    Ok(Some(PageDocument { page_id: page_id.to_string(), area_id, access, title, text, tags }))
 }
 
 #[cfg(test)]
@@ -172,6 +195,7 @@ mod tests {
     use crate::ops::areas::{create_area, Area, NewArea};
     use crate::ops::permissions::{Holder, Role};
     use crate::ops::testing::{fresh, give_role, member};
+    use crate::ops::tags::{add_tag, remove_tag, PageTag};
     use crate::ops::tree::{create_folder, create_page, rename_page, NewEntry, RenameEntry};
     use crate::search::Fragment;
 
@@ -564,6 +588,111 @@ mod tests {
         assert_eq!(found(&core, &grace, "hiring"), ["Minutes"]);
         assert!(found(&core, &grace, "notes").is_empty());
         assert!(found(&core, &grace, "budget").is_empty());
+    }
+
+    fn tag(core: &Core, writer: &Principal, page_id: &str, tag: &str) {
+        let input = PageTag { page_id: page_id.into(), tag: tag.into() };
+        add_tag(core, writer, input).unwrap();
+    }
+
+    #[test]
+    fn a_tag_in_the_query_finds_the_pages_that_carry_it_whatever_the_case() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let engineering = area(&core, &grace, "Engineering");
+        let rollback = page(&core, &grace, &engineering, "Rollback");
+        let deploy = page(&core, &grace, &engineering, "Deploy");
+        page(&core, &grace, &engineering, "Runbook ideas");
+        tag(&core, &grace, &deploy, "Runbook");
+        tag(&core, &grace, &rollback, "runbook");
+
+        // A Tag alone lists its Pages by title.
+        assert_eq!(found(&core, &grace, "#runbook"), ["Deploy", "Rollback"]);
+        assert_eq!(found(&core, &grace, "#RunBook"), ["Deploy", "Rollback"]);
+        assert!(found(&core, &grace, "#runbo").is_empty(), "a Tag is matched whole");
+    }
+
+    #[test]
+    fn tags_combine_with_words_and_with_each_other_and_every_tag_must_be_present() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let engineering = area(&core, &grace, "Engineering");
+        let deploy = page(&core, &grace, &engineering, "Deploy the API");
+        let rollback = page(&core, &grace, &engineering, "Roll back the API");
+        let dashboards = page(&core, &grace, &engineering, "Dashboards");
+        write(&core, &dashboards, "Where the API metrics are.\n");
+        tag(&core, &grace, &deploy, "runbook");
+        tag(&core, &grace, &deploy, "production");
+        tag(&core, &grace, &rollback, "runbook");
+        tag(&core, &grace, &dashboards, "production");
+
+        assert_eq!(found(&core, &grace, "api #runbook"), ["Deploy the API", "Roll back the API"]);
+        assert_eq!(found(&core, &grace, "#production api"), ["Deploy the API", "Dashboards"]);
+        assert_eq!(found(&core, &grace, "#runbook #Production"), ["Deploy the API"]);
+        assert_eq!(found(&core, &grace, "#runbook roll"), ["Roll back the API"]);
+        assert!(found(&core, &grace, "#runbook metrics").is_empty());
+        assert!(found(&core, &grace, "#runbook #staging").is_empty());
+    }
+
+    #[test]
+    fn a_tag_taken_off_a_page_no_longer_finds_it() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let engineering = area(&core, &grace, "Engineering");
+        let deploy = page(&core, &grace, &engineering, "Deploy");
+        tag(&core, &grace, &deploy, "runbook");
+        assert_eq!(found(&core, &grace, "#runbook"), ["Deploy"]);
+
+        let input = PageTag { page_id: deploy.clone(), tag: "Runbook".into() };
+        remove_tag(&core, &grace, input).unwrap();
+
+        assert!(found(&core, &grace, "#runbook").is_empty());
+        assert_eq!(found(&core, &grace, "deploy"), ["Deploy"]);
+    }
+
+    #[test]
+    fn a_tag_never_finds_a_page_the_searcher_cannot_read() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let ken = member(&core, "Ken", false);
+        let engineering = area(&core, &grace, "Engineering");
+        let finance = area(&core, &grace, "Finance");
+        give_role(&core, &engineering.id, &ken, Role::Read);
+        tag(&core, &grace, &page(&core, &grace, &engineering, "Deploy"), "runbook");
+        tag(&core, &grace, &page(&core, &grace, &finance, "Payroll run"), "runbook");
+        let personal = Area { id: crate::ops::testing::personal_area(&core, &grace), ..engineering.clone() };
+        tag(&core, &grace, &page(&core, &grace, &personal, "My checklist"), "runbook");
+        let ada = member(&core, "Ada", true);
+
+        assert_eq!(found(&core, &ken, "#runbook"), ["Deploy"]);
+        assert_eq!(found(&core, &ada, "#runbook"), ["Deploy", "Payroll run"]);
+        assert_eq!(found(&core, &grace, "#runbook"), ["Deploy", "My checklist", "Payroll run"]);
+    }
+
+    #[test]
+    fn an_agent_finds_pages_by_tag_within_its_roles() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let engineering = area(&core, &grace, "Engineering");
+        let finance = area(&core, &grace, "Finance");
+        tag(&core, &grace, &page(&core, &grace, &engineering, "Deploy"), "runbook");
+        tag(&core, &grace, &page(&core, &grace, &finance, "Payroll run"), "runbook");
+        let Principal::Member { id, .. } = &grace else { unreachable!() };
+        let limits = crate::ops::TokenLimits { id: "t1".into(), read_only: true, areas: Some(vec![engineering.id.clone()]) };
+        let acting_for_grace =
+            Principal::Member { id: id.clone(), workspace_admin: false, session: None, token: Some(limits.clone()) };
+        let reviewer = Principal::Agent { id: "agent-reviewer".into(), token: limits };
+        core.db()
+            .execute(
+                "INSERT INTO agents (id, name, created_at) VALUES ('agent-reviewer', 'Reviewer', 0)",
+                [],
+            )
+            .unwrap();
+        let root = crate::ops::tree::root_of(&core.db(), &engineering.id).unwrap();
+        permissions::grant(&core.db(), &root, &Holder::Agent("agent-reviewer".into()), Role::Read).unwrap();
+
+        assert_eq!(found(&core, &acting_for_grace, "#runbook"), ["Deploy"]);
+        assert_eq!(found(&core, &reviewer, "#runbook"), ["Deploy"]);
     }
 
     #[test]

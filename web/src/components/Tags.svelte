@@ -3,9 +3,12 @@
    * The Tags of a Page, drawn as small grey pills so they never read as part
    * of the path or the content. With the Write Role a Tag can be added, with
    * the Tags already in use suggested, and taken off again. A change shows
-   * once the Page's connection reports it, like anyone else's.
+   * once the Page's connection reports it, like anyone else's. Each Tag
+   * leads to the search for the Pages that carry it.
    */
   import { call } from '../lib/ops'
+  import { router } from '../lib/router.svelte'
+  import { tagSearchAddress } from '../lib/routes'
   import { suggestedTags } from '../lib/tags'
   import { reportFailure } from '../lib/toasts'
   import Icon from './Icon.svelte'
@@ -84,8 +87,9 @@
 
 <ul class="tags" aria-label="Tags">
   {#each tags as tag (tag)}
+    {@const address = tagSearchAddress(tag)}
     <li class="tag">
-      <span>{tag}</span>
+      <a class="label" href={address} title="Find the Pages tagged {tag}" onclick={event => router.follow(event, address)}>{tag}</a>
       {#if writable}
         <button type="button" class="remove" aria-label="Remove the Tag {tag}" onclick={() => remove(tag)}>
           <Icon name="close" size={10} />
@@ -184,6 +188,11 @@
     color: var(--color-muted);
     opacity: 0;
     transition: opacity var(--dur-fast) var(--ease-out);
+  }
+
+  .label {
+    color: inherit;
+    text-decoration: none;
   }
 
   .tag:hover .remove,
