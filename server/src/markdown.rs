@@ -287,6 +287,13 @@ fn render_inlines(inlines: &[Inline], in_heading: bool, html: bool, titles: Titl
                 out.push_str("\\\n");
                 at_line_start = true;
             }
+            // Formatting does not apply to an image, so the marks around it
+            // stay open: `**a ![b](c) d**` keeps both texts bold.
+            Inline::Image { src, alt } => {
+                let alt = escape_text(alt, false, false, false);
+                out.push_str(&format!("![{alt}](<{}>)", escape_url(src)));
+                at_line_start = false;
+            }
             Inline::PageLink { page_id } => {
                 // A Page link carries no formatting of its own.
                 while let Some(mark) = open.pop() {
@@ -505,6 +512,8 @@ impl ActiveMarks {
 struct Builder {
     stack: Vec<Frame>,
     marks: ActiveMarks,
+    /// The image being read, if any: where it points and its text so far.
+    image: Option<(String, String)>,
     /// The Page whose link is being read. What the link says is left out,
     /// because a Page link shows the Page's current title instead.
     page_link: Option<String>,
@@ -554,6 +563,11 @@ impl Builder {
     }
 
     fn text(&mut self, text: &str, code: bool) {
+        // Whatever Markdown puts inside an image is its alternative text.
+        if let Some((_, alt)) = &mut self.image {
+            alt.push_str(text);
+            return;
+        }
         if let Some(Frame::CodeBlock { text: body, .. }) = self.stack.last_mut() {
             body.push_str(text);
             return;
@@ -575,6 +589,9 @@ impl Builder {
     }
 
     fn html(&mut self, html: &str) {
+        if self.image.is_some() {
+            return self.text(html, false);
+        }
         let trimmed = html.trim();
         if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
             return;
@@ -597,6 +614,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
     let mut b = Builder {
         stack: vec![Frame::Root(Vec::new())],
         marks: ActiveMarks::default(),
+        image: None,
         page_link: None,
         callout_marker_end: None,
     };
@@ -668,6 +686,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                     Some(page_id) => b.page_link = Some(page_id.to_string()),
                     None => b.marks.links.push(dest_url.to_string()),
                 },
+                Tag::Image { dest_url, .. } => b.image = Some((dest_url.to_string(), String::new())),
                 _ => {}
             },
             Event::End(tag) => match tag {
@@ -721,11 +740,20 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                         b.marks.links.pop();
                     }
                 },
+                TagEnd::Image => {
+                    if let Some((src, alt)) = b.image.take() {
+                        // Like the rest of what a Page link says, an image inside one is left out.
+                        if b.page_link.is_none() {
+                            b.inline_target().push(Inline::Image { src, alt });
+                        }
+                    }
+                }
                 _ => {}
             },
             Event::Text(text) => b.text(&text, false),
             Event::Code(text) => b.text(&text, true),
             Event::SoftBreak => b.text(" ", false),
+            Event::HardBreak if b.image.is_some() => b.text(" ", false),
             Event::HardBreak => b.hard_break(),
             Event::Html(html) | Event::InlineHtml(html) => b.html(&html),
             Event::TaskListMarker(checked) => {
@@ -789,6 +817,13 @@ pub(crate) mod testing {
                             return Inline::PageLink { page_id };
                         }
                         _ => {}
+                    }
+                    if self.next(8) == 0 {
+                        let alt = if self.next(3) == 0 { String::new() } else { self.text() };
+                        return Inline::Image {
+                            src: format!("/api/attachments/{}", self.text()),
+                            alt,
+                        };
                     }
                     let marks = Marks {
                         bold: self.next(4) == 0,
@@ -917,6 +952,32 @@ mod tests {
              ```rust\nfn main() {}\n```\n"
         );
         assert_round_trip(blocks);
+    }
+
+    #[test]
+    fn images_are_written_as_markdown_images_and_read_back() {
+        let blocks = vec![para(vec![
+            text("See "),
+            Inline::Image {
+                src: "/api/attachments/a1".into(),
+                alt: "the [new] logo".into(),
+            },
+            text(" here."),
+        ])];
+        assert_eq!(
+            to_markdown(&blocks),
+            "See ![the \\[new\\] logo](</api/attachments/a1>) here.\n"
+        );
+        assert_round_trip(blocks);
+        assert_eq!(
+            from_markdown("**bold ![logo](x.png)** [![linked](y.png)](https://example.org)"),
+            vec![para(vec![
+                marked("bold ", |m| m.bold = true),
+                Inline::Image { src: "x.png".into(), alt: "logo".into() },
+                text(" "),
+                Inline::Image { src: "y.png".into(), alt: "linked".into() },
+            ])],
+        );
     }
 
     #[test]

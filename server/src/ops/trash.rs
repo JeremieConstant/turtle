@@ -10,6 +10,7 @@
 
 use super::accounts::Nothing;
 use super::areas::{self, Area, AreaId};
+use super::attachments;
 use super::permissions::{self, Role};
 use super::tree::{self, Entry, Kind};
 use super::versions::{self, Author};
@@ -447,9 +448,12 @@ fn remove_subtree(core: &Core, node_id: &str) -> Result<(), OpError> {
         move_to_top(&db, &area_id, id)?;
     }
     let pages = pages_in_subtree(&db, node_id)?;
+    let files = attachments::files_of(&db, &pages)?;
     forget_content(core, &db, &pages)?;
-    // Everything beneath goes with it, with its Versions, Tags and Grants.
+    // Everything beneath goes with it, with its Versions, Tags, Grants and
+    // Attachments.
     db.execute("DELETE FROM nodes WHERE id = ?1", [node_id])?;
+    attachments::remove_unattached_files(core, &db, &files)?;
     drop(db);
     for page in &pages {
         core.page_changed(page);
@@ -473,8 +477,10 @@ fn move_to_top(db: &Connection, area_id: &str, id: &str) -> Result<(), OpError> 
 fn remove_area(core: &Core, area_id: &str) -> anyhow::Result<()> {
     let db = core.db();
     let pages = pages_in_area(&db, area_id)?;
+    let files = attachments::files_of(&db, &pages)?;
     forget_content(core, &db, &pages).map_err(|error| anyhow::anyhow!("removing Area {area_id}: {error:?}"))?;
     db.execute("DELETE FROM areas WHERE id = ?1", [area_id])?;
+    attachments::remove_unattached_files(core, &db, &files)?;
     drop(db);
     for page in &pages {
         core.page_changed(page);

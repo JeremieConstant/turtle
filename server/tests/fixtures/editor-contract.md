@@ -3,6 +3,8 @@
 Some **bold**, *italic*, ~~struck~~, `code` and a [link](<https://example.org>).\
 Next line, and [](turtle:a1b2).
 
+With ![Logo](<logo.png>) inline.
+
 - one
 - two
   1. nested

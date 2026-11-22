@@ -324,7 +324,7 @@ pub(super) fn random_hex(bytes: usize) -> Result<String, OpError> {
     Ok(hex(&buffer))
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

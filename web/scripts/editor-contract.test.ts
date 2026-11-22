@@ -56,6 +56,7 @@ const CONTENT = {
       { type: 'pageLink', attrs: { pageId: 'a1b2' } },
       text('.'),
     ),
+    paragraph(text('With '), { type: 'image', attrs: { src: 'logo.png', alt: 'Logo' } }, text(' inline.')),
     {
       type: 'bulletList',
       content: [
@@ -81,7 +82,7 @@ const CONTENT = {
   ],
 }
 
-const schema = getSchema(contentExtensions)
+const schema = getSchema(contentExtensions())
 
 test('the content is valid for the editor', () => {
   expect(() => schema.nodeFromJSON(CONTENT).check()).not.toThrow()

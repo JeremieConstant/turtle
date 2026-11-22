@@ -7,6 +7,7 @@
 
 pub mod accounts;
 pub mod agents;
+pub mod attachments;
 pub mod areas;
 pub mod content;
 #[cfg(test)]
@@ -44,6 +45,10 @@ pub struct Core {
     access: tokio::sync::watch::Sender<u64>,
     search: crate::search::Index,
     live: crate::live::Pages,
+    /// Where Attachment files are kept, each under the hash of its content.
+    attachments: std::path::PathBuf,
+    /// The largest file, in bytes, that can be attached.
+    attachment_limit: u64,
 }
 
 impl Core {
@@ -66,9 +71,25 @@ impl Core {
             db: Mutex::new(crate::store::open(db_path)?),
             search: crate::search::Index::open(&db_path.with_file_name("search"))?,
             live: crate::live::Pages::new(crate::store::open(db_path)?, clock.clone()),
+            attachments: db_path.with_file_name("attachments"),
+            attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
+    }
+
+    /// Sets the largest file, in bytes, that can be attached.
+    pub fn set_attachment_limit(&mut self, bytes: u64) {
+        self.attachment_limit = bytes;
+    }
+
+    pub fn attachment_limit(&self) -> u64 {
+        self.attachment_limit
+    }
+
+    /// Where Attachment files are kept.
+    pub fn attachments_dir(&self) -> &Path {
+        &self.attachments
     }
 
     pub fn db(&self) -> MutexGuard<'_, Connection> {
@@ -395,6 +416,7 @@ pub fn catalogue() -> Catalogue {
     };
     accounts::register(&mut catalogue);
     agents::register(&mut catalogue);
+    attachments::register(&mut catalogue);
     members::register(&mut catalogue);
     areas::register(&mut catalogue);
     grants::register(&mut catalogue);
