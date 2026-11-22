@@ -132,7 +132,10 @@
     </a>
   </div>
 
-  <div class="search"><SearchBox areaId={searchAreaId} /></div>
+  <!-- The start screen is a search field itself. -->
+  {#if route.screen !== 'home'}
+    <div class="search"><SearchBox areaId={searchAreaId} /></div>
+  {/if}
 
   <div class="areas">
     {#if navigation.areas === null}

@@ -40,8 +40,6 @@
   --color-person-6: #b45309;
   --color-on-color: #ffffff;
   --color-danger: #b42318;
-  /* Behind the words of a Snippet that matched. */
-  --color-highlight: #fde68a;
   /* What lies over the page behind a dialog and behind the drawer. */
   --color-backdrop: rgb(0 0 0 / 0.18);
   --color-scrim: rgb(0 0 0 / 0.2);
@@ -122,6 +120,10 @@
   --width-drawer-max: 86vw;
   --width-floating-max: calc(100vw - 2 * var(--space-4));
   --height-control: 30px;
+  --height-search: 48px;
+  --height-search-l: 56px;
+  /* How far down the start screen its search field sits. */
+  --space-start-top: max(var(--space-16), 14vh);
   --size-icon-button: 26px;
   --size-chevron: 18px;
   --size-mark: 20px;

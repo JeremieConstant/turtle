@@ -17,8 +17,10 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     );
 }
 
-/// The most results one search returns.
-const MAX_RESULTS: usize = 20;
+/// How many results a search returns when the caller names no limit.
+const DEFAULT_LIMIT: u32 = 20;
+/// The most results one search returns, whatever limit the caller names.
+const MAX_LIMIT: u32 = 100;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchQuery {
@@ -28,12 +30,19 @@ pub struct SearchQuery {
     /// The Area to search in; everything the caller can read if absent.
     #[serde(default)]
     pub area_id: Option<String>,
+    /// The most results to return, from 1 to 100; 20 if absent. A number
+    /// outside that range counts as the nearest one inside it.
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SearchResults {
-    /// The best match first, at most 20.
+    /// The best match first, at most as many as the limit.
     pub results: Vec<SearchResult>,
+    /// True when more Pages matched than the limit let through. A more
+    /// specific query then finds what is missing.
+    pub more: bool,
 }
 
 /// A Page that matched.
@@ -64,12 +73,16 @@ pub fn search(core: &Core, principal: &Principal, input: SearchQuery) -> OpResul
     };
     // The index applies the access itself, so what the caller cannot read is
     // never among the hits, not even to be dropped later.
-    let hits = core.search.search(&crate::search::Search {
+    let limit = input.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT) as usize;
+    // One more than is returned, which is how to know that there is more.
+    let mut hits = core.search.search(&crate::search::Search {
         text: &input.query,
         area_id: input.area_id.as_deref(),
         readable: Some(&readable),
-        limit: MAX_RESULTS,
+        limit: limit + 1,
     })?;
+    let more = hits.len() > limit;
+    hits.truncate(limit);
     let db = core.db();
     let mut results = Vec::new();
     for hit in hits {
@@ -89,7 +102,7 @@ pub fn search(core: &Core, principal: &Principal, input: SearchQuery) -> OpResul
         let path = path_to(&db, &hit.page_id)?;
         results.push(SearchResult { page_id: hit.page_id, title, area_id, area_name, path, snippet: hit.snippet });
     }
-    Ok(SearchResults { results }.into())
+    Ok(SearchResults { results, more }.into())
 }
 
 /// The titles above a node, from the top of its Area down.
@@ -190,7 +203,7 @@ mod tests {
     /// The titles found, in order, once the index has caught up.
     fn found(core: &Core, principal: &Principal, query: &str) -> Vec<String> {
         core.catch_up_search().unwrap();
-        let input = SearchQuery { query: query.into(), area_id: None };
+        let input = SearchQuery { query: query.into(), area_id: None, limit: None };
         let results = search(core, principal, input).unwrap().output.results;
         results.into_iter().map(|result| result.title).collect()
     }
@@ -310,6 +323,51 @@ mod tests {
         assert_eq!(seen(&outsider), ["Roadmap news"]);
     }
 
+    /// A search for "runbook" among `pages` Pages that all match it, asking for at most `limit` results.
+    fn runbooks(pages: usize, limit: Option<u32>) -> SearchResults {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let engineering = area(&core, &grace, "Engineering");
+        for number in 1..=pages {
+            page(&core, &grace, &engineering, &format!("Runbook {number}"));
+        }
+        core.catch_up_search().unwrap();
+        search(&core, &grace, SearchQuery { query: "runbook".into(), area_id: None, limit }).unwrap().output
+    }
+
+    #[test]
+    fn a_search_without_a_limit_returns_twenty_results_and_says_when_more_matched() {
+        let cut = runbooks(21, None);
+        assert_eq!(cut.results.len(), 20);
+        assert!(cut.more);
+
+        let whole = runbooks(20, None);
+        assert_eq!(whole.results.len(), 20);
+        assert!(!whole.more);
+    }
+
+    #[test]
+    fn a_search_returns_as_many_results_as_the_limit_allows() {
+        let few = runbooks(8, Some(3));
+        assert_eq!(few.results.len(), 3);
+        assert!(few.more);
+
+        let many = runbooks(25, Some(50));
+        assert_eq!(many.results.len(), 25);
+        assert!(!many.more);
+    }
+
+    #[test]
+    fn a_limit_outside_one_to_a_hundred_counts_as_the_nearest_allowed() {
+        let none = runbooks(2, Some(0));
+        assert_eq!(none.results.len(), 1);
+        assert!(none.more);
+
+        let all = runbooks(101, Some(5000));
+        assert_eq!(all.results.len(), 100);
+        assert!(all.more);
+    }
+
     #[test]
     fn pages_in_a_personal_area_are_found_by_its_member_alone() {
         let core = fresh();
@@ -353,14 +411,14 @@ mod tests {
     #[test]
     fn nobody_signed_in_cannot_search() {
         let core = fresh();
-        let input = SearchQuery { query: "roadmap".into(), area_id: None };
+        let input = SearchQuery { query: "roadmap".into(), area_id: None, limit: None };
         let refused = search(&core, &Principal::Anonymous, input).unwrap_err();
         assert_eq!(refused.kind(), "not_permitted");
     }
 
     fn found_in(core: &Core, principal: &Principal, area: &str, query: &str) -> Result<Vec<String>, OpError> {
         core.catch_up_search().unwrap();
-        let input = SearchQuery { query: query.into(), area_id: Some(area.into()) };
+        let input = SearchQuery { query: query.into(), area_id: Some(area.into()), limit: None };
         let results = search(core, principal, input)?.output.results;
         Ok(results.into_iter().map(|result| result.title).collect())
     }
@@ -396,7 +454,7 @@ mod tests {
 
     fn results(core: &Core, principal: &Principal, query: &str) -> Vec<SearchResult> {
         core.catch_up_search().unwrap();
-        let input = SearchQuery { query: query.into(), area_id: None };
+        let input = SearchQuery { query: query.into(), area_id: None, limit: None };
         search(core, principal, input).unwrap().output.results
     }
 
