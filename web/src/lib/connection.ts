@@ -11,6 +11,7 @@ const FRAME_UPDATE = 0
 const FRAME_PRESENCE = 1
 const FRAME_PRESENCE_REQUEST = 2
 const FRAME_AGENT_UPDATE = 3
+const FRAME_TAGS = 4
 
 export type Status = 'connecting' | 'connected' | 'disconnected'
 
@@ -40,6 +41,8 @@ export class Connection {
      * while it runs is that Agent's change and nothing else.
      */
     private readonly onAgentChange: (agent: ChangingAgent, apply: () => void) => void = (_agent, apply) => apply(),
+    /** Called with the Page's Tags whenever someone changes them. */
+    private readonly onTags: (tags: string[]) => void = () => {},
   ) {
     this.awareness = new Awareness(doc)
 
@@ -95,6 +98,9 @@ export class Connection {
         applyAwarenessUpdate(this.awareness, payload, this)
       } else if (data[0] === FRAME_PRESENCE_REQUEST) {
         this.announce()
+      } else if (data[0] === FRAME_TAGS) {
+        const tags = readTags(payload)
+        if (tags) this.onTags(tags)
       }
     }
     socket.onclose = () => {
@@ -126,6 +132,16 @@ export class Connection {
     frame[0] = kind
     frame.set(payload, 1)
     this.socket.send(frame)
+  }
+}
+
+/** The Tags in the payload of a Tags frame; none if they cannot be read. */
+function readTags(payload: Uint8Array): string[] | null {
+  try {
+    const tags: unknown = JSON.parse(new TextDecoder().decode(payload))
+    return Array.isArray(tags) && tags.every(tag => typeof tag === 'string') ? tags : null
+  } catch {
+    return null
   }
 }
 

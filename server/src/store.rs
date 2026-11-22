@@ -192,6 +192,14 @@ const MIGRATIONS: &[&str] = &[
      INSERT INTO nodes (id, area_id, parent_id, kind, created_at)
          SELECT lower(hex(randomblob(16))), id, NULL, 'root', created_at
          FROM areas WHERE personal_member_id IS NOT NULL;",
+    // A Tag exists only on the Pages that carry it, so it has no table of its
+    // own and disappears with the last of them. It is stored in lower case.
+    "CREATE TABLE page_tags (
+         page_id TEXT NOT NULL REFERENCES nodes (id) ON DELETE CASCADE,
+         tag TEXT NOT NULL,
+         PRIMARY KEY (page_id, tag)
+     );
+     CREATE INDEX page_tags_by_tag ON page_tags (tag);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
@@ -333,7 +341,8 @@ mod tests {
         {
             // As the database was before Personal Areas.
             let old = Connection::open(&path).unwrap();
-            let before_personal_areas = MIGRATIONS.len() - 1;
+            // Personal Areas came with the tenth migration.
+            let before_personal_areas = 9;
             for migration in &MIGRATIONS[..before_personal_areas] {
                 old.execute_batch(migration).unwrap();
             }

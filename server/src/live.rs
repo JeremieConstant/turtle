@@ -22,6 +22,9 @@ pub const FRAME_PRESENCE_REQUEST: u8 = 2;
 /// presence shows it (JSON), that JSON, then the update. Editors mark exactly
 /// this change with the Agent's name.
 pub const FRAME_AGENT_UPDATE: u8 = 3;
+/// The Page's Tags as they are now, as a JSON list, sent by the server
+/// whenever they change. They are not part of the content.
+pub const FRAME_TAGS: u8 = 4;
 
 /// The connection a frame came from when Turtle itself made the change.
 pub const FROM_TURTLE: u64 = 0;
@@ -144,6 +147,14 @@ impl Pages {
         });
         open.insert(id.to_string(), page.clone());
         Ok(page)
+    }
+
+    /// Tells everyone who has the Page open its Tags as they are now. A Page
+    /// nobody has open is left closed: it is read with its Tags when opened.
+    pub fn tags_changed(&self, page_id: &str, tags: &[String]) {
+        let Some(page) = self.open.lock().unwrap().get(page_id).cloned() else { return };
+        let Ok(tags) = serde_json::to_vec(tags) else { return };
+        let _ = page.frames.send((FROM_TURTLE, frame(FRAME_TAGS, &tags)));
     }
 
     /// Applies a Member's update from an editor to an open Page. Passing it
