@@ -9,11 +9,12 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tantivy::collector::TopDocs;
+use tantivy::Order;
 use tantivy::query::{
     BooleanQuery, ConstScoreQuery, DisjunctionMaxQuery, FuzzyTermQuery, Occur, Query, TermQuery, TermSetQuery,
 };
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, STORED, STRING,
+    Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, FAST, STORED, STRING,
 };
 use tantivy::tokenizer::{
     AsciiFoldingFilter, Language, LowerCaser, RemoveLongFilter, SimpleTokenizer, Stemmer,
@@ -23,7 +24,7 @@ use tantivy::{IndexReader, IndexWriter, TantivyDocument, Term};
 
 /// Changes whenever the schema or the analysis changes, so an index written
 /// by an older Turtle is rebuilt instead of read wrongly.
-const SCHEMA_VERSION: &str = "1";
+const SCHEMA_VERSION: &str = "2";
 const VERSION_FILE: &str = "turtle-search-version";
 /// Present only while no Turtle has the index open and everything was
 /// written before it closed. Without it, changes may have been lost in a
@@ -43,11 +44,16 @@ pub struct PageDocument {
     pub title: String,
     /// The content as plain text.
     pub text: String,
+    /// The Tags the Page carries, as they are stored.
+    pub tags: Vec<String>,
 }
 
 /// What a query asks.
 pub struct Search<'a> {
+    /// The words to look for.
     pub text: &'a str,
+    /// Tags, as they are stored, that a Page must all carry.
+    pub tags: &'a [String],
     /// Only Pages of this Area; every Area if absent.
     pub area_id: Option<&'a str>,
     /// Only Pages whose `access` is one of these; every Page if absent.
@@ -100,6 +106,9 @@ struct Fields {
     page_id: Field,
     area_id: Field,
     access: Field,
+    tags: Field,
+    /// The title in lower case, to list Pages alphabetically.
+    title_order: Field,
     title: Words,
     text: Words,
 }
@@ -112,6 +121,9 @@ struct Words {
     english: Field,
     german: Field,
 }
+
+/// The field that lists Pages alphabetically, named where it is sorted on.
+const TITLE_ORDER: &str = "title_order";
 
 const RAW: &str = "turtle_raw";
 const ENGLISH: &str = "turtle_english";
@@ -254,6 +266,10 @@ impl Index {
         document.add_text(fields.page_id, &page.page_id);
         document.add_text(fields.area_id, &page.area_id);
         document.add_text(fields.access, &page.access);
+        for tag in &page.tags {
+            document.add_text(fields.tags, tag);
+        }
+        document.add_text(fields.title_order, page.title.to_lowercase());
         for (words, text) in [(fields.title, &page.title), (fields.text, &page.text)] {
             document.add_text(words.raw, text);
             document.add_text(words.english, text);
@@ -264,7 +280,7 @@ impl Index {
 
     pub fn search(&self, query: &Search) -> anyhow::Result<Vec<Hit>> {
         let words = words(query.text);
-        if words.is_empty() {
+        if words.is_empty() && query.tags.is_empty() {
             return Ok(Vec::new());
         }
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
@@ -286,11 +302,23 @@ impl Index {
         if let Some(area_id) = query.area_id {
             filter(term(self.fields.area_id, area_id));
         }
+        for tag in query.tags {
+            filter(term(self.fields.tags, tag));
+        }
         let matching = BooleanQuery::new(clauses);
         let searcher = self.reader.searcher();
-        let top = searcher.search(&matching, &TopDocs::with_limit(query.limit.max(1)).order_by_score())?;
+        let top = TopDocs::with_limit(query.limit.max(1));
+        // Without words there is no relevance to rank by, so the Pages come
+        // in the order of their titles.
+        let addresses: Vec<_> = if words.is_empty() {
+            let ordered = top.order_by_string_fast_field(TITLE_ORDER, Order::Asc);
+            searcher.search(&matching, &ordered)?.into_iter().map(|(_, address)| address).collect()
+        } else {
+            let ranked = top.order_by_score();
+            searcher.search(&matching, &ranked)?.into_iter().map(|(_, address)| address).collect()
+        };
         let mut hits = Vec::new();
-        for (_, address) in top {
+        for address in addresses {
             let document: TantivyDocument = searcher.doc(address)?;
             let page_id = document
                 .get_first(self.fields.page_id)
@@ -516,6 +544,8 @@ fn schema() -> (Schema, Fields) {
         page_id: builder.add_text_field("page_id", STRING | STORED),
         area_id: builder.add_text_field("area_id", STRING),
         access: builder.add_text_field("access", STRING),
+        tags: builder.add_text_field("tags", STRING),
+        title_order: builder.add_text_field(TITLE_ORDER, STRING | FAST),
         title,
         text: body,
     };

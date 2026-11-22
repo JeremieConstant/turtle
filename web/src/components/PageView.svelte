@@ -22,6 +22,7 @@
   import Editor from './Editor.svelte'
   import MarkdownView from './MarkdownView.svelte'
   import People from './People.svelte'
+  import Tags from './Tags.svelte'
   import Toolbar from './Toolbar.svelte'
   import Versions from './Versions.svelte'
 
@@ -47,6 +48,13 @@
   let markdownShown = $state(false)
   let versionsShown = $state(false)
 
+  /**
+   * The Page's Tags as the Page was read, until the connection says what they
+   * are now. From then on it alone reports them, as each change is made here
+   * or by anyone else, so an answer arriving late never shows older Tags.
+   */
+  let tags = $state<string[]>(untrack(() => page.tags))
+
   // Relative times ("4 minutes ago") move on while the Page is open.
   let now = $state(Math.floor(Date.now() / 1000))
   $effect(() => {
@@ -66,6 +74,7 @@
     },
     () => (loaded = true),
     agentChanged,
+    changed => (tags = changed),
   )
 
   /** As long as the mark holds and fades in the editor's styles. */
@@ -140,6 +149,11 @@
         {/if}
       {/each}
     </nav>
+    {#if tags.length || editable}
+      <div class="bar-tags">
+        <Tags listId="bar-tags" pageId={id} {tags} writable={editable} />
+      </div>
+    {/if}
     <div class="side">
       <People awareness={connection.awareness} {working} />
       <ConnectionStatus {status} />
@@ -176,6 +190,11 @@
             <span class="role">You can read this Page but not change it</span>
           {/if}
         </p>
+        {#if tags.length || editable}
+          <div class="meta-tags">
+            <Tags listId="meta-tags" pageId={id} {tags} writable={editable} />
+          </div>
+        {/if}
       </div>
 
       <!-- Someone who can only read gets no formatting buttons. -->
@@ -298,6 +317,31 @@
     margin: var(--space-3) 0 0;
     color: var(--color-muted);
     font-size: var(--text-s);
+  }
+
+  /* Tags sit beside the path, apart from the content; where the bar has no
+     room for them, they move under the title. */
+  .bar-tags {
+    flex: none;
+  }
+
+  .bar-tags :global(.tags) {
+    flex-wrap: nowrap;
+  }
+
+  .meta-tags {
+    display: none;
+    margin-top: var(--space-3);
+  }
+
+  @media (max-width: 1180px) {
+    .bar-tags {
+      display: none;
+    }
+
+    .meta-tags {
+      display: block;
+    }
   }
 
   .meta:empty {

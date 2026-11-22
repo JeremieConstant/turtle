@@ -92,3 +92,32 @@ async fn the_markdown_of_a_page_needs_a_session_and_a_page_of_an_area() {
     assert_eq!(unchanged.body, "# Q1\n");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_tag_added_by_someone_else_appears_on_the_open_page() {
+    let mut server = TestServer::start().await;
+    let writer = server.sign_up().await;
+    let page = writer.create_page("Deploy").await;
+    let reader = server.sign_in().await;
+    let open = server.connect(&reader, &page).await;
+
+    writer.call("add_tag", json!({ "page_id": page, "tag": "Runbook" })).await;
+
+    open.wait_until("the open Page shows the Tag", |content| content.tags == Some(vec!["runbook".to_string()]))
+        .await;
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn opening_a_page_brings_its_tags_at_once() {
+    let mut server = TestServer::start().await;
+    let writer = server.sign_up().await;
+    let page = writer.create_page("Deploy").await;
+    writer.call("add_tag", json!({ "page_id": page, "tag": "runbook" })).await;
+
+    let open = server.connect(&writer, &page).await;
+
+    open.wait_until("the Page arrives with its Tags", |content| content.tags == Some(vec!["runbook".to_string()]))
+        .await;
+    server.stop().await;
+}

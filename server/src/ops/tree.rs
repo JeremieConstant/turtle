@@ -34,7 +34,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "get_page",
-            "Gets a Page by its ID, with its Area, the Folders and Pages it is beneath, when and by whom it was last edited, and the caller's Role on it. A Page the caller cannot read is reported as not found.",
+            "Gets a Page by its ID, with its Area, the Folders and Pages it is beneath, when and by whom it was last edited, its Tags, and the caller's Role on it. A Page the caller cannot read is reported as not found.",
             get_page,
         )
         .changes = false;
@@ -111,6 +111,8 @@ pub struct Page {
     /// None for a Page nobody has written in yet. Changes made since then
     /// count once they are recorded as a Version.
     pub last_edited: Option<LastEdited>,
+    /// Its Tags, in alphabetical order.
+    pub tags: Vec<String>,
 }
 
 /// A Folder or Page above a Page.
@@ -270,6 +272,7 @@ pub fn get_page(core: &Core, principal: &Principal, input: PageId) -> OpResult<P
         at: newest.recorded_at,
         by: newest.authors,
     });
+    let tags = super::tags::tags_of(&db, &input.id)?;
     Ok(Page {
         id: input.id,
         title: found.title,
@@ -277,6 +280,7 @@ pub fn get_page(core: &Core, principal: &Principal, input: PageId) -> OpResult<P
         path,
         role: found.role,
         last_edited,
+        tags,
     }
     .into())
 }

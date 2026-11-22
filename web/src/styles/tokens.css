@@ -136,6 +136,8 @@
   --width-drawer-max: 86vw;
   --width-floating-max: calc(100vw - 2 * var(--space-4));
   --height-control: 30px;
+  --height-tag: 22px;
+  --size-tag-remove: 14px;
   --height-search: 48px;
   --height-search-l: 56px;
   /* How far down the start screen its search field sits. */
