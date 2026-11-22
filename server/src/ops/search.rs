@@ -166,7 +166,8 @@ pub(super) fn changes(db: &Connection, pending: &Pending) -> anyhow::Result<Chan
     Ok(Changes { everything, pages })
 }
 
-/// A Page as the index needs it, or none when there is no such Page.
+/// A Page as the index needs it, or none when there is no such Page or it
+/// is in the Trash.
 fn document(db: &Connection, page_id: &str) -> anyhow::Result<Option<PageDocument>> {
     let found = db
         .query_row(
@@ -178,6 +179,10 @@ fn document(db: &Connection, page_id: &str) -> anyhow::Result<Option<PageDocumen
         )
         .optional()?;
     let Some((area_id, title, state)) = found else { return Ok(None) };
+    // A Page in the Trash is found by nobody until it is restored.
+    if permissions::in_trash(db, page_id)? {
+        return Ok(None);
+    }
     let access = permissions::governing_node(db, page_id)?
         .ok_or_else(|| anyhow::anyhow!("Page {page_id} is in no Area"))?;
     let text = match state {

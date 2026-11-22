@@ -51,12 +51,16 @@ A recorded state of a Page with its authors, the people whose changes arrived si
 _Avoid_: Revision, snapshot, history entry
 
 **Trash**:
-Where deleted Pages and Folders are kept so they can be brought back.
+Where deleted Pages, Folders and Areas are kept for 30 days so they can be brought back. Every Area has its own Trash for its Pages and Folders; a deleted Area is out of reach of its own Admins, so only a Workspace Admin brings it back.
 _Avoid_: Recycle bin, archive, Papierkorb
 
 **Tag**:
 A free-form label on a Page, shared across the whole Workspace; it ignores upper and lower case and exists as long as one Page carries it.
 _Avoid_: Label, category, keyword
+
+**Page link**:
+A link in a Page's content to another Page by its ID, shown with that Page's current title so renaming or moving it never breaks the link, and shown without title to someone who may not read it. In Markdown it is a link to the address `turtle:` followed by the Page's ID.
+_Avoid_: Internal link, wiki link, reference, mention
 
 ### People and agents
 

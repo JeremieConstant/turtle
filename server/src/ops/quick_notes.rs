@@ -113,10 +113,9 @@ pub fn list_quick_notes(core: &Core, principal: &Principal, input: RecentQuickNo
     let mut quick_notes = Vec::new();
     for row in rows {
         let (id, title, created_at, area_id) = row?;
-        // A Quick Note moved where its Member no longer reads, or reached
-        // through a Token limited to other Areas, is hidden like any other
-        // Page, and so is the name of an Area they cannot read. Once the Trash
-        // exists (#14), a Quick Note in it must be left out here too.
+        // A Quick Note moved where its Member no longer reads, reached
+        // through a Token limited to other Areas, or in the Trash, is hidden
+        // like any other Page, and so is the name of an Area they cannot read.
         if permissions::role_on(&db, principal, &id)?.is_none() {
             continue;
         }

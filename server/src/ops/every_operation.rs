@@ -16,6 +16,8 @@ struct Fixture {
     area_id: String,
     page_id: String,
     folder_id: String,
+    /// A Page in the Trash.
+    trashed_id: String,
     /// A Member with Read, the subject of Member and Grant operations.
     ken_id: String,
     /// A standalone Agent without a Role, the subject of Agent operations.
@@ -66,6 +68,14 @@ fn table() -> Vec<Row> {
         ("create_folder", |f| json!({"area_id": f.area_id, "title": "New"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("rename_page", |f| json!({"id": f.page_id, "title": "Renamed"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("rename_folder", |f| json!({"id": f.folder_id, "title": "Renamed"}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("move_to_trash", |f| json!({"id": f.page_id}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("get_trash", |f| json!({"area_id": f.area_id}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("restore_from_trash", |f| json!({"id": f.trashed_id}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("delete_from_trash", |f| json!({"id": f.trashed_id}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("delete_area", |f| json!({"id": f.area_id}), [OK, REFUSED, REFUSED, HIDDEN, OK]),
+        ("list_deleted_areas", |_| json!({}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        // The Area is not deleted.
+        ("restore_area", |f| json!({"id": f.area_id}), [HIDDEN; 5]),
         // Every caller is a Member with a Personal Area, where Quick Notes land.
         ("create_quick_note", |_| json!({"text": "Idea"}), [OK; 5]),
         ("list_quick_notes", |_| json!({}), [OK; 5]),
@@ -97,6 +107,8 @@ fn table() -> Vec<Row> {
         ("list_tags", |_| json!({}), [OK; 5]),
         ("add_tag", |f| json!({"page_id": f.page_id, "tag": "Runbook"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("remove_tag", |f| json!({"page_id": f.page_id, "tag": "Runbook"}), [OK, OK, REFUSED, HIDDEN, OK]),
+        // It leaves out the Pages the caller cannot read instead of failing; ops::links tests which.
+        ("get_page_titles", |_| json!({"page_ids": ["made-up"]}), [OK; 5]),
         ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),
@@ -137,6 +149,11 @@ fn every_operation_respects_the_role_of_its_caller() {
             let fixture = Fixture {
                 page_id: entry("create_page", "Notes"),
                 folder_id: entry("create_folder", "Drafts"),
+                trashed_id: {
+                    let id = entry("create_page", "Old");
+                    catalogue.call(&core, &grace, "move_to_trash", json!({"id": id})).unwrap();
+                    id
+                },
                 area_id: area_id.clone(),
                 ken_id: match &ken {
                     Principal::Member { id, .. } => id.clone(),
@@ -174,7 +191,7 @@ fn every_operation_respects_the_role_of_its_caller() {
 }
 
 /// What a Personal Area's own Member cannot do there, though they are its Admin.
-const NEVER_IN_A_PERSONAL_AREA: [&str; 4] = ["rename_area", "list_grants", "set_grant", "remove_grant"];
+const NEVER_IN_A_PERSONAL_AREA: [&str; 5] = ["rename_area", "list_grants", "set_grant", "remove_grant", "delete_area"];
 
 #[test]
 fn a_personal_area_answers_to_its_member_alone() {
@@ -195,6 +212,11 @@ fn a_personal_area_answers_to_its_member_alone() {
             let fixture = Fixture {
                 page_id: entry("create_page", "Notes"),
                 folder_id: entry("create_folder", "Drafts"),
+                trashed_id: {
+                    let id = entry("create_page", "Old");
+                    catalogue.call(&core, &grace, "move_to_trash", json!({"id": id})).unwrap();
+                    id
+                },
                 area_id: area_id.clone(),
                 ken_id: match &ken {
                     Principal::Member { id, .. } => id.clone(),
@@ -216,7 +238,7 @@ fn a_personal_area_answers_to_its_member_alone() {
 
             let input = input(&fixture);
             let text = input.to_string();
-            let addresses_it = [&fixture.area_id, &fixture.page_id, &fixture.folder_id].iter().any(|id| text.contains(id.as_str()));
+            let addresses_it = [&fixture.area_id, &fixture.page_id, &fixture.folder_id, &fixture.trashed_id].iter().any(|id| text.contains(id.as_str()));
             let expected = match (caller_is, addresses_it) {
                 ("its Member", true) if NEVER_IN_A_PERSONAL_AREA.contains(&name) => REFUSED,
                 ("its Member", true) => by_role[0],

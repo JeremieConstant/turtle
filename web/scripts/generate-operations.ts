@@ -95,8 +95,23 @@ function outputType(schema: Schema, definitions: Map<string, string>): string {
   // Only the shape: definitions are collected separately, and the
   // description and title belong to the operation, not the type.
   const { type, properties, required, additionalProperties } = selfReferenced(schema, title)
-  definitions.set(title, typeOf({ type, properties, required, additionalProperties }))
+  define(definitions, title, typeOf({ type, properties, required, additionalProperties }))
   return title
+}
+
+/**
+ * Names a type. The catalogue's types are named after their Rust structs,
+ * and two structs of the same name in different modules would otherwise
+ * leave the web app with whichever came last.
+ */
+function define(definitions: Map<string, string>, name: string, type: string) {
+  const known = definitions.get(name)
+  if (known !== undefined && known !== type) {
+    throw new Error(
+      `Two different types are named ${name}. Rename one of the Rust types so every name is unique.\n\n${known}\n\n${type}`,
+    )
+  }
+  definitions.set(name, type)
 }
 
 export function generate(operations: Operation[]): string {
@@ -104,7 +119,7 @@ export function generate(operations: Operation[]): string {
   for (const operation of operations) {
     for (const schema of [operation.input, operation.output]) {
       for (const [name, definition] of Object.entries(schema.$defs ?? {})) {
-        definitions.set(name, typeOf(definition))
+        define(definitions, name, typeOf(definition))
       }
     }
   }

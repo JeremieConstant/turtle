@@ -14,6 +14,8 @@ Every capability is an operation in `server/src/ops` (ADR-0005), and every permi
 
 Something the caller may not read answers exactly like something that does not exist: same error kind, same message, and nothing in the message that came from it.
 
+`permissions::role_on` is where reading is decided. A reader that decides it some other way, such as the search index through `readable_through` and `governing_node`, or `list_tags`, applies every exclusion `role_on` makes itself, such as leaving out what is in the Trash.
+
 ## Messages are for people
 
 Error messages are whole sentences that say what to do next ("Enter a title."), name things with glossary terms, and never expose internals. Internal failures are logged on the server, not described to the caller.

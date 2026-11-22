@@ -205,6 +205,28 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE nodes ADD COLUMN quick_note_member_id TEXT REFERENCES members (id);
      CREATE INDEX quick_notes_by_member ON nodes (quick_note_member_id, created_at)
          WHERE quick_note_member_id IS NOT NULL;",
+    // The Trash marks the top of each deleted Subtree, and each deleted Area;
+    // what is beneath stays where it was, so restoring puts it all back. Who
+    // deleted it is kept like the author of a Version. Removing that Member
+    // or Agent must not bring the content back, so the reference is cleared
+    // instead of taking the row with it. When what an Entry in the Trash was
+    // beneath is removed for good, the Entry moves to the top of its Area and
+    // `was_beneath` keeps the titles of where it was, as a JSON array.
+    "CREATE TABLE trash (
+         node_id TEXT PRIMARY KEY REFERENCES nodes (id) ON DELETE CASCADE,
+         trashed_at INTEGER NOT NULL,
+         member_id TEXT REFERENCES members (id) ON DELETE SET NULL,
+         agent_id TEXT REFERENCES agents (id) ON DELETE SET NULL,
+         agent TEXT NOT NULL DEFAULT '',
+         was_beneath TEXT
+     );
+     CREATE TABLE deleted_areas (
+         area_id TEXT PRIMARY KEY REFERENCES areas (id) ON DELETE CASCADE,
+         deleted_at INTEGER NOT NULL,
+         member_id TEXT REFERENCES members (id) ON DELETE SET NULL,
+         agent_id TEXT REFERENCES agents (id) ON DELETE SET NULL,
+         agent TEXT NOT NULL DEFAULT ''
+     );",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { areaAddress, inShell, pageAddress, parseAddress, searchAddress, tagSearchAddress } from './routes'
+import { areaAddress, inShell, pageAddress, parseAddress, searchAddress, tagSearchAddress, trashAddress } from './routes'
 
 test('a Page address carries the ID and a readable title', () => {
   expect(parseAddress('/p/abc123/release-notes')).toEqual({ screen: 'page', id: 'abc123' })
@@ -130,4 +130,14 @@ test('a Tag leads to the search for it', () => {
 
 test('the search screen sits in the shell', () => {
   expect(inShell(parseAddress('/search', '?q=x'))).toBe(true)
+})
+
+test('the Trash of an Area has an address of its own, after the Area’s', () => {
+  expect(trashAddress('abc123', 'Engineering')).toBe('/a/abc123/engineering/trash')
+  expect(parseAddress('/a/abc123/engineering/trash')).toEqual({ screen: 'trash', areaId: 'abc123' })
+  expect(parseAddress(trashAddress('a/b c', ''))).toEqual({ screen: 'trash', areaId: 'a/b c' })
+})
+
+test('the deleted Areas are among the settings', () => {
+  expect(parseAddress('/settings/deleted-areas')).toEqual({ screen: 'deleted-areas' })
 })

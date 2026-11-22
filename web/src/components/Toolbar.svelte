@@ -7,7 +7,9 @@
    */
   import type { Editor } from '@tiptap/core'
   import { BLOCKS, LISTS, MARKS, STYLES, shortcut, type Format } from '../lib/format'
+  import { liveSearch } from '../lib/liveSearch.svelte'
   import { menuKeys, openMenu } from '../lib/menu'
+  import { pageIdOf } from '../lib/pageLink'
   import Icon from './Icon.svelte'
 
   const { editor }: { editor: Editor } = $props()
@@ -66,11 +68,40 @@
     },
   }
 
+  /* Searching for a Page by name is how a writer finds one; Page IDs are not meant to be typed. */
+  let pageLinkDialog = $state<HTMLDialogElement>()
+  let pageQuery = $state('')
+  const found = liveSearch(() => ({ query: pageQuery, limit: 8 }))
+  const PAGE_LINK: Format = {
+    id: 'pageLink',
+    label: 'Link to Page',
+    icon: 'pagelink',
+    run: () => {
+      pageQuery = ''
+      pageLinkDialog?.showModal()
+    },
+  }
+
+  function linkPage(pageId: string) {
+    pageLinkDialog?.close()
+    editor.chain().focus().insertContent({ type: 'pageLink', attrs: { pageId } }).run()
+  }
+
+  /** Enter takes the best match. */
+  function linkFirstPage(event: SubmitEvent) {
+    event.preventDefault()
+    const first = found.results?.[0]
+    if (first) linkPage(first.page_id)
+  }
+
   function setLink(event: SubmitEvent) {
     event.preventDefault()
     const href = address.trim()
     linkDialog?.close()
     if (!href) return
+    // An address of a Page is a Page link, as it would be once read back from Markdown.
+    const pageId = pageIdOf(href)
+    if (pageId) return linkPage(pageId)
     // A bare "example.org" is meant as a web address, not a path inside Turtle.
     const full = /^([a-z][a-z0-9+.-]*:|\/|#)/i.test(href) ? href : `https://${href}`
     if (editor.state.selection.empty) {
@@ -155,6 +186,7 @@
   <span class="separator" aria-hidden="true"></span>
   {#each MARKS as f (f.id)}{@render button(f)}{/each}
   {@render button(LINK)}
+  {@render button(PAGE_LINK)}
   <span class="separator" aria-hidden="true"></span>
   {#each LISTS as f (f.id)}{@render button(f)}{/each}
   <span class="separator" aria-hidden="true"></span>
@@ -169,6 +201,33 @@
     <div class="actions">
       <button type="button" class="btn" onclick={() => linkDialog?.close()}>Cancel</button>
       <button type="submit" class="btn primary">Add link</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog bind:this={pageLinkDialog} closedby="any" onclose={() => editor.commands.focus()}>
+  <form onsubmit={linkFirstPage}>
+    <label for="page-link-query">Link to Page</label>
+    <!-- svelte-ignore a11y_autofocus -->
+    <input id="page-link-query" type="search" bind:value={pageQuery} autofocus autocomplete="off" placeholder="Search for a Page by its title" />
+    {#if found.error}
+      <p class="note" role="alert">{found.error}</p>
+    {:else if found.results?.length === 0}
+      <p class="note">No Page matches “{found.answered}”.</p>
+    {:else if found.results}
+      <ul class="pages" aria-label="Matching Pages">
+        {#each found.results as result (result.page_id)}
+          <li>
+            <button type="button" class="page" onclick={() => linkPage(result.page_id)}>
+              <span class="page-title">{result.title}</span>
+              <span class="page-place">{[result.area_name, ...result.path].join(' / ')}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <div class="actions">
+      <button type="button" class="btn" onclick={() => pageLinkDialog?.close()}>Cancel</button>
     </div>
   </form>
 </dialog>
@@ -310,6 +369,48 @@
   label {
     font-size: var(--text-s);
     font-weight: var(--weight-medium);
+  }
+
+  .note {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: var(--text-s);
+  }
+
+  .pages {
+    display: grid;
+    gap: var(--space-half);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .page {
+    display: grid;
+    width: 100%;
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-s);
+    background: transparent;
+    text-align: left;
+    transition: background var(--dur-fast) var(--ease-out);
+  }
+
+  .page:hover,
+  .page:focus-visible {
+    background: var(--color-hover);
+  }
+
+  .page-title {
+    font-weight: var(--weight-medium);
+  }
+
+  .page-place {
+    overflow: hidden;
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .actions {

@@ -1,7 +1,8 @@
 <script lang="ts">
   /*
    * The menu of an Entry, shared by the sidebar's tree and the Area screen:
-   * a new Page or Folder beneath it, renaming it, and copying its link. What
+   * a new Page or Folder beneath it, renaming it, copying its link, and
+   * moving it to the Trash. What
    * it offers depends on the Role held on the Area (entryMenuItems). Creating
    * and renaming ask for the name in a dialog, then load the Area's tree
    * again, which both the sidebar and the Area screen show.
@@ -12,9 +13,10 @@
   import { navigation } from '../lib/navigation.svelte'
   import type { Area, Entry, Kind } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
-  import { pageAddress } from '../lib/routes'
+  import { areaAddress, pageAddress } from '../lib/routes'
   import { reportFailure } from '../lib/toasts'
-  import { createEntry, renameEntry } from '../lib/tree'
+  import { createEntry, findEntry, renameEntry } from '../lib/tree'
+  import { moveToTrash } from '../lib/trash'
   import { collapsed } from '../lib/ui.svelte'
   import NameDialog from './NameDialog.svelte'
 
@@ -23,6 +25,7 @@
     'new-folder': 'New Folder beneath…',
     rename: 'Rename…',
     'copy-link': 'Copy link',
+    trash: 'Move to Trash',
   }
 
   const { onclose }: { /** Called when the menu closes, however it closes. */ onclose?: () => void } = $props()
@@ -31,7 +34,7 @@
   let dialog: NameDialog
   /** The Entry the menu is open for, and the Area it is in. */
   let target = $state.raw<{ entry: Entry; area: Area } | null>(null)
-  type DialogPurpose = Exclude<EntryMenuItem, 'copy-link'>
+  type DialogPurpose = Exclude<EntryMenuItem, 'copy-link' | 'trash'>
   /** What the dialog asks for, what its button says, and what it creates. */
   const DIALOGS: Record<DialogPurpose, { label: (title: string) => string; action: string; kind?: Kind }> = {
     'new-page': { label: title => `Title of the new Page beneath ${title}`, action: 'Create Page', kind: 'page' },
@@ -57,6 +60,10 @@
       void copyLink(target.entry)
       return
     }
+    if (item === 'trash') {
+      void trash(target.entry, target.area)
+      return
+    }
     dialogPurpose = item
     dialog.open(item === 'rename' ? target.entry.title : '')
   }
@@ -78,6 +85,24 @@
     if (created?.kind === 'page') router.navigate(pageAddress(created.id, created.title))
   }
 
+  /** Moves an Entry to the Trash; a Page on the screen that went with it gives way to its Area. */
+  async function trash(entry: Entry, area: Area) {
+    const route = router.route
+    const onScreen = route.screen === 'page' && (route.id === entry.id || findEntry(entry.children, route.id) !== undefined)
+    try {
+      await moveToTrash(entry, area, async () => {
+        try {
+          await navigation.loadTree(area.id)
+        } catch (caught) {
+          reportFailure(caught, 'The tree of this Area could not be loaded again. Reload the page to see the change.')
+        }
+      })
+    } catch (caught) {
+      reportFailure(caught, `${entry.title} could not be moved to the Trash. Try again.`)
+      return
+    }
+    if (onScreen) router.navigate(areaAddress(area.id, area.name))
+  }
 </script>
 
 <div
@@ -91,7 +116,7 @@
   ontoggle={event => event.newState === 'closed' && onclose?.()}
 >
   {#each items as item, index (item)}
-    {#if item === 'copy-link' && index > 0}
+    {#if (item === 'copy-link' || item === 'trash') && index > 0}
       <hr />
     {/if}
     <button type="button" class="menu-item" role="menuitem" onclick={() => choose(item)}>{LABELS[item]}</button>

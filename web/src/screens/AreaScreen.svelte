@@ -17,6 +17,9 @@
   import type { Area, Entry, Role } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { areaAddress, pageAddress } from '../lib/routes'
+  import { ask } from '../lib/confirm.svelte'
+  import { reportFailure } from '../lib/toasts'
+  import { UNDO_DURATION } from '../lib/trash'
   import { createEntry } from '../lib/tree'
   import { collapsed, ui } from '../lib/ui.svelte'
   import NotFoundScreen from './NotFoundScreen.svelte'
@@ -90,6 +93,46 @@
     void navigation.refreshAreas()
   }
 
+  /*
+   * Deleting takes the Area out of everyone's reach, the Admin's too, so the
+   * toast's Undo is their only way back; afterwards a Workspace Admin
+   * restores it from the settings.
+   */
+  async function deleteArea() {
+    if (!area) return
+    const { name } = area
+    const yes = await ask({
+      title: `Delete ${name}?`,
+      message: `${name} and everything in it leave the sidebar of everyone. A Workspace Admin can restore it for 30 days, then it is gone for good.`,
+      action: 'Delete Area',
+      destructive: true,
+    })
+    if (!yes) return
+    try {
+      await call('delete_area', { id })
+    } catch (caught) {
+      reportFailure(caught, `${name} could not be deleted. Try again.`)
+      return
+    }
+    await navigation.refreshAreas()
+    router.navigate('/')
+    toast(`Deleted ${name}`, {
+      duration: UNDO_DURATION,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          try {
+            const restored = await call('restore_area', { id })
+            await navigation.refreshAreas()
+            router.navigate(areaAddress(restored.id, restored.name))
+          } catch (caught) {
+            reportFailure(caught, `${name} could not be restored. A Workspace Admin can restore it from the settings.`)
+          }
+        },
+      },
+    })
+  }
+
   async function createFirstPage(title: string) {
     const page = await createEntry('page', { area_id: id, title })
     await reload()
@@ -120,7 +163,10 @@
       <div class="head">
         <h1>{area.name}</h1>
         {#if area.role === 'admin' && !area.personal}
-          <button type="button" class="btn" onclick={() => renameDialog?.open(area?.name)}>Rename</button>
+          <div class="actions">
+            <button type="button" class="btn" onclick={() => renameDialog?.open(area?.name)}>Rename</button>
+            <button type="button" class="btn" onclick={deleteArea}>Delete</button>
+          </div>
         {/if}
       </div>
       {#if area.personal}
@@ -186,6 +232,11 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-4);
+  }
+
+  .actions {
+    display: flex;
+    gap: var(--space-2);
   }
 
   h1 {
