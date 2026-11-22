@@ -106,6 +106,8 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
             size_in_words(limit)
         )));
     }
+    // The file is written before the database is taken, so a large upload
+    // holds up nobody else.
     let content_hash = store_file(core.attachments_dir(), &content)?;
     let attachment = Attachment {
         id: random_hex(16)?,
@@ -117,7 +119,13 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
         size: content.len() as u64,
         attached_at: core.now(),
     };
-    core.db().execute(
+    let db = core.db();
+    // Removing a Page for good may have taken the file away meanwhile, if no
+    // other Attachment had it. That removal holds the database while it looks
+    // and removes, so stored again here, under the same lock, the file stays
+    // until this Attachment refers to it.
+    store_file(core.attachments_dir(), &content)?;
+    db.execute(
         "INSERT INTO attachments (id, page_id, name, size, content_type, content_hash, attached_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         rusqlite::params![
@@ -170,6 +178,43 @@ pub fn open_attachment(core: &Core, principal: &Principal, id: &str) -> Result<(
     let path = core.attachments_dir().join(&content_hash);
     let content = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
     Ok((attachment, content))
+}
+
+/// The files the Attachments of these Pages hold, to give to
+/// `remove_unattached_files` once the Pages are gone.
+pub(super) fn files_of(db: &Connection, pages: &[String]) -> rusqlite::Result<Vec<String>> {
+    let mut statement = db.prepare("SELECT DISTINCT content_hash FROM attachments WHERE page_id = ?1")?;
+    let mut hashes = Vec::new();
+    for page in pages {
+        for hash in statement.query_map([page], |row| row.get::<_, String>(0))? {
+            let hash = hash?;
+            if !hashes.contains(&hash) {
+                hashes.push(hash);
+            }
+        }
+    }
+    Ok(hashes)
+}
+
+/// Removes those of these files that no Attachment holds any more: another
+/// Attachment with the same content keeps its file. Called with the database
+/// held, which `attach_file` also takes before it relies on a file being there.
+pub(super) fn remove_unattached_files(core: &Core, db: &Connection, hashes: &[String]) -> rusqlite::Result<()> {
+    let mut still_attached = db.prepare("SELECT EXISTS (SELECT 1 FROM attachments WHERE content_hash = ?1)")?;
+    for hash in hashes {
+        if still_attached.query_row([hash], |row| row.get::<_, bool>(0))? {
+            continue;
+        }
+        let path = core.attachments_dir().join(hash);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            // What it belonged to is gone already; a file left behind only
+            // takes up space, so this is no reason to fail the removal.
+            Err(error) => eprintln!("removing {} failed: {error}", path.display()),
+        }
+    }
+    Ok(())
 }
 
 const SELECT: &str = "SELECT id, page_id, name, size, content_type, attached_at, content_hash FROM attachments";
@@ -261,7 +306,7 @@ fn size_in_words(bytes: u64) -> String {
 mod tests {
     use super::super::permissions::Role;
     use super::super::testing::{fresh, give_role, member};
-    use super::super::{areas, tree};
+    use super::super::{areas, trash, tree};
     use super::*;
 
     struct Setup {
@@ -366,6 +411,156 @@ mod tests {
             .collect();
         assert_eq!(stored, vec![hash.to_string()]);
         assert_eq!(std::fs::read(setup.core.attachments_dir().join(hash)).unwrap(), b"hello");
+    }
+
+    // The SHA-256 of "hello" and of "bye".
+    const HELLO_FILE: &str = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+    const BYE: &str = "Ynll";
+    const BYE_FILE: &str = "b49f425a7e1f9cff3856329ada223f2f9d368f15a00cf48df16ca95986137fe8";
+
+    fn stored_files(setup: &Setup) -> Vec<String> {
+        let mut stored: Vec<_> = std::fs::read_dir(setup.core.attachments_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        stored.sort();
+        stored
+    }
+
+    fn another_page(setup: &Setup, title: &str) -> String {
+        let entry = tree::NewEntry { area_id: setup.area_id.clone(), parent_id: None, title: title.into() };
+        tree::create_page(&setup.core, &setup.grace, entry.into()).unwrap().output.id
+    }
+
+    fn trash_page(setup: &Setup, page_id: &str) {
+        trash::move_to_trash(&setup.core, &setup.grace, trash::EntryId { id: page_id.into() }).unwrap();
+    }
+
+    fn delete_for_good(setup: &Setup, page_id: &str) {
+        trash::delete_from_trash(&setup.core, &setup.grace, trash::EntryId { id: page_id.into() }).unwrap();
+    }
+
+    #[test]
+    fn the_files_of_a_page_deleted_from_the_trash_are_removed_but_not_before() {
+        let setup = setup();
+        attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        attach(&setup, &setup.grace, "farewell.txt", BYE).unwrap();
+        trash_page(&setup, &setup.page_id);
+        assert_eq!(stored_files(&setup), [HELLO_FILE, BYE_FILE], "a Page in the Trash can still be restored");
+
+        delete_for_good(&setup, &setup.page_id);
+
+        assert!(stored_files(&setup).is_empty());
+    }
+
+    #[test]
+    fn a_file_another_attachment_holds_stays_until_that_one_is_removed_too() {
+        let setup = setup();
+        let other_page = another_page(&setup, "Checklist");
+        attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        let kept = attach_file(
+            &setup.core,
+            &setup.grace,
+            NewAttachment { page_id: other_page.clone(), name: "copy.txt".into(), content: HELLO.into() },
+        )
+        .unwrap()
+        .output;
+        trash_page(&setup, &setup.page_id);
+        delete_for_good(&setup, &setup.page_id);
+
+        assert_eq!(stored_files(&setup), [HELLO_FILE]);
+        let read = read_attachment(&setup.core, &setup.grace, AttachmentId { id: kept.id }).unwrap().output;
+        assert_eq!(read.content, HELLO);
+
+        trash_page(&setup, &other_page);
+        delete_for_good(&setup, &other_page);
+        assert!(stored_files(&setup).is_empty());
+    }
+
+    #[test]
+    fn the_files_of_pages_beneath_a_folder_go_when_the_folder_is_deleted_from_the_trash() {
+        let setup = setup();
+        let folder = tree::create_folder(
+            &setup.core,
+            &setup.grace,
+            tree::NewEntry { area_id: setup.area_id.clone(), parent_id: None, title: "Guides".into() },
+        )
+        .unwrap()
+        .output
+        .id;
+        let beneath = tree::create_page(
+            &setup.core,
+            &setup.grace,
+            tree::NewEntry { area_id: setup.area_id.clone(), parent_id: Some(folder.clone()), title: "Setup".into() }
+                .into(),
+        )
+        .unwrap()
+        .output
+        .id;
+        attach_file(
+            &setup.core,
+            &setup.grace,
+            NewAttachment { page_id: beneath, name: "farewell.txt".into(), content: BYE.into() },
+        )
+        .unwrap();
+        attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        trash_page(&setup, &folder);
+
+        delete_for_good(&setup, &folder);
+
+        assert_eq!(stored_files(&setup), [HELLO_FILE], "the Page outside the Folder keeps its file");
+    }
+
+    #[test]
+    fn the_files_of_what_expires_in_the_trash_are_removed_with_it() {
+        let setup = setup();
+        let other_area = areas::create_area(&setup.core, &setup.grace, areas::NewArea { name: "Sales".into() })
+            .unwrap()
+            .output
+            .id;
+        let in_other_area = tree::create_page(
+            &setup.core,
+            &setup.grace,
+            tree::NewEntry { area_id: other_area.clone(), parent_id: None, title: "Pitch".into() }.into(),
+        )
+        .unwrap()
+        .output
+        .id;
+        attach_file(
+            &setup.core,
+            &setup.grace,
+            NewAttachment { page_id: in_other_area, name: "farewell.txt".into(), content: BYE.into() },
+        )
+        .unwrap();
+        attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        trash_page(&setup, &setup.page_id);
+        trash::delete_area(&setup.core, &setup.grace, areas::AreaId { id: other_area }).unwrap();
+
+        setup.core.advance(trash::KEEP_DAYS * 24 * 60 * 60 + 1);
+        assert_eq!(trash::remove_expired(&setup.core).unwrap(), 2);
+
+        assert!(stored_files(&setup).is_empty());
+    }
+
+    #[test]
+    fn a_file_attached_again_after_its_last_attachment_went_is_stored_again() {
+        let setup = setup();
+        let other_page = another_page(&setup, "Checklist");
+        attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        trash_page(&setup, &setup.page_id);
+        delete_for_good(&setup, &setup.page_id);
+
+        let again = attach_file(
+            &setup.core,
+            &setup.grace,
+            NewAttachment { page_id: other_page, name: "deploy.txt".into(), content: HELLO.into() },
+        )
+        .unwrap()
+        .output;
+
+        assert_eq!(stored_files(&setup), [HELLO_FILE]);
+        let read = read_attachment(&setup.core, &setup.grace, AttachmentId { id: again.id }).unwrap().output;
+        assert_eq!(read.content, HELLO);
     }
 
     #[test]
