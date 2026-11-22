@@ -160,6 +160,8 @@ down. Those the caller cannot read are left out. */
   path: PathEntry[]
   /** The Role the caller holds on the Page. */
   role: Role
+  /** Its Tags, in alphabetical order. */
+  tags: string[]
   title: string
 }
 
@@ -167,6 +169,11 @@ export type PageMarkdown = {
   id: string
   markdown: string
   title: string
+}
+
+export type PageTags = {
+  /** In alphabetical order. */
+  tags: string[]
 }
 
 export type PathEntry = {
@@ -228,6 +235,11 @@ address Turtle is reached at. */
   address: string
   /** When the link stops working, in seconds since the Unix epoch. */
   expires_at: number
+}
+
+export type TagsInUse = {
+  /** The one on the most Pages first; as many alphabetically. */
+  tags: string[]
 }
 
 export type TokenArea = {
@@ -494,7 +506,7 @@ export type Operations = {
     }
     output: Entry
   }
-  /** Gets a Page by its ID, with its Area, the Folders and Pages it is beneath, when and by whom it was last edited, and the caller's Role on it. A Page the caller cannot read is reported as not found. */
+  /** Gets a Page by its ID, with its Area, the Folders and Pages it is beneath, when and by whom it was last edited, its Tags, and the caller's Role on it. A Page the caller cannot read is reported as not found. */
   get_page: {
     input: {
       id: string
@@ -521,6 +533,29 @@ the beginning of, so results can be shown while typing. */
       query: string
     }
     output: SearchResults
+  }
+  /** Lists the Tags in use on the Pages the caller can read, the most used first, to suggest when adding a Tag. */
+  list_tags: {
+    input: Record<string, never>
+    output: TagsInUse
+  }
+  /** Adds a Tag to a Page and returns the Page's Tags. A Tag ignores upper and lower case: it is stored in lower case, without a leading #, with spaces turned into hyphens. Adding a Tag the Page already carries changes nothing. Needs the Write Role. */
+  add_tag: {
+    input: {
+      page_id: string
+      /** Upper and lower case do not matter. */
+      tag: string
+    }
+    output: PageTags
+  }
+  /** Takes a Tag off a Page and returns the Page's Tags. Upper and lower case do not matter. Taking off a Tag the Page does not carry changes nothing. A Tag no Page carries any more no longer exists. Needs the Write Role. */
+  remove_tag: {
+    input: {
+      page_id: string
+      /** Upper and lower case do not matter. */
+      tag: string
+    }
+    output: PageTags
   }
   /** Lists the Versions of a Page, newest first, each with when it was recorded and who wrote the changes it holds: Members, Agents acting for a Member, and standalone Agents, told apart. Needs the Read Role. */
   list_versions: {

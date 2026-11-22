@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
-use live::{frame, read_varuint, write_varuint, OpenPage, FRAME_PRESENCE, FRAME_PRESENCE_REQUEST, FRAME_UPDATE};
+use live::{frame, read_varuint, write_varuint, OpenPage, FRAME_PRESENCE, FRAME_PRESENCE_REQUEST, FRAME_TAGS, FRAME_UPDATE};
 use ops::permissions::Role;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -375,6 +375,17 @@ async fn serve_connection(
         .encode_state_as_update_v1(&StateVector::default());
     outgoing
         .send(Message::Binary(Bytes::from(frame(FRAME_UPDATE, &state))))
+        .await?;
+    // The Tags as they are now, so a change made before this connection, or
+    // while an editor was reconnecting, is not missed. One made meanwhile
+    // follows as a frame of its own.
+    let tags = {
+        let core = access.core.clone();
+        let page_id = access.page_id.clone();
+        tokio::task::spawn_blocking(move || ops::tags::tags_of(&core.db(), &page_id)).await??
+    };
+    outgoing
+        .send(Message::Binary(Bytes::from(frame(FRAME_TAGS, &serde_json::to_vec(&tags)?))))
         .await?;
     let _ = page
         .frames

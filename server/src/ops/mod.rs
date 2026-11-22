@@ -15,6 +15,7 @@ pub mod grants;
 pub mod members;
 pub mod permissions;
 pub mod search;
+pub mod tags;
 pub mod tokens;
 pub mod tree;
 pub mod versions;
@@ -396,6 +397,7 @@ pub fn catalogue() -> Catalogue {
     grants::register(&mut catalogue);
     tree::register(&mut catalogue);
     search::register(&mut catalogue);
+    tags::register(&mut catalogue);
     versions::register(&mut catalogue);
     content::register(&mut catalogue);
     tokens::register(&mut catalogue);

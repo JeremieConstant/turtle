@@ -25,6 +25,7 @@ const FRAME_UPDATE: u8 = 0;
 const FRAME_PRESENCE: u8 = 1;
 const FRAME_PRESENCE_REQUEST: u8 = 2;
 const FRAME_AGENT_UPDATE: u8 = 3;
+const FRAME_TAGS: u8 = 4;
 
 /// The fragment the editor binds the document to.
 const FRAGMENT: &str = "default";
@@ -41,6 +42,8 @@ pub struct Content {
     pub document: String,
     /// The presence state (as JSON) of everyone else, by their client id.
     pub others: HashMap<u64, String>,
+    /// The Page's Tags as the server last sent them; none sent yet if `None`.
+    pub tags: Option<Vec<String>>,
 }
 
 struct Shared {
@@ -49,6 +52,7 @@ struct Shared {
     others: Mutex<HashMap<u64, (u64, String)>>,
     /// This client's own presence: (clock, JSON state).
     own_presence: Mutex<Option<(u64, String)>>,
+    tags: Mutex<Option<Vec<String>>>,
     /// Told of every update from the server once it is applied.
     observer: Mutex<Option<Observer>>,
 }
@@ -88,6 +92,7 @@ impl TestClient {
             doc: Doc::new(),
             others: Mutex::new(HashMap::new()),
             own_presence: Mutex::new(None),
+            tags: Mutex::new(None),
             observer: Mutex::new(None),
         });
         let (outgoing, mut queue) = mpsc::unbounded_channel::<Message>();
@@ -141,6 +146,10 @@ impl TestClient {
                             }
                         }
                         FRAME_PRESENCE => apply_presence(&shared, payload),
+                        FRAME_TAGS => {
+                            let tags = serde_json::from_slice(payload).expect("the server sent unreadable Tags");
+                            *shared.tags.lock().unwrap() = Some(tags);
+                        }
                         FRAME_PRESENCE_REQUEST => {
                             if let Some(frame) = own_presence_frame(&shared) {
                                 let _ = outgoing.send(Message::Binary(frame.into()));
@@ -248,10 +257,12 @@ impl TestClient {
             .iter()
             .map(|(&client, (_, state))| (client, state.clone()))
             .collect();
+        let tags = self.shared.tags.lock().unwrap().clone();
         Content {
             paragraphs,
             document,
             others,
+            tags,
         }
     }
 
