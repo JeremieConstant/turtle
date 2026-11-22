@@ -113,6 +113,11 @@ pub fn grants_on(db: &Connection, node_id: &str) -> anyhow::Result<Vec<(Holder, 
 /// does not exist gives no access to anyone. A Token only ever lowers what its
 /// owner holds: to nothing outside its Areas, to Read if it is read-only.
 pub fn role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlite::Result<Option<Role>> {
+    // What is in the Trash is out of reach until it is restored, whatever
+    // Role was held on it; the Trash's own operations ask about its Area.
+    if in_trash(db, node_id)? {
+        return Ok(None);
+    }
     let role = owners_role_on(db, principal, node_id)?;
     let Some(token) = principal.token() else { return Ok(role) };
     if let Some(areas) = &token.areas {
@@ -124,6 +129,23 @@ pub fn role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlit
         }
     }
     Ok(if token.read_only { role.map(|role| role.min(Role::Read)) } else { role })
+}
+
+/// Whether a node is in the Trash: it, or a node above it, was moved there,
+/// or its Area was deleted.
+pub fn in_trash(db: &Connection, node_id: &str) -> rusqlite::Result<bool> {
+    db.query_row(
+        "WITH RECURSIVE upward (id, parent_id, area_id) AS (
+             SELECT id, parent_id, area_id FROM nodes WHERE id = ?1
+             UNION ALL
+             SELECT nodes.id, nodes.parent_id, nodes.area_id
+             FROM nodes JOIN upward ON nodes.id = upward.parent_id
+         )
+         SELECT EXISTS (SELECT 1 FROM upward JOIN trash ON trash.node_id = upward.id)
+             OR EXISTS (SELECT 1 FROM upward JOIN deleted_areas ON deleted_areas.area_id = upward.area_id)",
+        [node_id],
+        |row| row.get(0),
+    )
 }
 
 /// The Role the Member or Agent behind a principal holds on a node, whatever

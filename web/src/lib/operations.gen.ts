@@ -68,6 +68,23 @@ only here; Turtle keeps only a hash of it. */
   value: string
 }
 
+export type DeletedArea = {
+  /** Days before it is removed for good, a day begun counting: 30 just
+after deleting, 1 on its last day. */
+  days_left: number
+  /** Seconds since the Unix epoch. */
+  deleted_at: number
+  /** None when they no longer exist. */
+  deleted_by?: Author | null
+  id: string
+  name: string
+}
+
+export type DeletedAreaList = {
+  /** Newest first. */
+  areas: DeletedArea[]
+}
+
 export type Entry = {
   children: Entry[]
   id: string
@@ -204,6 +221,15 @@ Page already said that and its last Version did too. */
   version?: VersionSummary | null
 }
 
+export type RestoredEntry = {
+  area_id: string
+  id: string
+  kind: Kind
+  title: string
+  /** It went to the top of the Area, because what it was beneath is gone. */
+  to_top: boolean
+}
+
 export type Role = "read" | "write" | "admin"
 
 export type RoleAfterwards = {
@@ -280,10 +306,49 @@ Areas the owner can no longer read are left out. */
   read_only: boolean
 }
 
+export type Trashed = {
+  /** The Area whose Trash it is in. */
+  area_id: string
+  id: string
+}
+
+export type TrashEntry = {
+  /** What was deleted with it, as it was in the tree. */
+  children: Entry[]
+  /** Days before it is removed for good, a day begun counting: 30 just
+after deleting, 1 on its last day. */
+  days_left: number
+  /** Seconds since the Unix epoch. */
+  deleted_at: number
+  /** None when they no longer exist. */
+  deleted_by?: Author | null
+  /** How many Pages and Folders were deleted with it. */
+  entries_beneath: number
+  /** Restores with `restore_from_trash`. */
+  id: string
+  kind: Kind
+  /** What it was beneath is in the Trash too, so restoring puts it at the
+top of the Area. */
+  restores_to_top: boolean
+  title: string
+  /** The titles of the Folders and Pages it was beneath, from the top of
+the Area down; empty when it was at the top. */
+  was_beneath: string[]
+}
+
+export type TrashList = {
+  area: Area
+  /** Newest first. */
+  entries: TrashEntry[]
+}
+
 export type Tree = {
   area: Area
   /** The top of the Area, in order. */
   entries: Entry[]
+  /** How many deleted Pages and Folders are in the Trash of the Area, for
+someone with the Write Role, who can see it; None for anyone else. */
+  trash?: number | null
 }
 
 export type Version = {
@@ -527,12 +592,62 @@ export type Operations = {
     }
     output: Page
   }
-  /** Gets the tree of Pages and Folders of an Area, each in the order of its siblings. */
+  /** Gets the tree of Pages and Folders of an Area, each in the order of its siblings, without what is in the Trash, and how many deleted Pages and Folders its Trash holds. */
   get_tree: {
     input: {
       area_id: string
     }
     output: Tree
+  }
+  /** Moves a Page or Folder with everything beneath it to the Trash of its Area, where it is kept for 30 days and can be restored. Needs the Write Role. */
+  move_to_trash: {
+    input: {
+      /** The ID of a Page or Folder. */
+      id: string
+    }
+    output: Trashed
+  }
+  /** Lists the Trash of an Area, newest first: each deleted Page or Folder once, with what was deleted with it, where it was, who deleted it and when, and how many days are left before it is removed for good. Needs the Write Role on the Area. */
+  get_trash: {
+    input: {
+      area_id: string
+    }
+    output: TrashList
+  }
+  /** Restores a Page or Folder from the Trash with everything that was deleted with it, to where it was; to the top of the Area when what it was beneath is gone. Needs the Write Role on the Area. */
+  restore_from_trash: {
+    input: {
+      /** The ID of a Page or Folder. */
+      id: string
+    }
+    output: RestoredEntry
+  }
+  /** Deletes a Page or Folder in the Trash for good, with everything that was deleted with it. This cannot be undone. Needs the Write Role on the Area. */
+  delete_from_trash: {
+    input: {
+      /** The ID of a Page or Folder. */
+      id: string
+    }
+    output: null
+  }
+  /** Moves an Area with everything in it to the Trash, where it is kept for 30 days. Only a Workspace Admin can restore it, except that whoever deleted it can undo that for a few minutes. Needs the Admin Role on it. A Personal Area cannot be deleted. */
+  delete_area: {
+    input: {
+      id: string
+    }
+    output: null
+  }
+  /** Lists the deleted Areas, newest first, with who deleted each and when, and how many days are left before it is removed for good. Only a Workspace Admin can. */
+  list_deleted_areas: {
+    input: Record<string, never>
+    output: DeletedAreaList
+  }
+  /** Restores a deleted Area with everything in it. A Workspace Admin can, and so can whoever deleted it within a few minutes, to undo it. */
+  restore_area: {
+    input: {
+      id: string
+    }
+    output: Area
   }
   /** Writes a Quick Note: a Page at the top of the caller's Personal Area. The first line of the text becomes its title and the rest its content, in Markdown. Only a Member can, also through a Token that reaches their Personal Area. */
   create_quick_note: {

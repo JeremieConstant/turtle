@@ -245,16 +245,25 @@ fn authors_of(db: &Connection, page_id: &str, number: u32) -> rusqlite::Result<V
          ORDER BY coalesce(members.name, agents.name) COLLATE NOCASE,
                   coalesce(members.id, agents.id), version_authors.agent",
     )?;
-    let authors = statement.query_map(rusqlite::params![page_id, number], |row| {
-        let member: Option<(String, String)> = row.get::<_, Option<String>>(0)?.zip(row.get(1)?);
-        let agent: String = row.get(2)?;
-        Ok(match member {
-            Some((id, name)) if agent.is_empty() => Author::Member { id, name },
-            Some((member_id, member_name)) => Author::AgentForMember { name: agent, member_id, member_name },
-            None => Author::Agent { id: row.get(3)?, name: row.get(4)? },
-        })
-    })?;
-    authors.collect()
+    let authors = statement.query_map(rusqlite::params![page_id, number], |row| stored_author(row, 0))?;
+    // The query keeps only authors who still exist, so none is missing.
+    Ok(authors.collect::<Result<Vec<_>, _>>()?.into_iter().flatten().collect())
+}
+
+/// An author as `live::Author::stored` keeps them, read with names from five
+/// columns starting at `first`: the Member's ID and name, the name of the
+/// Token an Agent acted through for them, and a standalone Agent's ID and
+/// name. None when neither the Member nor the Agent exists any more.
+pub(super) fn stored_author(row: &rusqlite::Row, first: usize) -> rusqlite::Result<Option<Author>> {
+    let member: Option<(String, String)> = row.get::<_, Option<String>>(first)?.zip(row.get(first + 1)?);
+    let agent: String = row.get(first + 2)?;
+    let standalone: Option<(String, String)> = row.get::<_, Option<String>>(first + 3)?.zip(row.get(first + 4)?);
+    Ok(match (member, standalone) {
+        (Some((id, name)), _) if agent.is_empty() => Some(Author::Member { id, name }),
+        (Some((member_id, member_name)), _) => Some(Author::AgentForMember { name: agent, member_id, member_name }),
+        (None, Some((id, name))) => Some(Author::Agent { id, name }),
+        (None, None) => None,
+    })
 }
 
 #[cfg(test)]

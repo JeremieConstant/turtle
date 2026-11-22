@@ -6,6 +6,8 @@ import { reportFailure } from './toasts'
 let areas = $state.raw<Area[] | null>(null)
 let areasFailed = $state(false)
 const trees = new SvelteMap<string, Entry[]>()
+/** How many deleted Subtrees each loaded Area's Trash holds; `null` for someone who cannot see it. */
+const trashSizes = new SvelteMap<string, number | null>()
 /** The Areas whose tree is being fetched for the first time. */
 const fetching = new Set<string>()
 /** Counts the people this has been shown to, so an answer meant for the one before is dropped. */
@@ -29,6 +31,10 @@ export const navigation = {
   tree(areaId: string): Entry[] | undefined {
     return trees.get(areaId)
   },
+  /** How many deleted Subtrees the Trash of an Area holds, once its tree is loaded; `null` when the person cannot see that Trash. */
+  trashSize(areaId: string): number | null | undefined {
+    return trashSizes.get(areaId)
+  },
   /** Loads the list of Areas again, after one was created or renamed or a Role changed. A failure is said in a toast. */
   async refreshAreas() {
     const asked = shownTo
@@ -49,12 +55,16 @@ export const navigation = {
     fetching.add(areaId)
     try {
       const tree = await call('get_tree', { area_id: areaId })
-      if (asked === shownTo) trees.set(areaId, tree.entries)
+      if (asked === shownTo) {
+        trees.set(areaId, tree.entries)
+        trashSizes.set(areaId, tree.trash ?? null)
+      }
       return tree
     } catch (caught) {
       // An Area that can no longer be read keeps nothing on screen, and leaves the list.
       if (asked === shownTo && caught instanceof OperationError && caught.kind === 'not_found') {
         trees.delete(areaId)
+        trashSizes.delete(areaId)
         void this.refreshAreas()
       }
       throw caught
@@ -79,5 +89,6 @@ export const navigation = {
     areas = null
     areasFailed = false
     trees.clear()
+    trashSizes.clear()
   },
 }

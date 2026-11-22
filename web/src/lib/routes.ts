@@ -5,11 +5,15 @@ export type Route =
   | { screen: 'sign-in' }
   | { screen: 'area'; id: string }
   | { screen: 'page'; id: string }
+  /** The Trash of an Area. */
+  | { screen: 'trash'; areaId: string }
   /** Every result for a query. The query is part of the address, so a search can be shared. */
   | { screen: 'search'; query: string }
   | { screen: 'members' }
   | { screen: 'tokens' }
   | { screen: 'agents' }
+  /** The deleted Areas, for a Workspace Admin to restore. */
+  | { screen: 'deleted-areas' }
   /** Where an invitation link leads; the secret is the link's last part. */
   | { screen: 'invitation'; secret: string }
   /** Where a password reset link leads. */
@@ -25,11 +29,20 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/settings/members') return { screen: 'members' }
   if (pathname === '/settings/tokens') return { screen: 'tokens' }
   if (pathname === '/settings/agents') return { screen: 'agents' }
+  if (pathname === '/settings/deleted-areas') return { screen: 'deleted-areas' }
   const link = pathname.match(/^\/(join|reset-password)\/([^/]+)$/)
   if (link) {
     return link[1] === 'join' ? { screen: 'invitation', secret: link[2] } : { screen: 'password-reset', secret: link[2] }
   }
   // The readable part is only decoration, so it is matched and ignored.
+  const trash = pathname.match(/^\/a\/([^/]+)\/(?:[^/]*\/)?trash$/)
+  if (trash) {
+    try {
+      return { screen: 'trash', areaId: decodeURIComponent(trash[1]) }
+    } catch {
+      return { screen: 'not-found' }
+    }
+  }
   const addressed = pathname.match(/^\/([ap])\/([^/]+)(?:\/[^/]*)?\/?$/)
   if (addressed) {
     try {
@@ -45,6 +58,12 @@ export function parseAddress(pathname: string, query = ''): Route {
 /** The address of an Area: its ID, then its name in a readable form. */
 export function areaAddress(id: string, name: string): string {
   return address('a', id, name)
+}
+
+/** The address of the Trash of an Area: the Area's, then "trash". */
+export function trashAddress(areaId: string, areaName: string): string {
+  const area = areaAddress(areaId, areaName)
+  return area.split('/').length > 3 ? `${area}/trash` : `${area}//trash`
 }
 
 /** The address of a Page: its ID, then its title in a readable form. */

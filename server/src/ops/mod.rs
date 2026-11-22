@@ -18,6 +18,7 @@ pub mod quick_notes;
 pub mod search;
 pub mod tags;
 pub mod tokens;
+pub mod trash;
 pub mod tree;
 pub mod versions;
 
@@ -397,6 +398,7 @@ pub fn catalogue() -> Catalogue {
     areas::register(&mut catalogue);
     grants::register(&mut catalogue);
     tree::register(&mut catalogue);
+    trash::register(&mut catalogue);
     quick_notes::register(&mut catalogue);
     search::register(&mut catalogue);
     tags::register(&mut catalogue);

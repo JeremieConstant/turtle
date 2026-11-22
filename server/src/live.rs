@@ -76,8 +76,19 @@ pub enum Author {
     Agent(String),
 }
 
-#[cfg(test)]
 impl Author {
+    /// How an author is stored beside what they did, for Versions and the
+    /// Trash alike: a Member's ID, a standalone Agent's ID, and the name of
+    /// the Token an Agent acted through for the Member, '' for none.
+    pub fn stored(&self) -> (Option<&str>, Option<&str>, &str) {
+        match self {
+            Author::Member(id) => (Some(id), None, ""),
+            Author::AgentForMember { member_id, agent } => (Some(member_id), None, agent),
+            Author::Agent(id) => (None, Some(id), ""),
+        }
+    }
+
+    #[cfg(test)]
     pub fn member(member_id: &str) -> Author {
         Author::Member(member_id.to_string())
     }
@@ -147,6 +158,15 @@ impl Pages {
         });
         open.insert(id.to_string(), page.clone());
         Ok(page)
+    }
+
+    /// Drops a Page removed for good from memory with any changes not yet
+    /// saved or recorded, so it is never written back.
+    pub fn forget(&self, id: &str) {
+        let Some(page) = self.open.lock().unwrap().remove(id) else { return };
+        let mut state = page.state.lock().unwrap();
+        state.unsaved = false;
+        state.unrecorded = None;
     }
 
     /// Tells everyone who has the Page open its Tags as they are now. A Page
@@ -373,11 +393,7 @@ impl Pages {
             rusqlite::params![page_id, number, markdown, now, restored_from],
         )?;
         for author in authors {
-            let (member_id, agent_id, agent) = match author {
-                Author::Member(id) => (Some(id), None, ""),
-                Author::AgentForMember { member_id, agent } => (Some(member_id), None, agent.as_str()),
-                Author::Agent(id) => (None, Some(id), ""),
-            };
+            let (member_id, agent_id, agent) = author.stored();
             transaction.execute(
                 "INSERT INTO version_authors (page_id, number, member_id, agent_id, agent) VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![page_id, number, member_id, agent_id, agent],

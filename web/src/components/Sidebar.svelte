@@ -1,7 +1,8 @@
 <script lang="ts">
   /*
    * The sidebar of every screen in the shell: the search, the Areas the
-   * person can read with the tree of the open one beneath its name, and at
+   * person can read with the tree of the open one beneath its name, ending in
+   * its Trash for those who can see it, and at
    * the foot the menu with the settings, the appearance and signing out.
    */
   import { onDestroy, untrack } from 'svelte'
@@ -13,7 +14,7 @@
   import { call } from '../lib/ops'
   import type { Area, Kind } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
-  import { areaAddress, pageAddress } from '../lib/routes'
+  import { areaAddress, pageAddress, trashAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
   import { reportFailure } from '../lib/toasts'
   import { createEntry, foldable } from '../lib/tree'
@@ -26,6 +27,7 @@
   const route = $derived(router.route)
   const currentPageId = $derived(route.screen === 'page' ? route.id : null)
   const currentAreaId = $derived(route.screen === 'area' ? route.id : null)
+  const currentTrashOf = $derived(route.screen === 'trash' ? route.areaId : null)
   /** The Area the search covers unless it is widened: the one being looked at. */
   const searchAreaId = $derived(currentAreaId ?? (currentPageId ? ui.openArea : null) ?? undefined)
 
@@ -153,6 +155,8 @@
         {@const open = ui.openArea === area.id}
         {@const tree = navigation.tree(area.id)}
         {@const address = areaAddress(area.id, area.name)}
+        {@const trashSize = navigation.trashSize(area.id)}
+        {@const toTrash = trashAddress(area.id, area.name)}
         <section class="area" class:open>
           <div class="area-head">
             <a
@@ -194,6 +198,19 @@
               {:else}
                 <p class="note indented">No Pages yet</p>
               {/if}
+              {#if trashSize != null}
+                <a
+                  class="trash-row"
+                  href={toTrash}
+                  aria-current={currentTrashOf === area.id ? 'page' : undefined}
+                  aria-label={trashSize > 0 ? `Trash of ${area.name}, ${trashSize} deleted` : `Trash of ${area.name}, empty`}
+                  onclick={event => router.follow(event, toTrash)}
+                >
+                  <Icon name="trash" size={14} />
+                  <span class="title">Trash</span>
+                  {#if trashSize > 0}<span class="count">{trashSize}</span>{/if}
+                </a>
+              {/if}
             </div>
           {/if}
         </section>
@@ -226,6 +243,7 @@
   {#if session.member?.workspace_admin}
     <a class="menu-item" role="menuitem" href="/settings/members" onclick={event => go(event, '/settings/members')}>Members</a>
     <a class="menu-item" role="menuitem" href="/settings/agents" onclick={event => go(event, '/settings/agents')}>Agents</a>
+    <a class="menu-item" role="menuitem" href="/settings/deleted-areas" onclick={event => go(event, '/settings/deleted-areas')}>Deleted Areas</a>
   {/if}
   <a class="menu-item" role="menuitem" href="/settings/tokens" onclick={event => go(event, '/settings/tokens')}>Tokens</a>
   <hr />
@@ -368,6 +386,41 @@
 
   .note.indented {
     padding-left: calc(var(--space-2) + var(--space-5));
+  }
+
+  .trash-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: var(--height-row);
+    margin-top: var(--space-1);
+    padding: 0 var(--space-2) 0 calc(var(--space-2) + var(--space-5));
+    border-radius: var(--radius-s);
+    color: var(--color-muted);
+    font-size: var(--text-m);
+    text-decoration: none;
+    transition:
+      background var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+
+  .trash-row:hover {
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
+
+  .trash-row[aria-current='page'] {
+    background: var(--color-selected);
+    color: var(--color-text);
+  }
+
+  .trash-row .title {
+    flex: 1;
+  }
+
+  .count {
+    font-size: var(--text-s);
+    font-variant-numeric: tabular-nums;
   }
 
   .new-area {

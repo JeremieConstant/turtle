@@ -41,7 +41,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "get_tree",
-            "Gets the tree of Pages and Folders of an Area, each in the order of its siblings.",
+            "Gets the tree of Pages and Folders of an Area, each in the order of its siblings, without what is in the Trash, and how many deleted Pages and Folders its Trash holds.",
             get_tree,
         )
         .changes = false;
@@ -68,6 +68,9 @@ pub struct Tree {
     pub area: Area,
     /// The top of the Area, in order.
     pub entries: Vec<Entry>,
+    /// How many deleted Pages and Folders are in the Trash of the Area, for
+    /// someone with the Write Role, who can see it; None for anyone else.
+    pub trash: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -205,7 +208,12 @@ fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind, place
             parent_id.clone()
         }
     };
-    if permissions::role_on(&db, principal, &parent_id)? < Some(Role::Write) {
+    let role = permissions::role_on(&db, principal, &parent_id)?;
+    // A parent in the Trash is out of reach like one that does not exist.
+    if role.is_none() {
+        return Err(OpError::NotFound("There is no such Page or Folder in this Area.".into()));
+    }
+    if role < Some(Role::Write) {
         return Err(OpError::NotPermitted(
             "Only someone with the Write Role can add Pages and Folders here.".into(),
         ));
@@ -334,7 +342,8 @@ pub fn get_tree(core: &Core, principal: &Principal, input: TreeOfArea) -> OpResu
     let area = areas::readable_area(&db, principal, &input.area_id)?;
     let root_id = root_of(&db, &area.id)?;
     let entries = beneath(&db, &area.id, &root_id)?;
-    Ok(Tree { area, entries }.into())
+    let trash = super::trash::trash_size(&db, &area)?;
+    Ok(Tree { area, entries, trash }.into())
 }
 
 /// A Page or Folder the principal can read, with the Role they hold on it.
@@ -365,13 +374,32 @@ fn readable_entry(db: &Connection, principal: &Principal, id: &str, kind: Kind) 
     Ok(ReadableEntry { area_id, title, role })
 }
 
-/// Everything beneath a node, each level in the order of its siblings.
-fn beneath(db: &Connection, area_id: &str, parent_id: &str) -> Result<Vec<Entry>, OpError> {
-    let mut statement = db.prepare(
+/// Everything beneath a node, each level in the order of its siblings,
+/// without what is in the Trash.
+pub(super) fn beneath(db: &Connection, area_id: &str, parent_id: &str) -> Result<Vec<Entry>, OpError> {
+    beneath_with(db, area_id, parent_id, "AND id NOT IN (SELECT node_id FROM trash)")
+}
+
+/// Everything beneath a node, each level in the order of its siblings, also
+/// what went to the Trash on its own, which the Trash leaves out itself.
+pub(super) fn beneath_in_trash(db: &Connection, area_id: &str, parent_id: &str, separately: &[String]) -> Result<Vec<Entry>, OpError> {
+    let mut entries = beneath_with(db, area_id, parent_id, "")?;
+    fn prune(entries: &mut Vec<Entry>, separately: &[String]) {
+        entries.retain(|entry| !separately.contains(&entry.id));
+        for entry in entries {
+            prune(&mut entry.children, separately);
+        }
+    }
+    prune(&mut entries, separately);
+    Ok(entries)
+}
+
+fn beneath_with(db: &Connection, area_id: &str, parent_id: &str, condition: &str) -> Result<Vec<Entry>, OpError> {
+    let mut statement = db.prepare(&format!(
         "SELECT id, parent_id, kind, title FROM nodes
-         WHERE area_id = ?1 AND parent_id IS NOT NULL
-         ORDER BY position, id",
-    )?;
+         WHERE area_id = ?1 AND parent_id IS NOT NULL {condition}
+         ORDER BY position, id"
+    ))?;
     let rows = statement.query_map([area_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -402,14 +430,14 @@ fn beneath(db: &Connection, area_id: &str, parent_id: &str) -> Result<Vec<Entry>
 }
 
 impl Kind {
-    fn stored(self) -> &'static str {
+    pub(super) fn stored(self) -> &'static str {
         match self {
             Kind::Page => "page",
             Kind::Folder => "folder",
         }
     }
 
-    fn from_stored(stored: &str) -> Option<Kind> {
+    pub(super) fn from_stored(stored: &str) -> Option<Kind> {
         match stored {
             "page" => Some(Kind::Page),
             "folder" => Some(Kind::Folder),

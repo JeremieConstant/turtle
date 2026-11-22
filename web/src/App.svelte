@@ -12,6 +12,7 @@
   import { ui } from './lib/ui.svelte'
   import AgentsScreen from './screens/AgentsScreen.svelte'
   import AreaScreen from './screens/AreaScreen.svelte'
+  import DeletedAreasScreen from './screens/DeletedAreasScreen.svelte'
   import InvitationScreen from './screens/InvitationScreen.svelte'
   import MembersScreen from './screens/MembersScreen.svelte'
   import NotFoundScreen from './screens/NotFoundScreen.svelte'
@@ -22,6 +23,7 @@
   import SignInScreen from './screens/SignInScreen.svelte'
   import StartScreen from './screens/StartScreen.svelte'
   import TokensScreen from './screens/TokensScreen.svelte'
+  import TrashScreen from './screens/TrashScreen.svelte'
 
   const route = $derived(router.route)
 
@@ -157,6 +159,10 @@
         {#key route.id}
           <PageScreen id={route.id} />
         {/key}
+      {:else if route.screen === 'trash'}
+        {#key route.areaId}
+          <TrashScreen areaId={route.areaId} />
+        {/key}
       {:else if route.screen === 'search'}
         <SearchScreen query={route.query} />
       {:else if route.screen === 'members'}
@@ -165,6 +171,8 @@
         <TokensScreen />
       {:else if route.screen === 'agents'}
         <AgentsScreen />
+      {:else if route.screen === 'deleted-areas'}
+        <DeletedAreasScreen />
       {:else}
         <NotFoundScreen />
       {/if}

@@ -41,6 +41,8 @@ const ACCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(15);
 /// How often the search index takes in what changed. With `SAVE_INTERVAL`
 /// this bounds how soon an edit can be found.
 const SEARCH_INTERVAL: Duration = Duration::from_secs(1);
+/// How often what has been in the Trash for too long is removed.
+const TRASH_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Where the data directory is when `TURTLE_DATA` does not say: beside
 /// wherever Turtle was started.
@@ -118,6 +120,21 @@ async fn main() -> anyhow::Result<()> {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => eprintln!("updating the search index failed: {error:#}"),
                 Err(error) => eprintln!("updating the search index panicked: {error}"),
+            }
+        }
+    });
+
+    // What has been in the Trash long enough goes once a day, first at start.
+    let cleaner = core.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(TRASH_INTERVAL);
+        loop {
+            tick.tick().await;
+            let core = cleaner.clone();
+            match tokio::task::spawn_blocking(move || ops::trash::remove_expired(&core)).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => eprintln!("emptying the Trash failed: {error:#}"),
+                Err(error) => eprintln!("emptying the Trash panicked: {error}"),
             }
         }
     });

@@ -69,7 +69,8 @@ pub fn list_tags(core: &Core, principal: &Principal, _input: Nothing) -> OpResul
             Some(known) => *known,
             None => {
                 let governing = permissions::governing_node(&db, &page_id)?;
-                let can_read = governing.is_some_and(|node| readable.contains(&node));
+                let can_read = governing.is_some_and(|node| readable.contains(&node))
+                    && !permissions::in_trash(&db, &page_id)?;
                 page_readable.insert(page_id, can_read);
                 can_read
             }
