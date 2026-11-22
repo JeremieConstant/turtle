@@ -22,7 +22,10 @@
     router.rewrite(searchAddress(typed.trim()))
   }
 
-  const search = liveSearch(() => ({ query }))
+  /** The most results the search operation returns for one query. */
+  const MOST = 100
+
+  const search = liveSearch(() => ({ query, limit: MOST }))
 
   $effect(() => {
     document.title = 'Search · Turtle'
@@ -45,6 +48,8 @@
     <p class="count" role="status">
       {#if results.length === 0}
         Nothing matches “{search.answered}”.
+      {:else if search.more}
+        The {results.length} best results for “{search.answered}”. Make the query more specific to find the rest.
       {:else}
         {results.length} {results.length === 1 ? 'result' : 'results'} for “{search.answered}”
       {/if}

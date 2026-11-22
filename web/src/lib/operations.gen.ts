@@ -181,7 +181,10 @@ content. A passage cut from a longer text begins or ends with "…". */
 }
 
 export type SearchResults = {
-  /** The best match first, at most 20. */
+  /** True when more Pages matched than the limit let through. A more
+specific query then finds what is missing. */
+  more: boolean
+  /** The best match first, at most as many as the limit. */
   results: SearchResult[]
 }
 
@@ -485,6 +488,9 @@ export type Operations = {
     input: {
       /** The Area to search in; everything the caller can read if absent. */
       area_id?: string | null
+      /** The most results to return, from 1 to 100; 20 if absent. A number
+outside that range counts as the nearest one inside it. */
+      limit?: number | null
       /** What to look for, as typed. The last word also matches words it is
 the beginning of, so results can be shown while typing. */
       query: string

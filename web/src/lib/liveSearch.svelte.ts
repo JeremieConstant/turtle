@@ -10,18 +10,21 @@ const PAUSE = 120
  * the person can read. Call it while a component is being set up; it searches
  * for as long as that component is on the screen.
  */
-export function liveSearch(asked: () => { query: string; areaId?: string }) {
+export function liveSearch(asked: () => { query: string; areaId?: string; limit?: number }) {
   let results = $state.raw<SearchResult[] | null>(null)
   let error = $state<string | null>(null)
   /** The query the results answer, which is behind the one being typed until its answer arrives. */
   let answered = $state('')
+  let more = $state(false)
 
-  const ask = latestOnly((query: string, area_id?: string) => call('search', { query, area_id }))
+  const ask = latestOnly((query: string, area_id?: string, limit?: number) =>
+    call('search', { query, area_id, limit }),
+  )
   const text = () => asked().query.trim()
 
   $effect(() => {
     const query = text()
-    const { areaId } = asked()
+    const { areaId, limit } = asked()
     if (!query) {
       results = null
       error = null
@@ -31,9 +34,10 @@ export function liveSearch(asked: () => { query: string; areaId?: string }) {
     let left = false
     const timer = setTimeout(async () => {
       try {
-        const answer = await ask(query, areaId)
+        const answer = await ask(query, areaId, limit)
         if (!answer || left) return
         results = answer.results
+        more = answer.more
         answered = query
         error = null
       } catch (caught) {
@@ -55,6 +59,10 @@ export function liveSearch(asked: () => { query: string; areaId?: string }) {
     },
     get answered() {
       return answered
+    },
+    /** Whether more Pages matched than the limit let through. */
+    get more() {
+      return more
     },
     /** What to tell the person when the last search failed. */
     get error() {

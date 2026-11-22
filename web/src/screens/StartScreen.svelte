@@ -16,10 +16,10 @@
   let marked = $state(0)
   let focused = $state(false)
 
-  const search = liveSearch(() => ({ query }))
+  const search = liveSearch(() => ({ query, limit: SHOWN }))
   const text = $derived(query.trim())
   // After a failed search the message stands in for the list, so there is nothing to mark or open.
-  const results = $derived(search.error ? [] : (search.results?.slice(0, SHOWN) ?? []))
+  const results = $derived(search.error ? [] : (search.results ?? []))
   const open = $derived(focused && text !== '' && (search.results !== null || search.error !== null))
   const everything = $derived(searchAddress(text))
 
