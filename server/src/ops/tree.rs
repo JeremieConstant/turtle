@@ -160,9 +160,18 @@ pub fn create_page(core: &Core, principal: &Principal, input: NewPage) -> OpResu
 
 /// Creates a Page first among its siblings, marked as the given Member's
 /// Quick Note, a mark it keeps wherever it is moved.
-pub(super) fn create_quick_note_page(core: &Core, principal: &Principal, input: NewPage, member_id: &str) -> OpResult<Entry> {
-    let created = create(core, principal, input.entry, Kind::Page, Placement::FirstAsQuickNoteOf(member_id))?;
-    write_first_content(core, principal, created, input.markdown)
+pub(super) fn create_quick_note_page(
+    core: &Core,
+    principal: &Principal,
+    entry: NewEntry,
+    content: Vec<crate::model::Block>,
+    member_id: &str,
+) -> OpResult<Entry> {
+    let created = create(core, principal, entry, Kind::Page, Placement::FirstAsQuickNoteOf(member_id))?;
+    if !content.is_empty() {
+        super::content::write_content(core, principal, &created.output.id, content)?;
+    }
+    Ok(created)
 }
 
 fn write_first_content(core: &Core, principal: &Principal, created: Reply<Entry>, markdown: Option<String>) -> OpResult<Entry> {

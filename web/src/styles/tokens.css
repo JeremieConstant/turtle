@@ -124,7 +124,7 @@
   --width-side: 280px;
   --width-text: 46rem;
   --width-start: 40rem;
-  /* The Quick Note box: three lines when empty, and grows up to about twelve. */
+  /* The body of the Quick Note box: three lines when empty, and grows up to about twelve. */
   --height-quick-note: 88px;
   --height-quick-note-max: 320px;
   --height-row: 28px;

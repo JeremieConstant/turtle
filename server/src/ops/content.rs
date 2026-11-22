@@ -90,6 +90,11 @@ pub fn replace_page(core: &Core, principal: &Principal, input: NewContent) -> Op
     write(core, principal, &input.page_id, |_| Ok(blocks))
 }
 
+/// Replaces the content of a Page the caller may change with `blocks`, as a Version of its own.
+pub(super) fn write_content(core: &Core, principal: &Principal, page_id: &str, blocks: Vec<Block>) -> OpResult<Written> {
+    write(core, principal, page_id, |_| Ok(blocks))
+}
+
 pub fn replace_section(core: &Core, principal: &Principal, input: NewSection) -> OpResult<Written> {
     let replacement = crate::markdown::from_markdown(&input.markdown);
     // A heading is matched as get_page_markdown shows it, with its Page links'

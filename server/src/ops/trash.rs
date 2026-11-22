@@ -694,8 +694,8 @@ mod tests {
     fn a_quick_note_in_the_trash_is_not_listed_among_the_quick_notes() {
         let core = fresh();
         let grace = member(&core, "Grace", false);
-        let first = create_quick_note(&core, &grace, NewQuickNote { text: "Groceries".into() }).unwrap().output;
-        create_quick_note(&core, &grace, NewQuickNote { text: "Ideas".into() }).unwrap();
+        let first = create_quick_note(&core, &grace, NewQuickNote { title: "Groceries".into(), ..Default::default() }).unwrap().output;
+        create_quick_note(&core, &grace, NewQuickNote { title: "Ideas".into(), ..Default::default() }).unwrap();
         let note = Entry { id: first.id, kind: Kind::Page, title: first.title, children: Vec::new() };
 
         trash(&core, &grace, &note);
