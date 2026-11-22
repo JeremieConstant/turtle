@@ -179,6 +179,19 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE version_authors_new RENAME TO version_authors;
      CREATE UNIQUE INDEX version_authors_once
          ON version_authors (page_id, number, coalesce(member_id, ''), coalesce(agent_id, ''), agent);",
+    // A Personal Area belongs to one Member (ADR-0008); Members who already
+    // exist get theirs here, new ones when their account is created. Its IDs
+    // are made like those of any Area: 16 random bytes in lowercase hex.
+    // Deleting a Member must not take their Personal Area with it, since its
+    // content may still be handed over, so the reference does not cascade.
+    "ALTER TABLE areas ADD COLUMN personal_member_id TEXT REFERENCES members (id);
+     CREATE UNIQUE INDEX one_personal_area_per_member ON areas (personal_member_id)
+         WHERE personal_member_id IS NOT NULL;
+     INSERT INTO areas (id, name, created_at, personal_member_id)
+         SELECT lower(hex(randomblob(16))), 'Personal', unixepoch(), id FROM members;
+     INSERT INTO nodes (id, area_id, parent_id, kind, created_at)
+         SELECT lower(hex(randomblob(16))), id, NULL, 'root', created_at
+         FROM areas WHERE personal_member_id IS NOT NULL;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
@@ -311,6 +324,52 @@ mod tests {
             .query_row("SELECT member_id, agent FROM version_authors", [], |row| Ok((row.get(0)?, row.get(1)?)))
             .unwrap();
         assert_eq!(author, ("m1".into(), "Claude".into()));
+    }
+
+    #[test]
+    fn members_who_already_exist_get_a_personal_area_each() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = database_in(data_dir.path()).unwrap();
+        {
+            // As the database was before Personal Areas.
+            let old = Connection::open(&path).unwrap();
+            let before_personal_areas = MIGRATIONS.len() - 1;
+            for migration in &MIGRATIONS[..before_personal_areas] {
+                old.execute_batch(migration).unwrap();
+            }
+            old.pragma_update(None, "user_version", before_personal_areas as i64).unwrap();
+            add_member(&old).unwrap();
+            old.execute_batch(
+                "INSERT INTO members (id, email, name, password_hash, workspace_admin, created_at)
+                     VALUES ('m2', 'grace@example.com', 'Grace', 'hash', 0, 0);
+                 INSERT INTO areas (id, name, created_at) VALUES ('a1', 'Engineering', 0);
+                 INSERT INTO nodes (id, area_id, parent_id, kind, created_at) VALUES ('r1', 'a1', NULL, 'root', 0);",
+            )
+            .unwrap();
+        }
+
+        let db = open(&path).unwrap();
+
+        let mut statement = db
+            .prepare(
+                "SELECT areas.name, areas.personal_member_id, count(nodes.id), length(areas.id)
+                 FROM areas JOIN nodes ON nodes.area_id = areas.id AND nodes.parent_id IS NULL
+                 GROUP BY areas.id ORDER BY areas.personal_member_id",
+            )
+            .unwrap();
+        let areas: Vec<(String, Option<String>, i64, i64)> = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            areas,
+            [
+                ("Engineering".into(), None, 1, 2),
+                ("Personal".into(), Some("m1".into()), 1, 32),
+                ("Personal".into(), Some("m2".into()), 1, 32),
+            ]
+        );
     }
 
     #[test]

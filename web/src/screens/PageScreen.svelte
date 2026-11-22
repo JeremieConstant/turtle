@@ -1,11 +1,13 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import PageView from '../components/PageView.svelte'
+  import { navigation } from '../lib/navigation.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { Page } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
+  import { findEntry } from '../lib/tree'
   import { ui } from '../lib/ui.svelte'
   import NotFoundScreen from './NotFoundScreen.svelte'
 
@@ -72,6 +74,23 @@
     if (!opened) return
     const refreshing = setInterval(refresh, REFRESH_INTERVAL)
     return () => clearInterval(refreshing)
+  })
+
+  /**
+   * The title the sidebar's tree last showed for this Page. When it changes,
+   * the Page was renamed from an Entry menu, and the screen follows. A tree
+   * loaded before the Page is no newer than it, so its title is not taken.
+   */
+  let titleInTree: string | undefined
+  $effect(() => {
+    if (!page) return
+    const title = findEntry(navigation.tree(page.area.id) ?? [], page.id)?.title
+    untrack(() => {
+      if (page && title !== undefined && titleInTree !== undefined && title !== titleInTree && title !== page.title) {
+        page = { ...page, title }
+      }
+      titleInTree = title
+    })
   })
 
   $effect(() => {

@@ -1,7 +1,7 @@
 <script lang="ts" module>
-  /* Icons only where a word would be worse: folding, Folders, a few compact
-     controls of the sidebar, the formatting toolbar, and the Agent mark.
-     Drawn on 16 units in the text colour. */
+  /* Icons only where a word would be worse: folding, Folders, the search, a
+     few compact controls of the sidebar, the formatting toolbar, and the Agent
+     mark. Drawn on 16 units in the text colour. */
   const PATHS = {
     chevron: 'M6 4l4 4-4 4',
     folder: 'M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z',
@@ -9,6 +9,7 @@
     // A fold box in front of a second one: "all" of them, folded or unfolded.
     collapse: 'M3 5.5h7.5V13H3zM5.5 3h7.5v7.5M4.75 9.25h4',
     expand: 'M3 5.5h7.5V13H3zM5.5 3h7.5v7.5M4.75 9.25h4M6.75 7.25v4',
+    search: 'M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM10.5 10.5L14 14',
     menu: 'M2.5 4.5h11M2.5 8h11M2.5 11.5h11',
     agent: 'M5 3.5h6a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 10V5A1.5 1.5 0 0 1 5 3.5zM6.5 7v1M9.5 7v1M8 1.5v2M5.5 14h5',
     // Formatting, for the toolbar.
@@ -29,8 +30,12 @@
     undo: 'M5.5 3.5L2.5 6.5l3 3M2.5 6.5h7a3.5 3.5 0 0 1 0 7H7.5',
     redo: 'M10.5 3.5l3 3-3 3M13.5 6.5h-7a3.5 3.5 0 0 0 0 7h2',
     caret: 'M5 6.5l3 3 3-3',
+    // Dots drawn as strokes of almost no length, so they need a thicker stroke to show.
+    more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
   } as const
   export type IconName = keyof typeof PATHS
+  /** Icons that need a stroke other than the usual 1.5 to read at the same weight. */
+  const STROKES: Partial<Record<IconName, number>> = { bold: 1.9, more: 2.4 }
 </script>
 
 <script lang="ts">
@@ -38,7 +43,7 @@
 </script>
 
 <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-  <path d={PATHS[name]} stroke="currentColor" stroke-width={name === 'bold' ? 1.9 : 1.5} stroke-linecap="round" stroke-linejoin="round" />
+  <path d={PATHS[name]} stroke="currentColor" stroke-width={STROKES[name] ?? 1.5} stroke-linecap="round" stroke-linejoin="round" />
 </svg>
 
 <style>

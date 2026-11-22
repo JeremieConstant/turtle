@@ -45,13 +45,13 @@
   --color-person-6: #b45309;
   --color-on-color: #ffffff;
   --color-danger: #b42318;
-  /* Behind the words of a Snippet that matched. */
-  --color-highlight: #fde68a;
   /* What lies over the page behind a dialog and behind the drawer. */
   --color-backdrop: rgb(0 0 0 / 0.18);
   --color-scrim: rgb(0 0 0 / 0.2);
   /* How much a control that cannot be used right now fades. */
   --opacity-disabled: 0.45;
+  /* How much the red button lightens under the pointer. */
+  --opacity-hover-danger: 0.88;
 
   /* Spacing, on a 4px grid */
   --space-hair: 1px;
@@ -116,6 +116,8 @@
   --width-text: 46rem;
   --width-start: 40rem;
   --height-row: 28px;
+  /* A row on the Area screen: roomier than the sidebar's. */
+  --height-row-l: 40px;
   --indent: 16px;
   --height-bar: 48px;
   --width-menu: 240px;
@@ -131,6 +133,10 @@
   --width-drawer-max: 86vw;
   --width-floating-max: calc(100vw - 2 * var(--space-4));
   --height-control: 30px;
+  --height-search: 48px;
+  --height-search-l: 56px;
+  /* How far down the start screen its search field sits. */
+  --space-start-top: max(var(--space-16), 14vh);
   --size-icon-button: 26px;
   --size-chevron: 18px;
   --size-mark: 20px;

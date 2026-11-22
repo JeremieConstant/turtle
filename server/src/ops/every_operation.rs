@@ -2,7 +2,7 @@
 //! an Area. A new operation fails this test until it has a row here.
 
 use super::permissions::Role;
-use super::testing::{fresh, give_role, member};
+use super::testing::{fresh, give_role, member, personal_area};
 use super::{catalogue, Principal};
 use serde_json::{json, Value};
 
@@ -163,6 +163,67 @@ fn every_operation_respects_the_role_of_its_caller() {
                 Err(error) => error.kind(),
             };
             assert_eq!(outcome, expected, "{name} called with {column}");
+        }
+    }
+}
+
+/// What a Personal Area's own Member cannot do there, though they are its Admin.
+const NEVER_IN_A_PERSONAL_AREA: [&str; 4] = ["rename_area", "list_grants", "set_grant", "remove_grant"];
+
+#[test]
+fn a_personal_area_answers_to_its_member_alone() {
+    let catalogue = catalogue();
+    for (name, input, by_role) in table() {
+        for caller_is in ["its Member", "another Member", "Workspace Admin"] {
+            let core = fresh();
+            let grace = member(&core, "Grace", false);
+            let ken = member(&core, "Ken", false);
+            let area_id = personal_area(&core, &grace);
+            let entry = |operation, title| {
+                let created = catalogue
+                    .call(&core, &grace, operation, json!({"area_id": area_id, "title": title}))
+                    .unwrap()
+                    .output;
+                created["id"].as_str().unwrap().to_string()
+            };
+            let fixture = Fixture {
+                page_id: entry("create_page", "Notes"),
+                folder_id: entry("create_folder", "Drafts"),
+                area_id: area_id.clone(),
+                ken_id: match &ken {
+                    Principal::Member { id, .. } => id.clone(),
+                    _ => unreachable!(),
+                },
+                agent_id: "agent-archivist".into(),
+            };
+            core.db()
+                .execute("INSERT INTO agents (id, name, created_at) VALUES ('agent-archivist', 'Archivist', 0)", [])
+                .unwrap();
+            core.db()
+                .execute("INSERT INTO versions (page_id, number, markdown, recorded_at) VALUES (?1, 1, 'Notes.', 0)", [&fixture.page_id])
+                .unwrap();
+            let caller = match caller_is {
+                "its Member" => grace.clone(),
+                "another Member" => member(&core, "Linus", false),
+                _ => member(&core, "Ada", true),
+            };
+
+            let input = input(&fixture);
+            let text = input.to_string();
+            let addresses_it = [&fixture.area_id, &fixture.page_id, &fixture.folder_id].iter().any(|id| text.contains(id.as_str()));
+            let expected = match (caller_is, addresses_it) {
+                ("its Member", true) if NEVER_IN_A_PERSONAL_AREA.contains(&name) => REFUSED,
+                ("its Member", true) => by_role[0],
+                ("its Member" | "another Member", false) => by_role[3],
+                ("Workspace Admin", false) => by_role[4],
+                (_, true) => HIDDEN,
+                _ => unreachable!(),
+            };
+            let outcome = match catalogue.call(&core, &caller, name, input) {
+                Ok(_) => OK,
+                Err(error) => error.kind(),
+            };
+            assert_eq!(outcome, expected, "{name} called by {caller_is}");
         }
     }
 }

@@ -1,10 +1,12 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { Toaster } from 'svelte-sonner'
+  import ConfirmDialog from './components/ConfirmDialog.svelte'
   import Icon from './components/Icon.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import { router } from './lib/router.svelte'
   import { inShell, type Route } from './lib/routes'
+  import { asksForSearch } from './lib/search'
   import { session } from './lib/session.svelte'
   import { ui } from './lib/ui.svelte'
   import AgentsScreen from './screens/AgentsScreen.svelte'
@@ -14,6 +16,7 @@
   import NotFoundScreen from './screens/NotFoundScreen.svelte'
   import PageScreen from './screens/PageScreen.svelte'
   import PasswordResetScreen from './screens/PasswordResetScreen.svelte'
+  import SearchScreen from './screens/SearchScreen.svelte'
   import SetupScreen from './screens/SetupScreen.svelte'
   import SignInScreen from './screens/SignInScreen.svelte'
   import StartScreen from './screens/StartScreen.svelte'
@@ -43,7 +46,7 @@
 
   $effect(() => {
     if (target === null) return
-    if (target === '/sign-in' && route.screen !== 'setup') returnTo = location.pathname
+    if (target === '/sign-in' && route.screen !== 'setup') returnTo = location.pathname + location.search
     router.replace(target)
   })
 
@@ -73,7 +76,33 @@
     opener?.focus()
   }
 
+  /** Moves the focus to the search of the screen, or else to the one in the sidebar. */
+  async function focusSearch() {
+    const field =
+      content?.querySelector<HTMLInputElement>('input[type=search]') ??
+      side?.querySelector<HTMLInputElement>('input[type=search]')
+    if (!field) return
+    // On a narrow window the sidebar's search is in the drawer, which has to be out to take the focus.
+    if (side?.contains(field) && !field.checkVisibility({ visibilityProperty: true })) {
+      ui.drawerOpen = true
+      await tick()
+    }
+    field.focus()
+  }
+
   function onkeydown(event: KeyboardEvent) {
+    // A checkbox or a radio button is an input that nothing is typed into.
+    const typing =
+      event.target instanceof Element &&
+      event.target.closest(
+        'input:not([type=checkbox], [type=radio]), textarea, select, [contenteditable]:not([contenteditable="false"])',
+      ) !== null
+    if (asksForSearch(event, typing) && inShell(route)) {
+      // Otherwise the slash would land in the field it brings the focus to.
+      event.preventDefault()
+      void focusSearch()
+      return
+    }
     // Escape closes a menu or dialog that is open in the drawer before it closes the drawer.
     if (event.key === 'Escape' && !document.querySelector(':popover-open, dialog[open]')) closeDrawer()
   }
@@ -127,6 +156,8 @@
         {#key route.id}
           <PageScreen id={route.id} />
         {/key}
+      {:else if route.screen === 'search'}
+        <SearchScreen query={route.query} />
       {:else if route.screen === 'members'}
         <MembersScreen />
       {:else if route.screen === 'tokens'}
@@ -139,6 +170,8 @@
     </div>
   </div>
 {/if}
+
+<ConfirmDialog />
 
 <!-- Short messages that stack in the corner and leave on their own. -->
 <Toaster position="bottom-right" visibleToasts={4} gap={8} offset={20} duration={4000} />

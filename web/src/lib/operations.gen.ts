@@ -16,6 +16,9 @@ export type AgentList = {
 export type Area = {
   id: string
   name: string
+  /** Whether this is the caller's Personal Area: theirs alone, never
+granted, renamed or deleted. Nobody else ever sees it. */
+  personal: boolean
   /** The Role the caller holds on the Area. */
   role: Role
 }
@@ -203,7 +206,10 @@ content. A passage cut from a longer text begins or ends with "…". */
 }
 
 export type SearchResults = {
-  /** The best match first, at most 20. */
+  /** True when more Pages matched than the limit let through. A more
+specific query then finds what is missing. */
+  more: boolean
+  /** The best match first, at most as many as the limit. */
   results: SearchResult[]
 }
 
@@ -413,12 +419,12 @@ export type Operations = {
     }
     output: Area
   }
-  /** Lists the Areas the caller can read, by name. */
+  /** Lists the Areas the caller can read: their own Personal Area first, then the others by name. */
   list_areas: {
     input: Record<string, never>
     output: AreaList
   }
-  /** Renames an Area. Needs the Admin Role on it. */
+  /** Renames an Area. Needs the Admin Role on it. A Personal Area cannot be renamed. */
   rename_area: {
     input: {
       id: string
@@ -426,14 +432,14 @@ export type Operations = {
     }
     output: Area
   }
-  /** Lists the Grants of an Area, and the active Members and standalone Agents one can be given to. Needs the Admin Role on the Area. */
+  /** Lists the Grants of an Area, and the active Members and standalone Agents one can be given to. Needs the Admin Role on the Area. A Personal Area has no Grants. */
   list_grants: {
     input: {
       area_id: string
     }
     output: GrantList
   }
-  /** Gives a Member, a standalone Agent, or all Members at once, a Role on an Area, replacing the Role they held there. A Grant to all Members does not include standalone Agents. Someone holding several Grants gets the highest Role. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area. */
+  /** Gives a Member, a standalone Agent, or all Members at once, a Role on an Area, replacing the Role they held there. A Grant to all Members does not include standalone Agents. Someone holding several Grants gets the highest Role. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area. Nobody can be given a Role on a Personal Area. */
   set_grant: {
     input: {
       area_id: string
@@ -507,6 +513,9 @@ export type Operations = {
     input: {
       /** The Area to search in; everything the caller can read if absent. */
       area_id?: string | null
+      /** The most results to return, from 1 to 100; 20 if absent. A number
+outside that range counts as the nearest one inside it. */
+      limit?: number | null
       /** What to look for, as typed. The last word also matches words it is
 the beginning of, so results can be shown while typing. */
       query: string

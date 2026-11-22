@@ -2,14 +2,18 @@
   /*
    * The tree of one Area in the sidebar, drawn as one flat list of the rows
    * that are visible, each indented by how deep it sits. A Folder, and a
-   * Page with something beneath it, folds and unfolds.
+   * Page with something beneath it, folds and unfolds. Each row has the
+   * Entry menu behind its ⋯ button and a right click.
    */
   import { untrack } from 'svelte'
+  import { entryMenuItems } from '../lib/entryMenu'
   import type { Area, Entry } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
   import { above, visibleRows } from '../lib/tree'
   import { collapsed } from '../lib/ui.svelte'
+  import EntryMenu from './EntryMenu.svelte'
+  import EntryMenuButton, { openFromRow } from './EntryMenuButton.svelte'
   import Icon from './Icon.svelte'
 
   const {
@@ -33,6 +37,15 @@
     if (id) untrack(() => above(entries, id).forEach(parent => collapsed.delete(parent)))
   })
 
+  let menu: EntryMenu
+  /** The Entry whose menu is open, so its row stays marked. */
+  let menuFor = $state<string | null>(null)
+
+  async function showMenu(entry: Entry, trigger: HTMLElement) {
+    menuFor = entry.id
+    await menu.open(entry, area, trigger)
+  }
+
   function toggle(id: string) {
     if (collapsed.has(id)) collapsed.delete(id)
     else collapsed.add(id)
@@ -42,7 +55,12 @@
 <ul aria-label="Pages and Folders in {area.name}">
   {#each rows as { entry, depth, open } (entry.id)}
     {@const address = pageAddress(entry.id, entry.title)}
-    <li class="row" class:current={entry.id === currentId} style:--depth={depth}>
+    <li
+      class="row"
+      class:current={entry.id === currentId}
+      style:--depth={depth}
+      oncontextmenu={event => openFromRow(event, trigger => showMenu(entry, trigger))}
+    >
       {#if entry.children.length > 0}
         <button
           type="button"
@@ -74,9 +92,14 @@
           <span class="title">{entry.title}</span>
         </a>
       {/if}
+      {#if entryMenuItems(entry.kind, area.role).length > 0}
+        <EntryMenuButton title={entry.title} open={menuFor === entry.id} onopen={trigger => showMenu(entry, trigger)} />
+      {/if}
     </li>
   {/each}
 </ul>
+
+<EntryMenu bind:this={menu} onclose={() => (menuFor = null)} />
 
 <style>
   ul {

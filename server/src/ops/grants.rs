@@ -14,13 +14,13 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "list_grants",
-            "Lists the Grants of an Area, and the active Members and standalone Agents one can be given to. Needs the Admin Role on the Area.",
+            "Lists the Grants of an Area, and the active Members and standalone Agents one can be given to. Needs the Admin Role on the Area. A Personal Area has no Grants.",
             list_grants,
         )
         .changes = false;
     catalogue.add(
         "set_grant",
-        "Gives a Member, a standalone Agent, or all Members at once, a Role on an Area, replacing the Role they held there. A Grant to all Members does not include standalone Agents. Someone holding several Grants gets the highest Role. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area.",
+        "Gives a Member, a standalone Agent, or all Members at once, a Role on an Area, replacing the Role they held there. A Grant to all Members does not include standalone Agents. Someone holding several Grants gets the highest Role. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area. Nobody can be given a Role on a Personal Area.",
         set_grant,
     );
     catalogue.add(

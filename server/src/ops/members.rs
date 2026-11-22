@@ -232,6 +232,7 @@ pub fn accept_invitation(core: &Core, _: &Principal, input: Joining) -> OpResult
             "There already is a Member with this email address. Sign in instead.".into(),
         ));
     }
+    super::areas::create_personal_area(&transaction, &id, core.now())?;
     let secret = start_session(core, &transaction, &id)?;
     transaction.commit()?;
     Ok(Reply {
@@ -470,6 +471,32 @@ mod tests {
                 entry("member-charles", "Charles", false, true),
             ]
         );
+    }
+
+    #[test]
+    fn a_member_who_joins_gets_a_personal_area_that_outlasts_deactivation() {
+        use crate::ops::areas::{get_area, AreaId};
+        use crate::ops::tree::{create_page, get_tree, NewEntry, TreeOfArea};
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let joined = grace_joins(&core, &ada);
+        let grace = signed_in(&core, &joined);
+        let personal = crate::ops::testing::personal_area(&core, &grace);
+        let note = NewEntry { area_id: personal.clone(), parent_id: None, title: "Ideas".into() };
+        create_page(&core, &grace, note.into()).unwrap();
+
+        deactivate_member(&core, &ada, MemberId { id: joined.output.id.clone() }).unwrap();
+        let hidden = get_area(&core, &ada, AreaId { id: personal.clone() }).unwrap_err();
+        assert_eq!(hidden.kind(), "not_found");
+
+        // Nothing reactivates a Member yet; this is what it will undo.
+        core.db().execute("UPDATE members SET deactivated_at = NULL WHERE id = ?1", [&joined.output.id]).unwrap();
+        let back = grace_signs_in(&core).unwrap();
+        let grace = signed_in(&core, &back);
+        assert_eq!(crate::ops::testing::personal_area(&core, &grace), personal);
+        let tree = get_tree(&core, &grace, TreeOfArea { area_id: personal }).unwrap().output;
+        let titles: Vec<_> = tree.entries.iter().map(|entry| entry.title.as_str()).collect();
+        assert_eq!(titles, ["Ideas"]);
     }
 
     /// Invites Grace and lets her join; returns the reply that signed her in.
