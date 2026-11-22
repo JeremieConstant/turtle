@@ -58,6 +58,10 @@ _Avoid_: Recycle bin, archive, Papierkorb
 A free-form label on a Page, shared across the whole Workspace; it ignores upper and lower case and exists as long as one Page carries it.
 _Avoid_: Label, category, keyword
 
+**Page link**:
+A link in a Page's content to another Page by its ID, shown with that Page's current title so renaming or moving it never breaks the link, and shown without title to someone who may not read it. In Markdown it is a link to the address `turtle:` followed by the Page's ID.
+_Avoid_: Internal link, wiki link, reference, mention
+
 ### People and agents
 
 **Member**:

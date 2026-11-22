@@ -3,15 +3,26 @@
 //! The contract: for any normalised content `c`,
 //! `from_markdown(&to_markdown(&c)) == c`.
 
-use crate::model::{normalize, Block, Inline, Marks};
+use crate::model::{normalize, page_id_of, Block, Inline, Marks, PAGE_ADDRESS_SCHEME};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 // ---------------------------------------------------------------------------
 // Content -> Markdown
 // ---------------------------------------------------------------------------
 
+/// The title a Page link shows for the Page with the given ID, or None when
+/// it shows none, because the reader may not read that Page.
+pub type Titles<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// The Markdown of some content, with Page links shown without titles.
 pub fn to_markdown(blocks: &[Block]) -> String {
-    let mut out = render_blocks(blocks, "\n\n", None);
+    to_markdown_with_titles(blocks, &|_| None)
+}
+
+/// The Markdown of some content, with each Page link shown with the title
+/// `titles` gives it. Reading it back ignores those titles.
+pub fn to_markdown_with_titles(blocks: &[Block], titles: Titles) -> String {
+    let mut out = render_blocks(blocks, "\n\n", None, titles);
     if !out.is_empty() {
         out.push('\n');
     }
@@ -19,7 +30,7 @@ pub fn to_markdown(blocks: &[Block]) -> String {
 }
 
 /// `parent_bullet` is the marker of the list item these blocks sit in, if any.
-fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>) -> String {
+fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>, titles: Titles) -> String {
     let mut parts: Vec<String> = Vec::new();
     // Two lists of the same kind in a row would merge into one when read back,
     // so the second one switches to the other marker. A list that opens an
@@ -30,10 +41,10 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>)
         let mut bullet = None;
         let mut delimiter = None;
         let rendered = match block {
-            Block::Paragraph(_) | Block::Heading { .. } => render_inline_block(block),
+            Block::Paragraph(_) | Block::Heading { .. } => render_inline_block(block, titles),
             Block::CodeBlock { language, text } => render_code_block(language.as_deref(), text),
             Block::Blockquote(children) => {
-                let inner = render_blocks(children, "\n\n", None);
+                let inner = render_blocks(children, "\n\n", None, titles);
                 if inner.is_empty() {
                     ">".to_string()
                 } else {
@@ -53,12 +64,12 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>)
             Block::BulletList(items) => {
                 let marker = if previous_bullet == Some('-') { '+' } else { '-' };
                 bullet = Some(marker);
-                render_list(items, Some(marker), |_| marker.to_string())
+                render_list(items, Some(marker), |_| marker.to_string(), titles)
             }
             Block::OrderedList { start, items } => {
                 let delim = if previous_delimiter == Some('.') { ')' } else { '.' };
                 delimiter = Some(delim);
-                render_list(items, None, |i| format!("{}{}", start + i as u64, delim))
+                render_list(items, None, |i| format!("{}{}", start + i as u64, delim), titles)
             }
             Block::HorizontalRule => "***".to_string(),
         };
@@ -75,6 +86,7 @@ fn render_list(
     items: &[Vec<Block>],
     bullet: Option<char>,
     marker: impl Fn(usize) -> String,
+    titles: Titles,
 ) -> String {
     let tight = items.iter().all(|item| is_tight_item(item));
     let rendered: Vec<String> = items
@@ -82,7 +94,7 @@ fn render_list(
         .enumerate()
         .map(|(i, item)| {
             let marker = marker(i);
-            let body = render_blocks(item, if tight { "\n" } else { "\n\n" }, bullet);
+            let body = render_blocks(item, if tight { "\n" } else { "\n\n" }, bullet, titles);
             if body.is_empty() {
                 // pulldown-cmark loses track of the enclosing list item when a
                 // loose list inside a quote ends with an empty item. A comment
@@ -148,21 +160,21 @@ fn longest_run(text: &str, needle: char) -> usize {
 /// Renders a paragraph or heading. Markdown's emphasis markers only work next
 /// to certain characters (`**bold **x` does not parse as bold), so the result
 /// is read back and, if it does not match, written again with HTML tags.
-fn render_inline_block(block: &Block) -> String {
-    let markdown = render_inline_block_with(block, false);
+fn render_inline_block(block: &Block, titles: Titles) -> String {
+    let markdown = render_inline_block_with(block, false, titles);
     if from_markdown(&markdown).as_slice() == std::slice::from_ref(block) {
         markdown
     } else {
-        render_inline_block_with(block, true)
+        render_inline_block_with(block, true, titles)
     }
 }
 
-fn render_inline_block_with(block: &Block, html: bool) -> String {
+fn render_inline_block_with(block: &Block, html: bool, titles: Titles) -> String {
     match block {
-        Block::Paragraph(content) => render_inlines(content, false, html),
+        Block::Paragraph(content) => render_inlines(content, false, html, titles),
         Block::Heading { level, content } => {
             let hashes = "#".repeat(*level as usize);
-            let inner = render_inlines(content, true, html);
+            let inner = render_inlines(content, true, html, titles);
             if inner.is_empty() {
                 hashes
             } else {
@@ -222,7 +234,7 @@ fn close_mark(mark: &Mark, html: bool) -> String {
     }
 }
 
-fn render_inlines(inlines: &[Inline], in_heading: bool, html: bool) -> String {
+fn render_inlines(inlines: &[Inline], in_heading: bool, html: bool, titles: Titles) -> String {
     let mut out = String::new();
     let mut open: Vec<Mark> = Vec::new();
     let mut at_line_start = true;
@@ -232,6 +244,16 @@ fn render_inlines(inlines: &[Inline], in_heading: bool, html: bool) -> String {
             Inline::HardBreak => {
                 out.push_str("\\\n");
                 at_line_start = true;
+            }
+            Inline::PageLink { page_id } => {
+                // A Page link carries no formatting of its own.
+                while let Some(mark) = open.pop() {
+                    out.push_str(&close_mark(&mark, html));
+                }
+                let title = titles(page_id).unwrap_or_default().replace(['\n', '\r'], " ");
+                let title = escape_text(&title, false, false, in_heading);
+                out.push_str(&format!("[{title}]({PAGE_ADDRESS_SCHEME}{page_id})"));
+                at_line_start = false;
             }
             Inline::Text { text, marks } => {
                 let wanted = if marks.code {
@@ -254,7 +276,7 @@ fn render_inlines(inlines: &[Inline], in_heading: bool, html: bool) -> String {
                 if marks.code {
                     out.push_str(&render_code_span(text));
                 } else {
-                    let at_line_end = !matches!(inlines.get(i + 1), Some(Inline::Text { .. }));
+                    let at_line_end = matches!(inlines.get(i + 1), None | Some(Inline::HardBreak));
                     out.push_str(&escape_text(text, at_line_start, at_line_end, in_heading));
                 }
                 at_line_start = false;
@@ -398,6 +420,9 @@ impl ActiveMarks {
 struct Builder {
     stack: Vec<Frame>,
     marks: ActiveMarks,
+    /// The Page whose link is being read. What the link says is left out,
+    /// because a Page link shows the Page's current title instead.
+    page_link: Option<String>,
 }
 
 impl Builder {
@@ -446,11 +471,20 @@ impl Builder {
             body.push_str(text);
             return;
         }
+        if self.page_link.is_some() {
+            return;
+        }
         let marks = self.marks.current(code);
         self.inline_target().push(Inline::Text {
             text: text.to_string(),
             marks,
         });
+    }
+
+    fn hard_break(&mut self) {
+        if self.page_link.is_none() {
+            self.inline_target().push(Inline::HardBreak);
+        }
     }
 
     fn html(&mut self, html: &str) {
@@ -465,7 +499,7 @@ impl Builder {
             "</em>" => self.marks.italic = self.marks.italic.saturating_sub(1),
             "<del>" => self.marks.strike += 1,
             "</del>" => self.marks.strike = self.marks.strike.saturating_sub(1),
-            "<br>" | "<br/>" | "<br />" => self.inline_target().push(Inline::HardBreak),
+            "<br>" | "<br/>" | "<br />" => self.hard_break(),
             // Any other HTML is kept as visible text instead of being dropped.
             _ => self.text(html, false),
         }
@@ -476,6 +510,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
     let mut b = Builder {
         stack: vec![Frame::Root(Vec::new())],
         marks: ActiveMarks::default(),
+        page_link: None,
     };
 
     for event in Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH) {
@@ -522,7 +557,10 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 Tag::Emphasis => b.marks.italic += 1,
                 Tag::Strong => b.marks.bold += 1,
                 Tag::Strikethrough => b.marks.strike += 1,
-                Tag::Link { dest_url, .. } => b.marks.links.push(dest_url.to_string()),
+                Tag::Link { dest_url, .. } => match page_id_of(&dest_url) {
+                    Some(page_id) => b.page_link = Some(page_id.to_string()),
+                    None => b.marks.links.push(dest_url.to_string()),
+                },
                 _ => {}
             },
             Event::End(tag) => match tag {
@@ -570,15 +608,19 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 TagEnd::Emphasis => b.marks.italic = b.marks.italic.saturating_sub(1),
                 TagEnd::Strong => b.marks.bold = b.marks.bold.saturating_sub(1),
                 TagEnd::Strikethrough => b.marks.strike = b.marks.strike.saturating_sub(1),
-                TagEnd::Link => {
-                    b.marks.links.pop();
-                }
+                // Links do not nest, so a link that ends inside a Page link is that one.
+                TagEnd::Link => match b.page_link.take() {
+                    Some(page_id) => b.inline_target().push(Inline::PageLink { page_id }),
+                    None => {
+                        b.marks.links.pop();
+                    }
+                },
                 _ => {}
             },
             Event::Text(text) => b.text(&text, false),
             Event::Code(text) => b.text(&text, true),
             Event::SoftBreak => b.text(" ", false),
-            Event::HardBreak => b.inline_target().push(Inline::HardBreak),
+            Event::HardBreak => b.hard_break(),
             Event::Html(html) | Event::InlineHtml(html) => b.html(&html),
             Event::Rule => {
                 b.close_implicit_paragraph();
@@ -625,8 +667,13 @@ pub(crate) mod testing {
             let len = self.next(5);
             (0..len)
                 .map(|_| {
-                    if self.next(8) == 0 {
-                        return Inline::HardBreak;
+                    match self.next(10) {
+                        0 => return Inline::HardBreak,
+                        1 => {
+                            let page_id = ["a1b2", "c3d4", "e5"][self.next(3)].to_string();
+                            return Inline::PageLink { page_id };
+                        }
+                        _ => {}
                     }
                     let marks = Marks {
                         bold: self.next(4) == 0,
@@ -857,6 +904,66 @@ mod tests {
         })])]);
     }
 
+    fn page_link(id: &str) -> Inline {
+        Inline::PageLink { page_id: id.into() }
+    }
+
+    #[test]
+    fn a_page_link_is_a_turtle_address_shown_with_the_current_title() {
+        let blocks = vec![para(vec![text("See "), page_link("a1b2"), text(" first.")])];
+        let titles = |id: &str| (id == "a1b2").then(|| "Setup [draft] *v2*".to_string());
+
+        let markdown = to_markdown_with_titles(&blocks, &titles);
+
+        assert_eq!(markdown, "See [Setup \\[draft\\] \\*v2\\*](turtle:a1b2) first.\n");
+        assert_eq!(from_markdown(&markdown), blocks);
+    }
+
+    #[test]
+    fn a_page_link_whose_title_may_not_be_shown_has_no_text() {
+        let blocks = vec![para(vec![page_link("a1b2")])];
+
+        assert_eq!(to_markdown_with_titles(&blocks, &|_| None), "[](turtle:a1b2)\n");
+        assert_eq!(to_markdown(&blocks), "[](turtle:a1b2)\n");
+        assert_eq!(from_markdown("[](turtle:a1b2)"), blocks);
+    }
+
+    #[test]
+    fn reading_a_turtle_address_makes_a_page_link_whatever_its_text_says() {
+        assert_eq!(
+            from_markdown("**[An *old* title](turtle:a1b2)** and <turtle:c3>"),
+            vec![para(vec![page_link("a1b2"), text(" and "), page_link("c3")])]
+        );
+        // An address that names no Page stays an ordinary link.
+        assert_eq!(
+            from_markdown("[odd](turtle:a/b)"),
+            vec![para(vec![marked("odd", |m| m.link = Some("turtle:a/b".into()))])]
+        );
+    }
+
+    #[test]
+    fn text_linked_to_a_turtle_address_is_a_page_link_once_normalised() {
+        let linked = |s: &str, bold: bool| {
+            marked(s, |m| {
+                m.link = Some("turtle:a1b2".into());
+                m.bold = bold
+            })
+        };
+        assert_eq!(
+            normalize(vec![para(vec![text("x"), linked("Set", true), linked("up", false), text("y")])]),
+            vec![para(vec![text("x"), page_link("a1b2"), text("y")])]
+        );
+    }
+
+    #[test]
+    fn page_links_beside_formatting_round_trip() {
+        assert_round_trip(vec![
+            para(vec![marked("bold", |m| m.bold = true), page_link("a"), marked("bold!", |m| m.bold = true)]),
+            Block::Heading { level: 2, content: vec![page_link("a"), page_link("a"), text(" #")] },
+            para(vec![text("wow!"), page_link("b"), Inline::HardBreak, page_link("c")]),
+        ]);
+    }
+
     const SEEDS: u64 = 20_000;
 
     #[test]
@@ -865,9 +972,12 @@ mod tests {
         for seed in 0..SEEDS {
             let mut rng = Rng(seed);
             let blocks = normalize(rng.blocks(0));
-            let markdown = to_markdown(&blocks);
-            if from_markdown(&markdown) != blocks {
-                failures.push((seed, markdown));
+            // Page links shown with a title must read back the same as without one.
+            let title = format!("t `x` ](y) <br> *z*\\ !{}", rng.text());
+            for markdown in [to_markdown(&blocks), to_markdown_with_titles(&blocks, &|_| Some(title.clone()))] {
+                if from_markdown(&markdown) != blocks {
+                    failures.push((seed, markdown));
+                }
             }
         }
         failures.sort_by_key(|(_, markdown)| markdown.len());

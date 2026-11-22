@@ -15,13 +15,13 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "get_page_markdown",
-            "Gets the content of a Page as Markdown. Needs the Read Role.",
+            "Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. Needs the Read Role.",
             get_page_markdown,
         )
         .changes = false;
     catalogue.add(
         "replace_page",
-        "Makes the content of a Page say what the given Markdown says. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role.",
+        "Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role.",
         replace_page,
     );
     catalogue.add(
@@ -78,7 +78,7 @@ pub struct Written {
 pub fn get_page_markdown(core: &Core, principal: &Principal, input: OfPage) -> OpResult<PageMarkdown> {
     let page = get_page(core, principal, PageId { id: input.page_id })?.output;
     let open = core.live().open(&page.id)?;
-    let markdown = crate::markdown::to_markdown(&crate::ydoc::read(&open.doc));
+    let markdown = super::links::markdown_for(core, principal, &crate::ydoc::read(&open.doc))?;
     Ok(PageMarkdown { id: page.id, title: page.title, markdown }.into())
 }
 
@@ -155,6 +155,7 @@ fn text_of(content: &[Inline]) -> String {
         .map(|inline| match inline {
             Inline::Text { text, .. } => text.as_str(),
             Inline::HardBreak => " ",
+            Inline::PageLink { .. } => "",
         })
         .collect();
     text.trim().to_string()

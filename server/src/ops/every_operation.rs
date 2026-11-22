@@ -107,6 +107,8 @@ fn table() -> Vec<Row> {
         ("list_tags", |_| json!({}), [OK; 5]),
         ("add_tag", |f| json!({"page_id": f.page_id, "tag": "Runbook"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("remove_tag", |f| json!({"page_id": f.page_id, "tag": "Runbook"}), [OK, OK, REFUSED, HIDDEN, OK]),
+        // It leaves out the Pages the caller cannot read instead of failing; ops::links tests which.
+        ("get_page_titles", |_| json!({"page_ids": ["made-up"]}), [OK; 5]),
         ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),

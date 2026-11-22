@@ -12,6 +12,7 @@ pub mod content;
 #[cfg(test)]
 mod every_operation;
 pub mod grants;
+pub mod links;
 pub mod members;
 pub mod permissions;
 pub mod quick_notes;
@@ -404,6 +405,7 @@ pub fn catalogue() -> Catalogue {
     tags::register(&mut catalogue);
     versions::register(&mut catalogue);
     content::register(&mut catalogue);
+    links::register(&mut catalogue);
     tokens::register(&mut catalogue);
     catalogue
 }
