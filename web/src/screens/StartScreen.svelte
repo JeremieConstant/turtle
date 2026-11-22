@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { navigation } from '../lib/navigation.svelte'
-
   $effect(() => {
     document.title = 'Turtle'
   })
@@ -8,11 +6,7 @@
 
 <main>
   <h1>Turtle</h1>
-  {#if navigation.areas?.length === 0}
-    <p>You cannot see any Areas yet. Create one in the sidebar, or ask the Admin of an Area to give you a Role on it.</p>
-  {:else}
-    <p>Open an Area in the sidebar, or search for a Page.</p>
-  {/if}
+  <p>Open an Area in the sidebar, or search for a Page.</p>
 </main>
 
 <style>

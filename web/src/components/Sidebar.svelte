@@ -140,9 +140,6 @@
         <p class="note">The Areas could not be loaded. Reload the page to try again.</p>
       {/if}
     {:else}
-      {#if navigation.areas.length === 0}
-        <p class="note">You cannot see any Areas yet.</p>
-      {/if}
       {#each navigation.areas as area (area.id)}
         {@const open = ui.openArea === area.id}
         {@const tree = navigation.tree(area.id)}
