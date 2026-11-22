@@ -1,5 +1,4 @@
 <script lang="ts">
-  import AppHeader from '../components/AppHeader.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { MemberEntry, SingleUseLink } from '../lib/operations.gen'
   import { session } from '../lib/session.svelte'
@@ -80,8 +79,6 @@
     copied = true
   }
 </script>
-
-<AppHeader />
 
 <main>
   <h1>Members</h1>
@@ -169,7 +166,7 @@
     gap: var(--space-2);
     margin-top: var(--space-4);
     padding: var(--space-3);
-    border: var(--line-width) solid var(--color-accent);
+    border: var(--line) solid var(--color-focus);
     border-radius: var(--radius-m);
   }
 
@@ -185,7 +182,7 @@
     align-items: center;
     gap: var(--space-2) var(--space-3);
     padding: var(--space-2) 0;
-    border-bottom: var(--line-width) solid var(--color-line);
+    border-bottom: var(--line) solid var(--color-line);
   }
 
   li > div:first-child {

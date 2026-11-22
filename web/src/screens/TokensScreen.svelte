@@ -1,5 +1,4 @@
 <script lang="ts">
-  import AppHeader from '../components/AppHeader.svelte'
   import TokenManager from '../components/TokenManager.svelte'
 
   $effect(() => {
@@ -8,8 +7,6 @@
 
   const mcpAddress = `${location.origin}/mcp`
 </script>
-
-<AppHeader />
 
 <main>
   <h1>Tokens</h1>

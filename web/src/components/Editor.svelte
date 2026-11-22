@@ -66,7 +66,7 @@
   .editor :global(.tiptap blockquote) {
     margin-left: 0;
     padding-left: var(--space-4);
-    border-left: var(--line-width-quote) solid var(--color-line);
+    border-left: var(--line-quote) solid var(--color-line);
     color: var(--color-muted);
   }
 
@@ -91,21 +91,21 @@
   }
 
   .editor :global(.tiptap a) {
-    color: var(--color-accent);
+    color: var(--color-focus);
   }
 
   .editor :global(.tiptap hr) {
     border: none;
-    border-top: var(--line-width) solid var(--color-line);
+    border-top: var(--line) solid var(--color-line);
   }
 
   /* Other people's cursors */
   .editor :global(.collaboration-carets__caret) {
     position: relative;
-    margin-left: calc(-1 * var(--line-width));
-    margin-right: calc(-1 * var(--line-width));
-    border-left: var(--line-width) solid;
-    border-right: var(--line-width) solid;
+    margin-left: calc(-1 * var(--line));
+    margin-right: calc(-1 * var(--line));
+    border-left: var(--line) solid;
+    border-right: var(--line) solid;
     pointer-events: none;
     word-break: normal;
   }
@@ -113,10 +113,10 @@
   .editor :global(.collaboration-carets__label) {
     position: absolute;
     top: var(--offset-caret-label);
-    left: calc(-1 * var(--line-width));
+    left: calc(-1 * var(--line));
     padding: 0 var(--space-2);
     border-radius: var(--radius-s) var(--radius-s) var(--radius-s) 0;
-    color: var(--color-on-person);
+    color: var(--color-on-color);
     font-size: var(--text-xs);
     font-weight: var(--weight-strong);
     line-height: var(--leading-code);

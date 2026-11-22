@@ -1,45 +1,242 @@
-/* Defaults for the browser's own elements. Everything else is scoped to its component. */
-* {
+/* Defaults for the browser's own elements and the few shared classes.
+   Everything else is scoped to its component. */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-body);
+  font-size: 100%;
+  line-height: var(--leading-ui);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   margin: 0;
   background: var(--color-bg);
-  color: var(--color-text);
-  font: var(--text-base) / var(--leading-body) var(--font-body);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
 }
 
 button {
-  padding: var(--space-1) var(--space-3);
-  border: var(--line-width) solid var(--color-line);
-  border-radius: var(--radius-m);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-  font-size: var(--text-m);
   cursor: pointer;
-}
-
-button:disabled {
-  cursor: default;
-  opacity: var(--opacity-disabled);
-}
-
-input {
-  padding: var(--space-2) var(--space-3);
-  border: var(--line-width) solid var(--color-line);
-  border-radius: var(--radius-m);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-}
-
-button[aria-pressed='true'] {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+  -webkit-tap-highlight-color: transparent;
 }
 
 a {
-  color: var(--color-accent);
+  color: inherit;
+}
+
+:focus-visible {
+  outline: var(--line-thick) solid var(--color-focus);
+  outline-offset: var(--space-half);
+}
+
+::selection {
+  background: var(--color-focus-soft);
+}
+
+/*
+ * Buttons and fields that carry no class of their own, as on the screens
+ * that are not yet in the new look, get the quiet look of .btn. :where()
+ * keeps this weaker than any component's own style.
+ */
+:where(button) {
+  padding: var(--space-1) var(--space-3);
+  border: var(--line) solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  font-size: var(--text-m);
+  font-weight: var(--weight-medium);
+}
+
+:where(button:disabled) {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
+
+:where(button[aria-pressed='true']) {
+  border-color: var(--color-text);
+  background: var(--color-selected);
+}
+
+:where(input:not([type='checkbox'], [type='radio']), select, textarea) {
+  padding: var(--space-1) var(--space-3);
+  border: var(--line) solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+}
+
+dialog {
+  padding: 0;
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-float);
+  color: inherit;
+}
+
+dialog::backdrop {
+  background: var(--color-backdrop);
+}
+
+[popover] {
+  margin: 0;
+  padding: var(--space-1);
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  color: inherit;
+}
+
+/* A quiet, square-cornered button used for every secondary action. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--height-control);
+  padding: 0 var(--space-3);
+  border: var(--line) solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  font-size: var(--text-m);
+  font-weight: var(--weight-medium);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.btn:hover {
+  background: var(--color-sunken);
+}
+
+.btn:active {
+  transform: scale(var(--press-scale));
+}
+
+.btn.primary {
+  border-color: var(--color-text);
+  background: var(--color-text);
+  color: var(--color-bg);
+}
+
+.btn.primary:hover {
+  background: var(--color-text-2);
+}
+
+.btn:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: var(--size-icon-button);
+  height: var(--size-icon-button);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-muted);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.icon-btn:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.icon-btn:active {
+  transform: scale(var(--press-scale-icon));
+}
+
+/* The items of a menu that opens as a popover. */
+.menu-item {
+  display: block;
+  width: 100%;
+  height: var(--height-control);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  font-size: var(--text-m);
+  font-weight: var(--weight-normal);
+  line-height: var(--height-control);
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--color-hover);
+  outline: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: var(--space-hair);
+  height: var(--space-hair);
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Menus open with a short fade from their trigger and close at once. */
+[popover]:popover-open {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+@starting-style {
+  [popover]:popover-open {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--space-1)));
+  }
+}
+
+/* Toasts (svelte-sonner), dressed in the same tokens as everything else. */
+[data-sonner-toaster] {
+  --width: var(--width-toast);
+  --border-radius: var(--radius-l);
+  --normal-bg: var(--color-surface);
+  --normal-border: var(--color-line);
+  --normal-text: var(--color-text);
+  font-family: var(--font-body);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] {
+  padding: var(--space-3) var(--space-4);
+  box-shadow: var(--shadow-float);
+  font-size: var(--text-m);
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-description] {
+  color: var(--color-muted);
+  font-size: var(--text-s);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-button] {
+  height: var(--size-icon-button);
+  border-radius: var(--radius-s);
+  font-size: var(--text-s);
+  font-weight: var(--weight-medium);
 }

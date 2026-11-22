@@ -110,8 +110,17 @@
   }
 
   input[type='search'] {
-    width: var(--width-search);
-    max-width: 100%;
+    flex: 1;
+    min-width: 0;
+    height: var(--height-control);
+    padding: 0 var(--space-2);
+    font-size: var(--text-m);
+  }
+
+  input[type='search']:focus {
+    outline: none;
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 var(--ring) var(--color-focus-soft);
   }
 
   .scope {
@@ -126,14 +135,14 @@
     position: absolute;
     top: 100%;
     left: 0;
-    z-index: var(--layer-popover);
+    z-index: var(--layer-menu);
     width: var(--width-search-results);
-    max-width: var(--width-popover-max);
+    max-width: var(--width-floating-max);
     margin-top: var(--space-1);
     background: var(--color-surface);
-    border: var(--line-width) solid var(--color-line);
+    border: var(--line) solid var(--color-line);
     border-radius: var(--radius-m);
-    box-shadow: var(--shadow-popover);
+    box-shadow: var(--shadow-float);
   }
 
   ul {
@@ -153,7 +162,7 @@
 
   a:hover,
   a:focus-visible {
-    background: var(--color-bg);
+    background: var(--color-hover);
   }
 
   .title {

@@ -46,14 +46,14 @@
 
   .person {
     padding: var(--space-hair) var(--space-2);
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-round);
     background: var(--person);
-    color: var(--color-on-person);
+    color: var(--color-on-color);
     font-size: var(--text-s);
   }
 
   .agent {
-    border: var(--line-width) dashed var(--color-muted);
+    border: var(--line) dashed var(--color-muted);
     background: none;
     color: var(--color-muted);
   }

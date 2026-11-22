@@ -19,6 +19,6 @@
   }
 
   .connected {
-    color: var(--color-accent);
+    color: var(--color-focus);
   }
 </style>

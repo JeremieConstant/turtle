@@ -1,94 +1,155 @@
 /*
- * Every colour, distance and type setting of the web app is defined here and
- * nowhere else (ADR-0007). Components use these properties only, so a design
- * pass changes values in this file, not structure elsewhere.
+ * Every colour, distance, type setting, radius and motion duration of the web
+ * app is defined here and nowhere else (ADR-0007). Components read these
+ * properties only, so a design pass changes values in this file, not
+ * structure elsewhere.
+ *
+ * The palette is monochrome. Colour appears only where it means something:
+ * focus and the drop target (--color-focus), the people editing a Page
+ * (--color-person-*), and an Agent's change (--color-agent).
  */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  /* Colours */
-  --color-bg: #fbfaf7;
+  /* Neutrals */
+  --color-bg: #ffffff;
+  --color-side: #f7f7f6;
   --color-surface: #ffffff;
-  --color-text: #1c1917;
-  --color-muted: #78716c;
-  --color-line: #e7e5e4;
-  --color-accent: #0f766e;
-  --color-danger: #b91c1c;
-  /* Behind the words of a search snippet that matched. */
-  --color-highlight: #fde68a;
-  /* Text on top of a person's colour. */
-  --color-on-person: #ffffff;
+  --color-sunken: #f2f2f0;
+  --color-hover: #ececea;
+  --color-selected: #e4e4e1;
+  --color-line: #e6e6e3;
+  --color-line-strong: #d4d4d0;
+  --color-text: #1a1a19;
+  --color-text-2: #4a4a47;
+  --color-muted: #82827d;
+  --color-faint: #b0b0aa;
 
+  /* Meaning */
+  --color-focus: #2f6bdc;
+  --color-focus-soft: rgb(47 107 220 / 0.1);
+  --color-agent: #0f7b6c;
+  --color-agent-soft: rgb(15 123 108 / 0.1);
   /* The colours people are told apart by. One is picked per person and sent
-     to the others, so these stay the same in the dark variant. */
-  --color-person-1: #c2410c;
-  --color-person-2: #0f766e;
+     to the others; person.ts knows how many there are. */
+  --color-person-1: #d9480f;
+  --color-person-2: #c2255c;
   --color-person-3: #7c3aed;
-  --color-person-4: #be185d;
-  --color-person-5: #1d4ed8;
-  --color-person-6: #4d7c0f;
-  --color-person-7: #b45309;
-
+  --color-person-4: #1d4ed8;
+  --color-person-5: #4d7c0f;
+  --color-person-6: #b45309;
+  --color-on-color: #ffffff;
+  --color-danger: #b42318;
+  /* Behind the words of a Snippet that matched. */
+  --color-highlight: #fde68a;
+  /* What lies over the page behind a dialog and behind the drawer. */
+  --color-backdrop: rgb(0 0 0 / 0.18);
+  --color-scrim: rgb(0 0 0 / 0.2);
   /* How much a control that cannot be used right now fades. */
-  --opacity-disabled: 0.6;
+  --opacity-disabled: 0.45;
 
-  /* Spacing */
+  /* Spacing, on a 4px grid */
   --space-hair: 1px;
+  --space-half: 2px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
 
   /* Shape */
-  --line-width: 1px;
-  --line-width-quote: 3px;
+  --line: 1px;
+  --line-thick: 2px;
+  --line-quote: 3px;
+  /* The soft ring around a field that has the focus. */
+  --ring: 3px;
   --radius-s: 4px;
   --radius-m: 6px;
-  --radius-l: 8px;
-  --radius-pill: 999px;
+  --radius-l: 10px;
+  --radius-round: 999px;
 
-  /* Type */
-  --font-body: system-ui, sans-serif;
-  --font-mono: ui-monospace, monospace;
-  --text-xs: 12px;
-  --text-s: 13px;
-  --text-m: 14px;
-  --text-base: 16px;
+  /* Type. The system face first: it brings optical sizes and tracking. */
+  --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --text-xs: 0.75rem;
+  --text-s: 0.8125rem;
+  --text-m: 0.875rem;
+  --text-base: 1rem;
+  --text-l: 1.125rem;
+  --text-h3: 1.1875rem;
+  --text-h2: 1.4375rem;
+  --text-h1: 2rem;
+  --text-search: 1.25rem;
   /* Relative to the surrounding text. */
   --text-code-inline: 0.9em;
-  --tracking-label: 0.05em;
   /* How far a cursor's name sits above the line it is on. */
   --offset-caret-label: -1.4em;
-  --leading-tight: 1.25;
-  --leading-code: 1.5;
-  --leading-body: 1.6;
+  --leading-tight: 1.2;
+  --leading-ui: 1.4;
+  --leading-body: 1.65;
+  --leading-code: 1.55;
+  --tracking-display: -0.022em;
+  --tracking-heading: -0.012em;
+  --tracking-small: 0.01em;
+  --weight-normal: 400;
+  --weight-medium: 500;
   --weight-strong: 600;
 
   /* Layout */
+  --width-side: 280px;
+  --width-text: 46rem;
+  --width-start: 40rem;
+  --height-row: 28px;
+  --indent: 16px;
+  --height-bar: 48px;
+  --width-menu: 240px;
+  --width-menu-s: 140px;
+  --width-toast: 320px;
+  --width-form: 400px;
   --width-content: 1200px;
   --width-editor: 420px;
-  --width-side: 320px;
-  --width-form: 400px;
-  --height-editor: 60vh;
-  --width-search: 280px;
   --width-search-results: 480px;
-  /* A popover never reaches the edges of a narrow screen. */
-  --width-popover-max: calc(100vw - 2 * var(--space-4));
-  /* Search results lie over whatever is below the header. */
-  --layer-popover: 10;
-  --shadow-popover: 0 4px 16px rgb(0 0 0 / 0.15);
+  --height-editor: 60vh;
+  --height-screen: 100dvh;
+  /* A drawer, dialog or menu never reaches the edges of a narrow window. */
+  --width-drawer-max: 86vw;
+  --width-floating-max: calc(100vw - 2 * var(--space-4));
+  --height-control: 30px;
+  --size-icon-button: 26px;
+  --size-chevron: 18px;
+  --size-mark: 20px;
+  --layer-drag: 50;
+  --layer-menu: 40;
+  --layer-drawer: 30;
+
+  /* Depth: one shadow, used only on things that float above the page */
+  --shadow-float: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.1);
+
+  /* Motion. Short and quiet; reduced motion sets every duration to 0. */
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --dur-agent: 2400ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --press-scale: 0.97;
+  --press-scale-icon: 0.92;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-reduced-motion: reduce) {
   :root {
-    --color-bg: #1c1917;
-    --color-surface: #24211f;
-    --color-text: #f5f5f4;
-    --color-muted: #a8a29e;
-    --color-line: #3f3a36;
-    --color-accent: #5eead4;
-    --color-danger: #fca5a5;
-    --color-highlight: #854d0e;
+    --dur-instant: 0ms;
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --dur-agent: 0ms;
+    --press-scale: 1;
+    --press-scale-icon: 1;
   }
 }

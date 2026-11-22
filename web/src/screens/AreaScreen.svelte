@@ -1,14 +1,16 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
-  import AppHeader from '../components/AppHeader.svelte'
   import Grants from '../components/Grants.svelte'
   import TitleForm, { ADD_ACTIONS } from '../components/TitleForm.svelte'
   import TreeEntry from '../components/TreeEntry.svelte'
+  import { toast } from 'svelte-sonner'
+  import { navigation } from '../lib/navigation.svelte'
   import { call, OperationError } from '../lib/ops'
-  import type { Area, Entry, Kind } from '../lib/operations.gen'
+  import type { Area, Kind } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { areaAddress } from '../lib/routes'
   import { createEntry } from '../lib/tree'
+  import { ui } from '../lib/ui.svelte'
   import NotFoundScreen from './NotFoundScreen.svelte'
 
   // The screen is created anew for every Area, so the ID never changes underneath it.
@@ -26,17 +28,15 @@
   let busy = $state(false)
   let error = $state<string | null>(null)
 
-  /** The top of the tree, in order. */
-  let entries = $state.raw<Entry[] | null>(null)
+  /** The top of the tree, in order: the same one the sidebar shows. */
+  const entries = $derived(navigation.tree(id) ?? null)
   const writable = $derived(area !== null && area.role !== 'read')
 
-  /** Set when the tree could not be loaded again after a change; what is shown may be outdated. */
-  let reloadFailed = $state(false)
+  // The sidebar shows the tree of the Area that is on the screen.
+  ui.openArea = id
 
   async function fetchTree() {
-    const tree = await call('get_tree', { area_id: id })
-    area = tree.area
-    entries = tree.entries
+    area = (await navigation.loadTree(id)).area
   }
 
   fetchTree().catch(caught => {
@@ -48,17 +48,21 @@
   async function reload() {
     try {
       await fetchTree()
-      reloadFailed = false
     } catch (caught) {
       // Access may have been lost in the meantime; that looks like any other missing Area.
       if (caught instanceof OperationError && caught.kind === 'not_found') missing = true
-      else reloadFailed = true
+      else toast.error('The change was saved, but the tree could not be loaded again. Reload the page to see it.')
     }
   }
 
   async function addAtTop(title: string, kind: Kind) {
     await createEntry(kind, { area_id: id, title })
     await reload()
+  }
+
+  /** A Grant changed, and with it perhaps which Areas the person can read and what they may do there. */
+  async function rolesChanged() {
+    await Promise.all([reload(), navigation.refreshAreas()])
   }
 
   $effect(() => {
@@ -88,6 +92,7 @@
     try {
       area = await call('rename_area', { id, name })
       renaming = false
+      void navigation.refreshAreas()
     } catch (caught) {
       error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'
     } finally {
@@ -99,7 +104,6 @@
 {#if missing}
   <NotFoundScreen />
 {:else}
-  <AppHeader areaId={id} />
   <main>
     {#if loadFailed}
       <p class="muted">This Area could not be loaded. Reload the page to try again.</p>
@@ -124,9 +128,6 @@
         </div>
       {/if}
       <p class="muted">Your Role here: {area.role}.</p>
-      {#if reloadFailed}
-        <p class="error" role="alert">The change was saved, but the tree could not be loaded again. Reload the page to see it.</p>
-      {/if}
       {#if entries && entries.length > 0}
         <ul class="tree">
           {#each entries as entry (entry.id)}
@@ -145,7 +146,7 @@
       {#if area.role === 'admin'}
         <!-- Created anew whenever the Role changes, so it never shows a stale list. -->
         {#key area.role}
-          <Grants areaId={id} onrolechange={reload} />
+          <Grants areaId={id} onrolechange={rolesChanged} />
         {/key}
       {/if}
     {/if}

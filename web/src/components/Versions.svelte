@@ -149,7 +149,7 @@
     font-size: var(--text-s);
     font-weight: var(--weight-strong);
     text-transform: uppercase;
-    letter-spacing: var(--tracking-label);
+    letter-spacing: var(--tracking-small);
   }
 
   ol {
@@ -167,7 +167,7 @@
     gap: var(--space-1);
     width: 100%;
     padding: var(--space-2) var(--space-3);
-    border: var(--line-width) solid var(--color-line);
+    border: var(--line) solid var(--color-line);
     border-radius: var(--radius-l);
     background: var(--color-surface);
     color: inherit;
@@ -176,7 +176,7 @@
   }
 
   .entry[aria-pressed='true'] {
-    border-color: var(--color-accent);
+    border-color: var(--color-focus);
   }
 
   .title {
@@ -214,7 +214,7 @@
   pre {
     margin: 0;
     padding: var(--space-3);
-    border: var(--line-width) solid var(--color-line);
+    border: var(--line) solid var(--color-line);
     border-radius: var(--radius-l);
     background: var(--color-surface);
     font: var(--text-s) / var(--leading-code) var(--font-mono);
@@ -223,7 +223,7 @@
   }
 
   .added {
-    color: var(--color-accent);
+    color: var(--color-focus);
   }
 
   .removed {

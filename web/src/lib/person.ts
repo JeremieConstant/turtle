@@ -8,7 +8,7 @@ export type Person = { name: string; color: string }
  */
 export type Present = Person | { name: string; agent: true; member?: string }
 
-const PERSON_COLORS = 7
+const PERSON_COLORS = 6
 
 /** A signed-in Member as the others see them: their name, and a colour that lasts for the browser session. */
 export function currentPerson(name: string): Person {
