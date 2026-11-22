@@ -259,6 +259,7 @@
   }
 
   function menuKeys(event: KeyboardEvent) {
+    if (event.key === 'Escape') return menuEl?.hidePopover()
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
     event.preventDefault()
     const items = [...menuEl!.querySelectorAll<HTMLButtonElement>('button')]

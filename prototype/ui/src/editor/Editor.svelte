@@ -2,8 +2,9 @@
   /*
    * The Page editor. It offers only what Markdown can express (ADR-0006):
    * headings, paragraphs, lists, task lists, simple tables, code blocks,
-   * quotes, callouts, links to other Pages and images. Nothing shows Markdown;
-   * typing "/" in an empty line opens the list of blocks.
+   * quotes, callouts, links to other Pages and images. Nothing shows Markdown.
+   * The toolbar offers all of it; typing "/" in an empty line opens the same
+   * blocks as a list.
    */
   import { Editor } from '@tiptap/core'
   import Image from '@tiptap/extension-image'
@@ -12,10 +13,13 @@
   import { Placeholder } from '@tiptap/extensions'
   import StarterKit from '@tiptap/starter-kit'
   import { untrack } from 'svelte'
+  import Icon from '../components/Icon.svelte'
   import type { Author } from '../lib/mock/types'
   import { router } from '../lib/router.svelte'
   import { AgentChanges, Callout, RemoteCarets } from './extensions'
+  import { SLASH, type Format } from './format'
   import PickerDialog from './PickerDialog.svelte'
+  import Toolbar from './Toolbar.svelte'
 
   let {
     html,
@@ -34,30 +38,14 @@
 
   /* ---- The "/" menu --------------------------------------------------- */
 
-  type Block = { label: string; keys: string; run: (e: Editor) => void }
-  const BLOCKS: Block[] = [
-    { label: 'Heading', keys: 'h2 heading title', run: (e) => e.chain().focus().setHeading({ level: 2 }).run() },
-    { label: 'Subheading', keys: 'h3 subheading', run: (e) => e.chain().focus().setHeading({ level: 3 }).run() },
-    { label: 'Bulleted list', keys: 'bullet list ul', run: (e) => e.chain().focus().toggleBulletList().run() },
-    { label: 'Numbered list', keys: 'numbered ordered list ol', run: (e) => e.chain().focus().toggleOrderedList().run() },
-    { label: 'Task list', keys: 'task todo checkbox', run: (e) => e.chain().focus().toggleTaskList().run() },
-    {
-      label: 'Table',
-      keys: 'table grid',
-      run: (e) => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
-    },
-    { label: 'Code block', keys: 'code pre snippet', run: (e) => e.chain().focus().toggleCodeBlock().run() },
-    { label: 'Quote', keys: 'quote blockquote', run: (e) => e.chain().focus().toggleBlockquote().run() },
-    { label: 'Callout', keys: 'callout note info', run: (e) => e.chain().focus().wrapIn('callout').run() },
-    { label: 'Link to a Page', keys: 'link page', run: () => picker.open('page') },
-    { label: 'Image', keys: 'image picture', run: () => picker.open('image') },
-  ]
+  /** Counts transactions, so the toolbar can read the editor's state again. */
+  let version = $state(0)
 
   let slash = $state<null | { query: string; from: number; to: number; x: number; y: number }>(null)
   let active = $state(0)
   let picker: PickerDialog
   const matches = $derived(
-    slash ? BLOCKS.filter((b) => (b.label + ' ' + b.keys).toLowerCase().includes(slash!.query.toLowerCase())) : [],
+    slash ? SLASH.filter((b) => (b.label + ' ' + b.keys).toLowerCase().includes(slash!.query.toLowerCase())) : [],
   )
 
   function readSlash(e: Editor) {
@@ -75,11 +63,13 @@
     slash = { query: match[1], from: start, to: start + text.length, x: coords.left - box.left, y: coords.bottom - box.top }
   }
 
-  function choose(block: Block) {
+  const pick = (what: 'page' | 'image') => picker.open(what)
+
+  function choose(block: Format) {
     if (!editor || !slash) return
     editor.chain().focus().deleteRange({ from: slash.from, to: slash.to }).run()
     slash = null
-    block.run(editor)
+    block.run(editor, pick)
   }
 
   $effect(() => {
@@ -113,6 +103,7 @@
           else if (event.key === 'Enter') choose(matches[active])
           else if (event.key === 'Escape') slash = null
           else return false
+          requestAnimationFrame(() => element.querySelector('.slash .active')?.scrollIntoView({ block: 'nearest' }))
           return true
         },
         handleClick(_view, _pos, event) {
@@ -124,6 +115,8 @@
         },
       },
       onTransaction: ({ editor: ed, transaction }) => {
+        // Counted a moment later: a blur can arrive while Svelte removes the editor.
+        queueMicrotask(() => version++)
         if (transaction.docChanged) onchange?.(ed, (transaction.getMeta('remote') as Author | undefined) ?? null)
         // Only typing and caret moves can open the menu. A blur also arrives as a
         // transaction, sometimes while Svelte is removing the editor.
@@ -141,10 +134,14 @@
   })
 </script>
 
+{#if editable && editor}
+  <Toolbar {editor} {version} {pick} />
+{/if}
+
 <div class="editor" class:readonly={!editable} bind:this={element}>
   {#if slash && matches.length}
     <div class="slash" role="listbox" aria-label="Insert a block" style:left="{slash.x}px" style:top="{slash.y + 6}px">
-      {#each matches as block, i (block.label)}
+      {#each matches as block, i (block.id)}
         <button
           role="option"
           aria-selected={i === active}
@@ -152,6 +149,7 @@
           onmousedown={(e) => (e.preventDefault(), choose(block))}
           onmouseenter={() => (active = i)}
         >
+          <span class="glyph"><Icon name={block.icon} /></span>
           {block.label}
         </button>
       {/each}
@@ -477,7 +475,9 @@
     position: absolute;
     z-index: var(--layer-menu);
     display: grid;
-    min-width: 200px;
+    min-width: 220px;
+    max-height: 320px;
+    overflow-y: auto;
     padding: var(--space-1);
     border: var(--line) solid var(--color-line);
     border-radius: var(--radius-m);
@@ -495,8 +495,11 @@
   }
 
   .slash button {
-    height: 30px;
-    padding: 0 var(--space-3);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    height: 34px;
+    padding: 0 var(--space-3) 0 var(--space-1);
     border: 0;
     border-radius: var(--radius-s);
     background: none;
@@ -506,5 +509,17 @@
 
   .slash button.active {
     background: var(--color-hover);
+  }
+
+  /* Each block's icon sits in a small tile, so the list scans by shape. */
+  .slash .glyph {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: var(--line) solid var(--color-line);
+    border-radius: var(--radius-s);
+    background: var(--color-bg);
+    color: var(--color-text-2);
   }
 </style>

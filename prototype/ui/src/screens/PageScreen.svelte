@@ -171,7 +171,6 @@
           {/each}
         </nav>
         {#if page.tags.length || writable}
-          <span class="rule" aria-hidden="true"></span>
           <div class="bar-tags"><Tags id="bar-tags" page_id={page.id} tags={page.tags} {writable} /></div>
         {/if}
       </div>
@@ -288,19 +287,13 @@
 
   .bar-tags {
     flex: none;
+    margin-left: var(--space-5);
   }
 
   .bar-tags :global(.tags) {
     flex-wrap: nowrap;
   }
 
-  .rule {
-    flex: none;
-    width: var(--line);
-    height: 14px;
-    margin: 0 var(--space-2);
-    background: var(--color-line-strong);
-  }
 
   .meta-tags {
     display: none;
@@ -309,7 +302,6 @@
 
   /* Where the bar has no room beside the path, the Tags move under the title. */
   @media (max-width: 1180px) {
-    .rule,
     .bar-tags {
       display: none;
     }

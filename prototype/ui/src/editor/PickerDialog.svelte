@@ -1,7 +1,7 @@
 <script lang="ts">
   /*
    * Inserts a link to another Page (found through search) or an image (by
-   * its address). Both are things Markdown can hold: [title](/p/id/title)
+   * its address); a pasted web address links to that instead. All are things Markdown can hold: [title](/p/id/title)
    * and ![alt](src).
    */
   import type { Editor } from '@tiptap/core'
@@ -23,20 +23,23 @@
     dialog.showModal()
   }
 
-  function linkTo(hit: { id: string; title: string }) {
-    editor
-      ?.chain()
-      .focus()
-      .insertContent({ type: 'text', text: hit.title, marks: [{ type: 'link', attrs: { href: pageAddress(hit.id, hit.title) } }] })
-      .insertContent(' ')
-      .run()
+  /* Selected text becomes the link; with nothing selected the title is inserted. */
+  function link(href: string, text: string) {
+    if (!editor) return
+    if (!editor.state.selection.empty) editor.chain().focus().extendMarkRange('link').setLink({ href }).run()
+    else editor.chain().focus().insertContent({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }).insertContent(' ').run()
     dialog.close()
   }
+
+  const linkTo = (hit: { id: string; title: string }) => link(pageAddress(hit.id, hit.title), hit.title)
+  const isAddress = (text: string) => /^(https?:\/\/|mailto:)\S+$/i.test(text.trim()) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(text.trim())
 
   function submit(event: SubmitEvent) {
     event.preventDefault()
     if (mode === 'page') {
-      if (hits[active]) linkTo(hits[active])
+      const text = value.trim()
+      if (isAddress(text)) link(/^[a-z]+:/i.test(text) ? text : 'https://' + text, text)
+      else if (hits[active]) linkTo(hits[active])
       return
     }
     if (!value.trim()) return
@@ -59,7 +62,7 @@
       autofocus
       {onkeydown}
       oninput={() => (active = 0)}
-      placeholder={mode === 'page' ? 'Find a Page to link to' : 'Image address, https://…'}
+      placeholder={mode === 'page' ? 'Find a Page, or paste a web address' : 'Image address, https://…'}
       aria-label={mode === 'page' ? 'Find a Page' : 'Image address'}
     />
     {#if mode === 'page' && hits.length}
