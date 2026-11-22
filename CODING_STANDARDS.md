@@ -31,3 +31,5 @@ A comment explains a reason, a constraint or a decision the code cannot show. Do
 ## Tests go through the public seam
 
 Tests exercise an operation, an HTTP or WebSocket endpoint, or a module's exports. Expected values come from the spec or a worked example, never recomputed the way the code computes them.
+
+Page content has three seams: Markdown (`markdown::{to_markdown, from_markdown}`), the collaborative document (`ydoc::{write, read}`), and the document's stored layout, the element and attribute names the editor reads. A document test may state the content it expects as Markdown, since the Markdown reader is independent of the document code, and may read the stored layout directly, since that layout is the contract with the editor rather than an internal detail.

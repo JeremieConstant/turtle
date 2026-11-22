@@ -2,7 +2,9 @@
 //!
 //! The layout is the one the editor produces: an XML fragment whose elements
 //! are named after the editor's node types, with text formatting stored as
-//! attributes on text ranges.
+//! attributes on text ranges. The `the_editor_contract` tests here and
+//! `web/scripts/editor-contract.test.ts` hold the two to each other through shared
+//! fixtures in `tests/fixtures`.
 
 use crate::diff::{align, common_edges, text_hunks, Fit, Step};
 use crate::model::{normalize, Block, CalloutKind, Inline, Marks, TaskItem};
@@ -911,6 +913,78 @@ mod tests {
 
         assert_eq!(text(&doc), before);
         assert_eq!(read(&elsewhere), from_markdown("- [ ] open\n- [x] also open\n"));
+    }
+
+    // The editor contract: see web/scripts/editor-contract.test.ts, which shares
+    // these fixtures and says how to write them anew.
+    fn fixture(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
+    }
+
+    fn contract_markdown() -> String {
+        std::fs::read_to_string(fixture("editor-contract.md")).unwrap()
+    }
+
+    #[test]
+    fn the_editor_contract_a_document_the_editor_made_reads_as_its_markdown() {
+        let stored = std::fs::read(fixture("from-editor.bin")).unwrap();
+        let blocks = read_state(&stored).unwrap();
+        assert_eq!(to_markdown(&blocks), contract_markdown());
+    }
+
+    /// The layout of a document: each element with its attributes and each
+    /// text with its formatting, sorted, so two documents with the same
+    /// layout compare equal however their bytes were encoded.
+    fn layout(doc: &Doc) -> String {
+        fn attributes(pairs: impl Iterator<Item = (String, String)>) -> String {
+            let mut pairs: Vec<_> = pairs.map(|(k, v)| format!("{k}={v}")).collect();
+            pairs.sort();
+            pairs.join(" ")
+        }
+        fn dump<T: ReadTxn>(txn: &T, node: XmlOut, depth: usize, out: &mut String) {
+            let indent = "  ".repeat(depth);
+            match node {
+                XmlOut::Element(element) => {
+                    let attrs = attributes(element.attributes(txn).map(|(k, v)| (k.to_string(), format!("{v:?}"))));
+                    out.push_str(&format!("{indent}<{} {attrs}>\n", element.tag()));
+                    for child in element.children(txn) {
+                        dump(txn, child, depth + 1, out);
+                    }
+                }
+                XmlOut::Text(text) => {
+                    for chunk in text.diff(txn, YChange::identity) {
+                        let marks = chunk.attributes.map(|a| {
+                            attributes(a.iter().map(|(k, v)| (k.to_string(), format!("{v:?}"))))
+                        });
+                        out.push_str(&format!("{indent}{:?} [{}]\n", chunk.insert, marks.unwrap_or_default()));
+                    }
+                }
+                XmlOut::Fragment(fragment) => fragment.children(txn).for_each(|child| dump(txn, child, depth, out)),
+            }
+        }
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = doc.transact();
+        let mut out = String::new();
+        fragment.children(&txn).for_each(|child| dump(&txn, child, 0, &mut out));
+        out
+    }
+
+    #[test]
+    fn the_editor_contract_the_markdown_written_is_the_fixture_the_editor_reads() {
+        let doc = Doc::with_client_id(1);
+        write(&doc, &from_markdown(&contract_markdown()));
+        let path = fixture("from-server.bin");
+        if std::env::var("UPDATE_CONTRACT").as_deref() == Ok("1") {
+            let stored = doc.transact().encode_state_as_update_v1(&yrs::StateVector::default());
+            std::fs::write(&path, stored).unwrap();
+        }
+        let fixture = Doc::new();
+        apply(&fixture, &std::fs::read(&path).unwrap());
+        assert_eq!(
+            layout(&doc),
+            layout(&fixture),
+            "from-server.bin is out of date; write it anew as web/scripts/editor-contract.test.ts says"
+        );
     }
 
     #[test]

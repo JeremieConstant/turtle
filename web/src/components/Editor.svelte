@@ -2,13 +2,10 @@
   import { Editor } from '@tiptap/core'
   import Collaboration from '@tiptap/extension-collaboration'
   import CollaborationCaret from '@tiptap/extension-collaboration-caret'
-  import { TaskItem, TaskList } from '@tiptap/extension-list'
-  import StarterKit from '@tiptap/starter-kit'
   import type { Awareness } from 'y-protocols/awareness'
   import type * as Y from 'yjs'
   import { AgentChanges } from '../lib/agent-changes'
-  import { Callout } from '../lib/callout'
-  import { PageLink } from '../lib/pageLink'
+  import { contentExtensions } from '../lib/extensions'
   import { personColor, type Person } from '../lib/person'
 
   const {
@@ -34,10 +31,7 @@
     const editor = new Editor({
       element,
       extensions: [
-        // Underline is off because Markdown cannot express it (ADR-0006).
-        // The trailing node is off because every open editor would append its
-        // own empty paragraph at the same moment, and they would pile up.
-        StarterKit.configure({ undoRedo: false, underline: false, trailingNode: false }),
+        ...contentExtensions,
         Collaboration.configure({ document: doc }),
         CollaborationCaret.configure({
           provider: connection,
@@ -63,11 +57,6 @@
           }),
         }),
         AgentChanges,
-        PageLink,
-        TaskList,
-        // A task may hold more than a line, as it can in Markdown.
-        TaskItem.configure({ nested: true }),
-        Callout,
       ],
       editable,
       autofocus: editable,

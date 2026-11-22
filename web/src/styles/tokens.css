@@ -5,7 +5,9 @@
  * structure elsewhere.
  *
  * Every colour has a light and a dark value (issue #50), so the dark
- * appearance changes this file only.
+ * appearance changes this file only. Each colour token holds its own
+ * light-dark() pair, even where it equals another token's: the appearance
+ * test checks this.
  *
  * The palette is monochrome. Colour appears only where it means something:
  * focus and the drop target (--color-focus), the people editing a Page
