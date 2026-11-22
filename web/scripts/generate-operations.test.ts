@@ -58,3 +58,36 @@ test('an untitled output stays inline', () => {
   ])
   expect(generated).toContain('    output: null')
 })
+
+const restored = (properties: Record<string, unknown>) => ({
+  title: 'Restored',
+  type: 'object',
+  properties,
+  required: Object.keys(properties),
+})
+
+test('two different types of the same name are refused, naming both', () => {
+  const versions = restored({ number: { type: 'integer' } })
+  const trash = restored({ id: { type: 'string' } })
+  expect(() =>
+    generate([
+      { name: 'restore_version', description: 'Restores a Version.', browser_only: false, input: { type: 'object' }, output: versions },
+      { name: 'restore_from_trash', description: 'Restores from the Trash.', browser_only: false, input: { type: 'object' }, output: trash },
+    ]),
+  ).toThrow(/Restored.*number: number.*id: string/s)
+})
+
+test('the same type reached from several operations is generated once', () => {
+  const area = { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }
+  const generated = generate([
+    { name: 'get_area', description: 'Gets an Area.', browser_only: false, input: { type: 'object' }, output: { title: 'Area', ...area } },
+    {
+      name: 'list_areas',
+      description: 'Lists the Areas.',
+      browser_only: false,
+      input: { type: 'object' },
+      output: { type: 'array', items: { $ref: '#/$defs/Area' }, $defs: { Area: area } },
+    },
+  ])
+  expect(generated.match(/export type Area =/g)).toHaveLength(1)
+})

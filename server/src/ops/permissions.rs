@@ -210,6 +210,9 @@ pub fn personal_member_of(db: &Connection, node_id: &str) -> rusqlite::Result<Op
 /// carries any, or the root of its Area when none does. `None` when the node
 /// does not exist.
 ///
+/// It says nothing about the Trash, which `role_on` also refuses: a caller
+/// deciding access with it leaves out what `in_trash` reports itself.
+///
 /// Search stores this with each Page. In the MVP only roots carry Grants, so
 /// it never changes; once Subtrees carry their own, giving a node its first
 /// Grant or taking its last must mark the Pages beneath it as changed.
@@ -236,6 +239,7 @@ pub fn governing_node(db: &Connection, node_id: &str) -> rusqlite::Result<Option
 /// is. A Member reads through the root of their Personal Area, and a
 /// Workspace Admin through every node that governs any other Area's Pages.
 /// A Token limited to chosen Areas reads through the nodes in those alone.
+/// Like `governing_node`, it leaves the Trash to the caller (see `in_trash`).
 pub fn readable_through(db: &Connection, principal: &Principal) -> rusqlite::Result<Vec<String>> {
     let nodes = owner_reads_through(db, principal)?;
     let Some(areas) = principal.token().and_then(|token| token.areas.as_ref()) else { return Ok(nodes) };
