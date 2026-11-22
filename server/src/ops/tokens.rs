@@ -672,6 +672,27 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_acting_for_a_member_reaches_their_personal_area_and_a_standalone_agent_never_does() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let personal = crate::ops::testing::personal_area(&core, &grace);
+        let (_, everywhere) = agent(&core, &grace, named("Everywhere"));
+        let (_, only_personal) = agent(&core, &grace, NewToken { area_ids: Some(vec![personal.clone()]), ..named("Notes") });
+        let reviewer = standalone(&core, &ada, "Reviewer");
+        let (_, standalone_agent) = agent(&core, &ada, for_agent(&reviewer, "CI"));
+
+        for acting in [&everywhere, &only_personal] {
+            assert_eq!(area_names(&core, acting), ["Personal"]);
+            let page = NewEntry { area_id: personal.clone(), parent_id: None, title: "Quick thought".into() };
+            assert!(create_page(&core, acting, page.into()).is_ok());
+        }
+        assert!(area_names(&core, &standalone_agent).is_empty());
+        let hidden = get_tree(&core, &standalone_agent, TreeOfArea { area_id: personal }).unwrap_err();
+        assert_eq!(hidden.kind(), "not_found");
+    }
+
+    #[test]
     fn a_workspace_admins_token_limited_to_areas_does_not_manage_members() {
         let core = fresh();
         let ada = member(&core, "Ada", true);

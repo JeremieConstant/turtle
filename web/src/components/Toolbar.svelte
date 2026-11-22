@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Editor } from '@tiptap/core'
   import type { Snippet } from 'svelte'
+  import NameDialog from './NameDialog.svelte'
 
   const {
     editor,
@@ -11,6 +12,15 @@
     /** Shown at the far end of the toolbar. */
     children?: Snippet
   } = $props()
+
+  let linkDialog: NameDialog
+
+  /** Sets the link at the selection to the address given; an empty one removes it. */
+  async function setLink(href: string) {
+    if (!editor) return
+    if (href === '') editor.chain().focus().unsetLink().run()
+    else editor.chain().focus().extendMarkRange('link').setLink({ href }).run()
+  }
 
   type Button = { label: string; title: string; run: (editor: Editor) => void; active?: (editor: Editor) => boolean }
 
@@ -33,12 +43,7 @@
     {
       label: 'Link',
       title: 'Link',
-      run: e => {
-        const href = prompt('Link address', e.getAttributes('link').href ?? 'https://')
-        if (href === null) return
-        if (href === '') e.chain().focus().unsetLink().run()
-        else e.chain().focus().extendMarkRange('link').setLink({ href }).run()
-      },
+      run: e => linkDialog.open(e.getAttributes('link').href ?? 'https://'),
       active: e => e.isActive('link'),
     },
   ]
@@ -82,6 +87,8 @@
   {/if}
   <span class="end">{@render children?.()}</span>
 </div>
+
+<NameDialog bind:this={linkDialog} label="Link address" action="Set link" hint="Leave it empty to remove the link." optional onsubmit={setLink} />
 
 <style>
   .toolbar {

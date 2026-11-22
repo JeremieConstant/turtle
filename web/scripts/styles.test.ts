@@ -73,3 +73,23 @@ test('every duration in a style is a duration token', () => {
   )
   expect(untimed).toEqual([])
 })
+
+test('the settings screens, Grants, Versions and the account screens keep no styles of their own', () => {
+  // They take their whole look from the shared classes in base.css, so they cannot drift from the rest of the app.
+  const shared = [
+    'screens/MembersScreen.svelte',
+    'screens/AgentsScreen.svelte',
+    'screens/TokensScreen.svelte',
+    'components/TokenManager.svelte',
+    'components/Grants.svelte',
+    'components/Versions.svelte',
+    'screens/SetupScreen.svelte',
+    'screens/SignInScreen.svelte',
+    'screens/InvitationScreen.svelte',
+    'screens/PasswordResetScreen.svelte',
+    'components/AccountForm.svelte',
+    'components/Field.svelte',
+  ]
+  const styled = shared.filter(file => /<style[\s>]/.test(readFileSync(join(SOURCE, file), 'utf8')))
+  expect(styled).toEqual([])
+})

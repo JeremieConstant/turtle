@@ -45,6 +45,8 @@
   --color-scrim: rgb(0 0 0 / 0.2);
   /* How much a control that cannot be used right now fades. */
   --opacity-disabled: 0.45;
+  /* How much the red button lightens under the pointer. */
+  --opacity-hover-danger: 0.88;
 
   /* Spacing, on a 4px grid */
   --space-hair: 1px;

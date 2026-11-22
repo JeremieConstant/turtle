@@ -132,18 +132,21 @@ pub fn create_first_account(
 
     // Checked under the same lock as the insert, so two people completing
     // setup at the same moment cannot both become the first account.
-    let db = core.db();
-    if any_member_exists(&db)? {
+    let mut db = core.db();
+    let transaction = db.transaction()?;
+    if any_member_exists(&transaction)? {
         return Err(OpError::Conflict(
             "This installation already has an account. Sign in instead.".into(),
         ));
     }
-    db.execute(
+    transaction.execute(
         "INSERT INTO members (id, email, name, password_hash, workspace_admin, created_at)
          VALUES (?1, ?2, ?3, ?4, 1, ?5)",
         rusqlite::params![member.id, member.email, member.name, password_hash, core.now()],
     )?;
-    let secret = start_session(core, &db, &member.id)?;
+    super::areas::create_personal_area(&transaction, &member.id, core.now())?;
+    let secret = start_session(core, &transaction, &member.id)?;
+    transaction.commit()?;
     Ok(Reply {
         output: member,
         session: SessionChange::Start(secret),

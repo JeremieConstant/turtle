@@ -12,7 +12,7 @@ describe('holders in a choice', () => {
 
 describe('whom a Role can still be given to', () => {
   const list: GrantList = {
-    area: { id: 'a1', name: 'Engineering', role: 'admin' },
+    area: { id: 'a1', name: 'Engineering', role: 'admin', personal: false },
     grants: [{ holder: { kind: 'member', member_id: 'grace' }, name: 'Grace', role: 'admin' }],
     members: [
       { id: 'grace', name: 'Grace' },

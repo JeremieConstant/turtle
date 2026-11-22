@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { Toaster } from 'svelte-sonner'
+  import ConfirmDialog from './components/ConfirmDialog.svelte'
   import Icon from './components/Icon.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import { router } from './lib/router.svelte'
@@ -169,6 +170,8 @@
     </div>
   </div>
 {/if}
+
+<ConfirmDialog />
 
 <!-- Short messages that stack in the corner and leave on their own. -->
 <Toaster position="bottom-right" visibleToasts={4} gap={8} offset={20} duration={4000} />

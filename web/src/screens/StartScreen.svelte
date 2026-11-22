@@ -3,7 +3,6 @@
   import SearchField from '../components/SearchField.svelte'
   import SearchResults from '../components/SearchResults.svelte'
   import { liveSearch } from '../lib/liveSearch.svelte'
-  import { navigation } from '../lib/navigation.svelte'
   import { router } from '../lib/router.svelte'
   import { pageAddress, searchAddress } from '../lib/routes'
   import { moveMark } from '../lib/search'
@@ -77,11 +76,6 @@
       </div>
     {/if}
   </div>
-  {#if navigation.areas?.length === 0}
-    <p class="hint">
-      You cannot see any Areas yet. Create one in the sidebar, or ask the Admin of an Area to give you a Role on it.
-    </p>
-  {/if}
 </main>
 
 <style>
@@ -136,11 +130,6 @@
     padding: var(--space-3);
     color: var(--color-muted);
     font-size: var(--text-m);
-  }
-
-  .hint {
-    margin: var(--space-6) var(--space-1) 0;
-    color: var(--color-muted);
   }
 
   @media (max-width: 800px) {

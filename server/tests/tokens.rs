@@ -105,7 +105,8 @@ async fn an_agent_reads_and_writes_through_the_mcp_endpoint_with_a_token() {
 
     // What the Agent created belongs to the Token's owner.
     let areas = ada.call("list_areas", json!({})).await;
-    assert_eq!(areas["areas"][0]["name"], "Engineering");
+    let names: Vec<_> = areas["areas"].as_array().unwrap().iter().map(|area| area["name"].clone()).collect();
+    assert_eq!(names, [json!("Personal"), json!("Engineering")]);
 }
 
 #[tokio::test]

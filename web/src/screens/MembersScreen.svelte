@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { MemberEntry, SingleUseLink } from '../lib/operations.gen'
   import { session } from '../lib/session.svelte'
@@ -62,8 +63,14 @@
     return attempt(async () => changed(await call('set_workspace_admin', { id: member.id, workspace_admin })))
   }
 
-  function deactivate(member: MemberEntry) {
-    if (!confirm(`Deactivate ${member.name}? They are signed out at once and can no longer sign in.`)) return
+  async function deactivate(member: MemberEntry) {
+    const sure = await ask({
+      title: `Deactivate ${member.name}?`,
+      message: 'They are signed out at once and can no longer sign in.',
+      action: 'Deactivate',
+      destructive: true,
+    })
+    if (!sure) return
     return attempt(async () => changed(await call('deactivate_member', { id: member.id })))
   }
 
@@ -80,51 +87,51 @@
   }
 </script>
 
-<main>
+<main class="screen">
   <h1>Members</h1>
   {#if loadError}
-    <p class="muted">{loadError}</p>
+    <p class="muted section">{loadError}</p>
   {:else if members !== null}
-    <form onsubmit={invite}>
-      <h2>Invite a person</h2>
+    <form class="section stack" onsubmit={invite}>
+      <h2 class="section-title">Invite a person</h2>
       <p class="muted">You get a link to pass on. It works once and expires after seven days.</p>
-      <div class="row">
-        <input type="email" aria-label="Email address" placeholder="Email address" required autocomplete="off" bind:value={email} />
-        <button type="submit" disabled={busy}>Invite</button>
+      <div class="controls">
+        <input class="input grow" type="email" aria-label="Email address" placeholder="Email address" required autocomplete="off" bind:value={email} />
+        <button type="submit" class="btn primary" disabled={busy}>Invite</button>
       </div>
     </form>
 
     {#if shown}
-      <section class="link" aria-live="polite">
+      <section class="section notice" aria-live="polite">
         <strong>{shown.purpose}</strong>
-        <div class="row">
-          <input readonly aria-label="Link to pass on" value={address} onfocus={event => event.currentTarget.select()} />
-          <button type="button" onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+        <div class="controls">
+          <input class="input grow" readonly aria-label="Link to pass on" value={address} onfocus={event => event.currentTarget.select()} />
+          <button type="button" class="btn" onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>
         </div>
-        <small class="muted">Works once, until {expires}.</small>
+        <small class="hint">Works once, until {expires}.</small>
       </section>
     {/if}
 
     {#if error}
-      <p class="error" role="alert">{error}</p>
+      <p class="error section" role="alert">{error}</p>
     {/if}
 
-    <ul>
+    <ul class="list section">
       {#each members as member (member.id)}
         <li class:inactive={!member.active}>
-          <div>
-            <span>{member.name}</span>
-            <small class="muted">{[member.email, member.workspace_admin && 'Workspace Admin', !member.active && 'Deactivated'].filter(Boolean).join(' · ')}</small>
+          <div class="item">
+            <span class="item-name">{member.name}</span>
+            <small class="hint">{[member.email, member.workspace_admin && 'Workspace Admin', !member.active && 'Deactivated'].filter(Boolean).join(' · ')}</small>
           </div>
           {#if member.active}
-            <div class="actions">
+            <div class="controls">
               {#if member.workspace_admin}
-                <button type="button" disabled={busy} onclick={() => setAdmin(member, false)}>Remove Workspace Admin</button>
+                <button type="button" class="btn" disabled={busy} onclick={() => setAdmin(member, false)}>Remove Workspace Admin</button>
               {:else}
-                <button type="button" disabled={busy} onclick={() => setAdmin(member, true)}>Make Workspace Admin</button>
+                <button type="button" class="btn" disabled={busy} onclick={() => setAdmin(member, true)}>Make Workspace Admin</button>
               {/if}
-              <button type="button" disabled={busy} onclick={() => resetPassword(member)}>Password reset link</button>
-              <button type="button" disabled={busy} onclick={() => deactivate(member)}>Deactivate</button>
+              <button type="button" class="btn" disabled={busy} onclick={() => resetPassword(member)}>Password reset link</button>
+              <button type="button" class="btn" disabled={busy} onclick={() => deactivate(member)}>Deactivate</button>
             </div>
           {/if}
         </li>
@@ -132,84 +139,3 @@
     </ul>
   {/if}
 </main>
-
-<style>
-  main {
-    max-width: var(--width-content);
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-4);
-  }
-
-  h1,
-  h2 {
-    line-height: var(--leading-tight);
-  }
-
-  h2 {
-    margin-bottom: 0;
-    font-size: var(--text-base);
-  }
-
-  .row {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .link {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    margin-top: var(--space-4);
-    padding: var(--space-3);
-    border: var(--line) solid var(--color-focus);
-    border-radius: var(--radius-m);
-  }
-
-  ul {
-    padding: 0;
-    list-style: none;
-  }
-
-  li {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-2) var(--space-3);
-    padding: var(--space-2) 0;
-    border-bottom: var(--line) solid var(--color-line);
-  }
-
-  li > div:first-child {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .inactive span {
-    color: var(--color-muted);
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .muted {
-    color: var(--color-muted);
-    font-size: var(--text-m);
-  }
-
-  small.muted {
-    font-size: var(--text-s);
-  }
-
-  .error {
-    color: var(--color-danger);
-  }
-</style>

@@ -14,26 +14,8 @@
   } = $props()
 </script>
 
-<label>
+<label class="field">
   <span>{label}</span>
-  <input {type} {autocomplete} required bind:value />
-  {#if hint}<small>{hint}</small>{/if}
+  <input class="input" {type} {autocomplete} required bind:value />
+  {#if hint}<small class="hint">{hint}</small>{/if}
 </label>
-
-<style>
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  span {
-    font-size: var(--text-m);
-    font-weight: var(--weight-strong);
-  }
-
-  small {
-    color: var(--color-muted);
-    font-size: var(--text-s);
-  }
-</style>

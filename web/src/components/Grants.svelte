@@ -73,17 +73,18 @@
   }
 </script>
 
-<section>
-  <h2>Who has access</h2>
+<section class="section stack">
+  <h2 class="section-title">Who has access</h2>
   {#if loadFailed}
     <p class="muted">Access could not be loaded. Reload the page to try again.</p>
   {:else if list}
-    <ul>
+    <ul class="list">
       {#each list.grants as grant (holderKey(grant.holder))}
         <li>
-          <span>{holderLabel(grant.holder, grant.name)}</span>
-          <div class="row">
+          <span class="item-name">{holderLabel(grant.holder, grant.name)}</span>
+          <div class="controls">
             <select
+              class="input"
               aria-label="Role of {holderLabel(grant.holder, grant.name)}"
               disabled={busy}
               value={grant.role}
@@ -93,24 +94,24 @@
                 <option value={role}>{ROLE_NAMES[role]}</option>
               {/each}
             </select>
-            <button type="button" disabled={busy} onclick={() => remove(grant)}>Remove</button>
+            <button type="button" class="btn" disabled={busy} onclick={() => remove(grant)}>Remove</button>
           </div>
         </li>
       {/each}
     </ul>
     {#if choices.length > 0}
-      <form class="row" onsubmit={add}>
-        <select aria-label="Whom to give a Role" bind:value={newHolder}>
+      <form class="controls" onsubmit={add}>
+        <select class="input grow" aria-label="Whom to give a Role" bind:value={newHolder}>
           {#each choices as choice (choice.key)}
             <option value={choice.key}>{choice.label}</option>
           {/each}
         </select>
-        <select aria-label="Role to give" bind:value={newRole}>
+        <select class="input" aria-label="Role to give" bind:value={newRole}>
           {#each ROLES as role}
             <option value={role}>{ROLE_NAMES[role]}</option>
           {/each}
         </select>
-        <button type="submit" disabled={busy}>Give Role</button>
+        <button type="submit" class="btn primary" disabled={busy}>Give Role</button>
       </form>
     {/if}
     {#if error}
@@ -118,46 +119,3 @@
     {/if}
   {/if}
 </section>
-
-<style>
-  h2 {
-    margin-bottom: 0;
-    font-size: var(--text-base);
-    line-height: var(--leading-tight);
-  }
-
-  ul {
-    padding: 0;
-    list-style: none;
-  }
-
-  li {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-2) var(--space-3);
-    padding: var(--space-2) 0;
-    border-bottom: var(--line) solid var(--color-line);
-  }
-
-  .row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  form select:first-child {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .muted {
-    color: var(--color-muted);
-    font-size: var(--text-m);
-  }
-
-  .error {
-    color: var(--color-danger);
-  }
-</style>
