@@ -434,6 +434,38 @@ Open it.
     }
 
     #[test]
+    fn an_agents_change_reaches_the_editors_in_a_frame_that_names_the_agent_before_it_is_announced() {
+        use yrs::updates::decoder::Decode;
+        use yrs::{Doc, Transact, Update};
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let claude = agent(&core, &grace, "Claude");
+        let page_id = page(&core, &grace);
+        let mut frames = core.live().open(&page_id).unwrap().frames.subscribe();
+
+        append_to_page(&core, &claude, NewContent { page_id: page_id.clone(), markdown: "One.".into() }).unwrap();
+
+        let mut kinds = Vec::new();
+        let mut named = None;
+        while let Ok((_, frame)) = frames.try_recv() {
+            kinds.push(frame[0]);
+            if frame[0] == crate::live::FRAME_AGENT_UPDATE {
+                let mut data = &frame[1..];
+                let len = crate::live::read_varuint(&mut data).unwrap() as usize;
+                let who: serde_json::Value = serde_json::from_slice(&data[..len]).unwrap();
+                named = Some((who, data[len..].to_vec()));
+            }
+        }
+        // The change comes once, named, and the Agent is announced after it.
+        assert_eq!(kinds, [crate::live::FRAME_AGENT_UPDATE, crate::live::FRAME_PRESENCE]);
+        let (who, update) = named.unwrap();
+        assert_eq!(who, serde_json::json!({ "name": "Claude", "agent": true, "member": "Grace" }));
+        let editor = Doc::new();
+        editor.transact_mut().apply_update(Update::decode_v1(&update).unwrap()).unwrap();
+        assert_eq!(crate::markdown::to_markdown(&crate::ydoc::read(&editor)), "One.\n");
+    }
+
+    #[test]
     fn a_refused_write_changes_nothing_and_records_no_version() {
         let core = fresh();
         let grace = member(&core, "Grace", false);

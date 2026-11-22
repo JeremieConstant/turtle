@@ -9,8 +9,8 @@
   import { onDestroy, untrack } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import * as Y from 'yjs'
-  import { markAgentChange, unmarkAgentChange } from '../lib/agent-changes'
-  import { Connection, type Status } from '../lib/connection'
+  import { beginAgentChange, endAgentChange, unmarkAgentChange } from '../lib/agent-changes'
+  import { Connection, type ChangingAgent, type Status } from '../lib/connection'
   import type { Page } from '../lib/operations.gen'
   import { currentPerson, type Present } from '../lib/person'
   import { router } from '../lib/router.svelte'
@@ -34,7 +34,7 @@
     page: Page
     /** Called whenever the connection drops, so the screen can find out whether access is gone. */
     ondisconnect: () => void
-    /** Called when an Agent has just changed the Page, which records a Version. */
+    /** Called when Turtle announces an Agent, once its change is recorded as a Version. */
     onagent: () => void
   } = $props()
   const id = untrack(() => page.id)
@@ -65,17 +65,11 @@
       if (next === 'disconnected') ondisconnect()
     },
     () => (loaded = true),
+    agentChanged,
   )
 
-  /*
-   * An Agent's change. Turtle sends it as an ordinary update and announces the
-   * Agent right after. An announcement that follows no fresh update is an
-   * Agent that was already there, for someone who just arrived: nothing to mark.
-   */
-  const AGENT_FOLLOWS_UPDATE_MS = 1000
   /** As long as the mark holds and fades in the editor's styles. */
   const AGENT_MARKED_MS = 7_400
-  let lastArrival = 0
   let marks = 0
   /** The Agents whose change is marked now. */
   const working = new SvelteSet<string>()
@@ -83,39 +77,43 @@
   const marked = new Map<string, number>()
   const timers = new Set<ReturnType<typeof setTimeout>>()
 
-  doc.on('update', (_update: Uint8Array, origin: unknown) => {
-    if (origin === connection) lastArrival = Date.now()
-  })
-
-  connection.awareness.on('update', ({ added, updated }: { added: number[]; updated: number[] }, origin: unknown) => {
-    if (origin !== connection || Date.now() - lastArrival > AGENT_FOLLOWS_UPDATE_MS) return
-    for (const client of [...added, ...updated]) {
-      const user = connection.awareness.getStates().get(client)?.user as Present | undefined
-      if (user && 'agent' in user) agentChanged(user.name)
-    }
-  })
-
-  function agentChanged(name: string) {
-    onagent()
-    working.add(name)
-    marked.set(name, (marked.get(name) ?? 0) + 1)
+  /** An Agent's change arrives, naming the Agent: exactly that change is marked with its name. */
+  function agentChanged(agent: ChangingAgent, apply: () => void) {
     const mark = `agent-${++marks}`
     // The editor may still be starting; the change then shows without a mark.
-    const marking = editor && markAgentChange(editor.state, name, mark)
-    if (editor && marking) editor.view.dispatch(marking)
-    const markedIn = editor
+    const markedIn = editor && !editor.isDestroyed ? editor : null
+    markedIn?.view.dispatch(beginAgentChange(markedIn.state, agent.name, mark))
+    try {
+      apply()
+    } finally {
+      if (markedIn && !markedIn.isDestroyed) markedIn.view.dispatch(endAgentChange(markedIn.state))
+    }
+    working.add(agent.name)
+    marked.set(agent.name, (marked.get(agent.name) ?? 0) + 1)
     const timer = setTimeout(() => {
       timers.delete(timer)
       if (markedIn && !markedIn.isDestroyed) markedIn.view.dispatch(unmarkAgentChange(markedIn.state, mark))
-      const left = (marked.get(name) ?? 1) - 1
-      if (left > 0) marked.set(name, left)
+      const left = (marked.get(agent.name) ?? 1) - 1
+      if (left > 0) marked.set(agent.name, left)
       else {
-        marked.delete(name)
-        working.delete(name)
+        marked.delete(agent.name)
+        working.delete(agent.name)
       }
     }, AGENT_MARKED_MS)
     timers.add(timer)
   }
+
+  // Turtle announces an Agent once its change is recorded as a Version, so
+  // that is when the Page reads who last edited it.
+  connection.awareness.on('update', ({ added, updated }: { added: number[]; updated: number[] }, origin: unknown) => {
+    if (origin !== connection) return
+    const states = connection.awareness.getStates()
+    const agentAnnounced = [...added, ...updated].some(client => {
+      const user = states.get(client)?.user as Present | undefined
+      return user !== undefined && 'agent' in user
+    })
+    if (agentAnnounced) onagent()
+  })
 
   onDestroy(() => {
     timers.forEach(clearTimeout)

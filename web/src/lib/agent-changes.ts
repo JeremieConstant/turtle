@@ -1,10 +1,10 @@
 /*
  * Marks the blocks an Agent just changed, with its name, for a moment.
  *
- * Turtle sends an Agent's change as an ordinary update and then announces the
- * Agent's presence; it says nothing about where the change was. So the editor
- * remembers where the last change that arrived over the connection landed,
- * and that is what gets marked when the Agent's announcement follows.
+ * Turtle sends an Agent's change in a frame of its own that names the Agent.
+ * The editor applies it between `beginAgentChange` and `endAgentChange`, and
+ * the change that arrives over the connection in between is marked: exactly
+ * that one, never a person's change that arrives just before or after.
  */
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state'
@@ -15,8 +15,9 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap'
 export type AgentChange = { id: string; name: string; from: number; to: number }
 
 type Range = { from: number; to: number }
-type State = { arrived: Range | null; changes: AgentChange[] }
-type Meta = { add: AgentChange } | { remove: string }
+/** The Agent whose change is being applied right now, if any, and what is marked. */
+type State = { expecting: { id: string; name: string } | null; changes: AgentChange[] }
+type Meta = { begin: { id: string; name: string } } | { end: true } | { remove: string }
 
 const key = new PluginKey<State>('agentChanges')
 
@@ -24,19 +25,29 @@ export function agentChangesPlugin(): Plugin<State> {
   return new Plugin<State>({
     key,
     state: {
-      init: () => ({ arrived: null, changes: [] }),
-      apply(tr, { arrived, changes }) {
-        // Everything keeps to its text as the text around it changes.
-        const map = (range: Range) => ({ from: tr.mapping.map(range.from, 1), to: tr.mapping.map(range.to, -1) })
-        let next = changes.map(change => ({ ...change, ...map(change) }))
-        if (tr.docChanged) {
-          const remote = (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)?.isChangeOrigin
-          arrived = remote ? changedRange(tr) : arrived && map(arrived)
+      init: () => ({ expecting: null, changes: [] }),
+      apply(tr, { expecting, changes }) {
+        // Every mark keeps to its text as the text around it changes.
+        let next = changes.map(change => ({
+          ...change,
+          from: tr.mapping.map(change.from, 1),
+          to: tr.mapping.map(change.to, -1),
+        }))
+        const remote = (tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)?.isChangeOrigin
+        const agent = expecting
+        const range = agent && tr.docChanged && remote ? changedRange(tr) : null
+        if (agent && range) {
+          // One change of an Agent may arrive in more than one step; it stays one mark.
+          const known = next.find(change => change.id === agent.id)
+          next = known
+            ? next.map(c => (c === known ? { ...c, from: Math.min(c.from, range.from), to: Math.max(c.to, range.to) } : c))
+            : [...next, { ...agent, ...range }]
         }
         const meta = tr.getMeta(key) as Meta | undefined
-        if (meta && 'add' in meta) next = [...next, meta.add]
+        if (meta && 'begin' in meta) expecting = meta.begin
+        if (meta && 'end' in meta) expecting = null
         if (meta && 'remove' in meta) next = next.filter(change => change.id !== meta.remove)
-        return { arrived: arrived && arrived.to > arrived.from ? arrived : null, changes: next.filter(c => c.to > c.from) }
+        return { expecting, changes: next.filter(change => change.to > change.from) }
       },
     },
     props: {
@@ -51,14 +62,14 @@ export const AgentChanges = Extension.create({
   addProseMirrorPlugins: () => [agentChangesPlugin()],
 })
 
-/**
- * Marks the change that arrived last as the named Agent's. Returns the
- * transaction that does it, or null when nothing arrived to mark.
- */
-export function markAgentChange(state: EditorState, name: string, id: string): Transaction | null {
-  const arrived = key.getState(state)?.arrived
-  if (!arrived) return null
-  return state.tr.setMeta(key, { add: { id, name, ...arrived } } satisfies Meta).setMeta('addToHistory', false)
+/** Says that the change arriving next over the connection is the named Agent's; `id` names its mark. */
+export function beginAgentChange(state: EditorState, name: string, id: string): Transaction {
+  return state.tr.setMeta(key, { begin: { id, name } } satisfies Meta).setMeta('addToHistory', false)
+}
+
+/** Says that the Agent's change has arrived; what arrives next is nobody's in particular again. */
+export function endAgentChange(state: EditorState): Transaction {
+  return state.tr.setMeta(key, { end: true } satisfies Meta).setMeta('addToHistory', false)
 }
 
 /** Takes the mark off a change again. */

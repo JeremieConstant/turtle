@@ -10,8 +10,12 @@ import {
 const FRAME_UPDATE = 0
 const FRAME_PRESENCE = 1
 const FRAME_PRESENCE_REQUEST = 2
+const FRAME_AGENT_UPDATE = 3
 
 export type Status = 'connecting' | 'connected' | 'disconnected'
+
+/** An Agent as Turtle names it with its change: with the Member it acts for, unless it is a standalone Agent. */
+export type ChangingAgent = { name: string; agent: true; member?: string }
 
 /** Keeps a Yjs document and its presence in sync with the Turtle server. */
 export class Connection {
@@ -30,6 +34,12 @@ export class Connection {
     private readonly onStatus: (status: Status) => void,
     /** Called once, when the content stored on the server has arrived. */
     private readonly onLoaded: () => void,
+    /**
+     * Called with an Agent's change, which arrives naming the Agent. `apply`
+     * puts it into the document, at once; whatever the document changes
+     * while it runs is that Agent's change and nothing else.
+     */
+    private readonly onAgentChange: (agent: ChangingAgent, apply: () => void) => void = (_agent, apply) => apply(),
   ) {
     this.awareness = new Awareness(doc)
 
@@ -75,11 +85,12 @@ export class Connection {
       const data = new Uint8Array(event.data as ArrayBuffer)
       const payload = data.subarray(1)
       if (data[0] === FRAME_UPDATE) {
-        Y.applyUpdate(this.doc, payload, this)
-        if (!this.hasLoaded) {
-          this.hasLoaded = true
-          this.onLoaded()
-        }
+        this.applyUpdate(payload)
+      } else if (data[0] === FRAME_AGENT_UPDATE) {
+        const { agent, update } = readAgentChange(payload)
+        // A change whose Agent cannot be read still counts; it only goes unnamed.
+        if (agent) this.onAgentChange(agent, () => this.applyUpdate(update))
+        else this.applyUpdate(update)
       } else if (data[0] === FRAME_PRESENCE) {
         applyAwarenessUpdate(this.awareness, payload, this)
       } else if (data[0] === FRAME_PRESENCE_REQUEST) {
@@ -96,6 +107,14 @@ export class Connection {
     }
   }
 
+  private applyUpdate(update: Uint8Array) {
+    Y.applyUpdate(this.doc, update, this)
+    if (!this.hasLoaded) {
+      this.hasLoaded = true
+      this.onLoaded()
+    }
+  }
+
   private announce() {
     if (this.awareness.getLocalState() === null) return
     this.send(FRAME_PRESENCE, encodeAwarenessUpdate(this.awareness, [this.doc.clientID]))
@@ -107,5 +126,23 @@ export class Connection {
     frame[0] = kind
     frame.set(payload, 1)
     this.socket.send(frame)
+  }
+}
+
+/** The Agent and the update in the payload of an Agent's change; no Agent if it cannot be read. */
+function readAgentChange(payload: Uint8Array): { agent: ChangingAgent | null; update: Uint8Array } {
+  // The Agent's length comes first, as an unsigned varint like Yjs writes them.
+  let length = 0
+  let at = 0
+  for (let shift = 0; at < payload.length; shift += 7) {
+    const byte = payload[at++]
+    length += (byte & 0x7f) * 2 ** shift
+    if (byte < 0x80) break
+  }
+  const update = payload.subarray(at + length)
+  try {
+    return { agent: JSON.parse(new TextDecoder().decode(payload.subarray(at, at + length))) as ChangingAgent, update }
+  } catch {
+    return { agent: null, update }
   }
 }

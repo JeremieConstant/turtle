@@ -3,7 +3,7 @@ import { EditorState } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { expect, test } from 'vitest'
-import { agentChanges, agentChangesPlugin, markAgentChange, unmarkAgentChange } from './agent-changes'
+import { agentChanges, agentChangesPlugin, beginAgentChange, endAgentChange, unmarkAgentChange } from './agent-changes'
 
 const schema = getSchema([StarterKit])
 const paragraph = (text: string) => schema.node('paragraph', null, [schema.text(text)])
@@ -21,27 +21,41 @@ function arrive(state: EditorState, at: number, text: string) {
   return state.apply(state.tr.insert(at, paragraph(text)).setMeta(ySyncPluginKey, { isChangeOrigin: true }))
 }
 
-test("the change that just arrived is marked with the Agent's name", () => {
-  const state = arrive(page(), 5, 'New')
-  const marked = state.apply(markAgentChange(state, 'Docs Agent', 'a1')!)
-  expect(agentChanges(marked)).toEqual([{ id: 'a1', name: 'Docs Agent', from: 5, to: 10 }])
+/** A change Turtle said is the named Agent's, as the editor applies it. */
+function arriveFromAgent(state: EditorState, name: string, id: string, at: number, text: string) {
+  const expecting = state.apply(beginAgentChange(state, name, id))
+  const changed = arrive(expecting, at, text)
+  return changed.apply(endAgentChange(changed))
+}
+
+test("an Agent's change is marked with the Agent's name", () => {
+  const state = arriveFromAgent(page(), 'Docs Agent', 'a1', 5, 'New')
+  expect(agentChanges(state)).toEqual([{ id: 'a1', name: 'Docs Agent', from: 5, to: 10 }])
 })
 
-test('what was typed here is never taken for an Agent\'s change', () => {
-  const state = page()
-  const typed = state.apply(state.tr.insert(5, paragraph('Mine')))
-  expect(markAgentChange(typed, 'Docs Agent', 'a1')).toBeNull()
+test("a person's change that arrives just before or after an Agent's is not marked", () => {
+  let state = arrive(page(), 0, 'Before')
+  state = arriveFromAgent(state, 'Docs Agent', 'a1', 18, 'New')
+  state = arrive(state, 0, 'After')
+  // "Before" (8) and "After" (7) now precede "One" (5) and "Two" (5): "New" starts at 7 + 8 + 5 + 5.
+  expect(agentChanges(state)).toEqual([{ id: 'a1', name: 'Docs Agent', from: 25, to: 30 }])
+})
+
+test("what is typed here while an Agent's change arrives is not marked", () => {
+  let state = page()
+  state = state.apply(beginAgentChange(state, 'Docs Agent', 'a1'))
+  state = state.apply(state.tr.insert(0, paragraph('Mine')))
+  state = state.apply(endAgentChange(state))
+  expect(agentChanges(state)).toEqual([])
 })
 
 test('the mark stays on the changed text as the text around it changes', () => {
-  const state = arrive(page(), 5, 'New')
-  let marked = state.apply(markAgentChange(state, 'Docs Agent', 'a1')!)
-  marked = marked.apply(marked.tr.insert(0, paragraph('Zero')))
-  expect(agentChanges(marked)).toEqual([{ id: 'a1', name: 'Docs Agent', from: 11, to: 16 }])
+  let state = arriveFromAgent(page(), 'Docs Agent', 'a1', 5, 'New')
+  state = state.apply(state.tr.insert(0, paragraph('Zero')))
+  expect(agentChanges(state)).toEqual([{ id: 'a1', name: 'Docs Agent', from: 11, to: 16 }])
 })
 
 test('the mark goes again after its moment', () => {
-  const state = arrive(page(), 5, 'New')
-  const marked = state.apply(markAgentChange(state, 'Docs Agent', 'a1')!)
-  expect(agentChanges(marked.apply(unmarkAgentChange(marked, 'a1')))).toEqual([])
+  const state = arriveFromAgent(page(), 'Docs Agent', 'a1', 5, 'New')
+  expect(agentChanges(state.apply(unmarkAgentChange(state, 'a1')))).toEqual([])
 })

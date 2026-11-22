@@ -18,6 +18,10 @@ pub const FRAME_UPDATE: u8 = 0;
 pub const FRAME_PRESENCE: u8 = 1;
 /// Sent by the server when someone joins, asking the others to announce themselves.
 pub const FRAME_PRESENCE_REQUEST: u8 = 2;
+/// An Agent's change, sent by the server only: the length of the Agent as
+/// presence shows it (JSON), that JSON, then the update. Editors mark exactly
+/// this change with the Agent's name.
+pub const FRAME_AGENT_UPDATE: u8 = 3;
 
 /// The connection a frame came from when Turtle itself made the change.
 pub const FROM_TURTLE: u64 = 0;
@@ -252,19 +256,26 @@ impl Pages {
             let after = crate::markdown::to_markdown(&crate::ydoc::read(&page.doc));
             (before, state.unrecorded.take(), after, update)
         };
+        // A Member's change is an ordinary update. An Agent's names the Agent;
+        // the change stands even when the Agent cannot be named.
+        let agent = self.agent_shown(by).unwrap_or_else(|error| {
+            eprintln!("naming an Agent on Page {} failed: {error:#}", page.id);
+            None
+        });
         let changed = update.is_some();
         if let Some(update) = update {
-            let _ = page.frames.send((FROM_TURTLE, frame(FRAME_UPDATE, &update)));
+            let sent = match &agent {
+                Some(user) => agent_update_frame(user, &update),
+                None => frame(FRAME_UPDATE, &update),
+            };
+            let _ = page.frames.send((FROM_TURTLE, sent));
         }
-        // Editors take the announcement as their cue to show who changed the
-        // Page, also in its last edit, so it comes once the Version is there.
+        // Editors take the announcement as their cue to show the Agent among
+        // those present and in the Page's last edit, so it comes once the
+        // Version is there.
         let announce = || {
-            if !changed {
-                return;
-            }
-            // Only presence: the change stands even when it cannot be shown.
-            if let Err(error) = self.announce_agent(page, by) {
-                eprintln!("announcing an Agent on Page {} failed: {error:#}", page.id);
+            if let (true, Some(user)) = (changed, &agent) {
+                announce_presence(page, by, user.clone());
             }
         };
         let now = (self.clock)();
@@ -402,31 +413,39 @@ impl Pages {
 }
 
 impl Pages {
-    /// Tells the editors which Agent just changed the Page, as presence
-    /// without a cursor: Agents have none. An Agent acting for a Member is
-    /// named with them. Editors forget it after a while unless the Agent
-    /// writes again, which is what an Agent being there means.
-    fn announce_agent(&self, page: &OpenPage, author: &Author) -> anyhow::Result<()> {
-        let user = {
-            let db = self.db.lock().unwrap();
-            match author {
-                Author::Member(_) => return Ok(()),
-                Author::AgentForMember { member_id, agent } => {
-                    let member: String =
-                        db.query_row("SELECT name FROM members WHERE id = ?1", [member_id], |row| row.get(0))?;
-                    serde_json::json!({ "name": agent, "agent": true, "member": member })
-                }
-                Author::Agent(id) => {
-                    let name: String = db.query_row("SELECT name FROM agents WHERE id = ?1", [id], |row| row.get(0))?;
-                    serde_json::json!({ "name": name, "agent": true })
-                }
+    /// An Agent as editors show it, the same in its changes and its
+    /// presence; none for a Member, whose changes carry no name.
+    fn agent_shown(&self, author: &Author) -> anyhow::Result<Option<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        Ok(match author {
+            Author::Member(_) => None,
+            Author::AgentForMember { member_id, agent } => {
+                let member: String =
+                    db.query_row("SELECT name FROM members WHERE id = ?1", [member_id], |row| row.get(0))?;
+                Some(serde_json::json!({ "name": agent, "agent": true, "member": member }))
             }
-        };
-        announce_presence(page, author, user);
-        Ok(())
+            Author::Agent(id) => {
+                let name: String = db.query_row("SELECT name FROM agents WHERE id = ?1", [id], |row| row.get(0))?;
+                Some(serde_json::json!({ "name": name, "agent": true }))
+            }
+        })
     }
 }
 
+/// A `FRAME_AGENT_UPDATE` frame: the Agent, then its update.
+fn agent_update_frame(agent: &serde_json::Value, update: &[u8]) -> Vec<u8> {
+    let agent = agent.to_string();
+    let mut payload = Vec::with_capacity(agent.len() + update.len() + 4);
+    write_varuint(&mut payload, agent.len() as u64);
+    payload.extend_from_slice(agent.as_bytes());
+    payload.extend_from_slice(update);
+    frame(FRAME_AGENT_UPDATE, &payload)
+}
+
+/// Tells the editors which Agent just changed the Page, as presence without
+/// a cursor: Agents have none. An Agent acting for a Member is named with
+/// them. Editors forget it after a while unless the Agent writes again,
+/// which is what an Agent being there means.
 fn announce_presence(page: &OpenPage, author: &Author, user: serde_json::Value) {
     let client = {
         let mut agents = page.agents.lock().unwrap();
