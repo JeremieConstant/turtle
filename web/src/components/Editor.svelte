@@ -6,6 +6,7 @@
   import type { Awareness } from 'y-protocols/awareness'
   import type * as Y from 'yjs'
   import { AgentChanges } from '../lib/agent-changes'
+  import { Image, type ImageOptions } from '../lib/image'
   import { PageLink } from '../lib/pageLink'
   import { personColor, type Person } from '../lib/person'
 
@@ -14,6 +15,7 @@
     connection,
     person,
     editable = true,
+    attach,
     onready,
   }: {
     doc: Y.Doc
@@ -22,6 +24,8 @@
     person: Person
     /** False for someone who can only read the Page. */
     editable?: boolean
+    /** Attaches a pasted or dropped file to the Page. */
+    attach: ImageOptions['attach']
     /** Called with the editor once it runs. It lives exactly as long as this component. */
     onready: (editor: Editor) => void
   } = $props()
@@ -61,6 +65,7 @@
           }),
         }),
         AgentChanges,
+        Image.configure({ attach }),
         PageLink,
       ],
       editable,
@@ -202,6 +207,18 @@
 
   .editor :global(.tiptap li p) {
     margin: var(--space-list-item) 0;
+  }
+
+  /* An image keeps to the width of the text and never stretches beyond its own. */
+  .editor :global(.tiptap img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-s);
+    vertical-align: bottom;
+  }
+
+  .editor :global(.tiptap img.ProseMirror-selectednode) {
+    outline: var(--line-thick) solid var(--color-focus);
   }
 
   .editor :global(.tiptap hr) {

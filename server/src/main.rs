@@ -75,9 +75,20 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(4100);
 
+    // The largest file that can be attached, in MB.
+    let attachment_limit = match std::env::var("TURTLE_MAX_ATTACHMENT_MB") {
+        Ok(mb) => match mb.trim().parse::<u64>() {
+            Ok(mb) if mb > 0 => mb * 1024 * 1024,
+            _ => anyhow::bail!("TURTLE_MAX_ATTACHMENT_MB must be a whole number of MB above 0, not {mb:?}"),
+        },
+        Err(_) => ops::attachments::DEFAULT_ATTACHMENT_LIMIT,
+    };
+
     // Opening the core brings the schema up to date.
     let db_path = store::database_in(&data_dir)?;
-    let core = Arc::new(ops::Core::open(&db_path)?);
+    let mut core = ops::Core::open(&db_path)?;
+    core.set_attachment_limit(attachment_limit);
+    let core = Arc::new(core);
 
     let app = Arc::new(App {
         core: core.clone(),
@@ -145,6 +156,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/pages/{page}/markdown",
             get(read_markdown).put(write_markdown),
         )
+        .route("/api/attachments/{id}", get(download_attachment))
         .with_state(app.clone())
         .merge(http_api::router(core.clone()))
         .merge(mcp::router(core))
@@ -279,6 +291,45 @@ async fn read_markdown(State(app): State<Arc<App>>, Path(page_id): Path<String>,
         Ok(reply) => ([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], reply.output.markdown).into_response(),
         Err(refused) => refused,
     }
+}
+
+/// The file of an Attachment, as `read_attachment` gives it. Only images
+/// are shown in the browser; every other file is downloaded, and nothing in
+/// it runs as part of Turtle.
+async fn download_attachment(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+    let opened = as_caller(&app.core, headers, move |core, principal| {
+        ops::attachments::open_attachment(core, principal, &id)
+    })
+    .await;
+    let (attachment, content) = match opened {
+        Ok(opened) => opened,
+        Err(refused) => return refused,
+    };
+    let shown = if attachment.shown_as_image { "inline" } else { "attachment" };
+    let disposition = format!("{shown}; filename*=UTF-8''{}", percent_encoded(&attachment.name));
+    (
+        [
+            (header::CONTENT_TYPE, attachment.content_type),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+            (header::CONTENT_SECURITY_POLICY, "sandbox".into()),
+            // Someone who loses access must not find it in a shared cache.
+            (header::CACHE_CONTROL, "private".into()),
+        ],
+        content,
+    )
+        .into_response()
+}
+
+/// A file name as a header may carry it (RFC 8187): every byte but letters,
+/// digits and `-._~` as %XX.
+fn percent_encoded(name: &str) -> String {
+    name.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (byte as char).to_string(),
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
 }
 
 /// Makes the Page say what the given Markdown says, as `replace_page` does.

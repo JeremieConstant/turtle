@@ -81,6 +81,7 @@ fn read_blocks<T: ReadTxn>(txn: &T, nodes: impl Iterator<Item = XmlOut>) -> Vec<
                     .map(|inline| match inline {
                         Inline::Text { text, .. } => text,
                         Inline::HardBreak => "\n".to_string(),
+                        Inline::Image { .. } => String::new(),
                         Inline::PageLink { .. } => String::new(),
                     })
                     .collect(),
@@ -116,6 +117,7 @@ fn read_inlines<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Inline> {
             XmlOut::Element(child) if child.tag().as_ref() == "hardBreak" => {
                 inlines.push(Inline::HardBreak)
             }
+            XmlOut::Element(child) if child.tag().as_ref() == "image" => inlines.push(read_image(txn, &child)),
             XmlOut::Element(child) if child.tag().as_ref() == PAGE_LINK => {
                 if let Some(page_id) = string_attribute(txn, &child, PAGE_ID) {
                     inlines.push(Inline::PageLink { page_id });
@@ -125,6 +127,15 @@ fn read_inlines<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Inline> {
         }
     }
     inlines
+}
+
+/// An image as the editor stores it: an `image` element with its address and
+/// alternative text as attributes.
+fn read_image<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Inline {
+    Inline::Image {
+        src: string_attribute(txn, element, "src").unwrap_or_default(),
+        alt: string_attribute(txn, element, "alt").unwrap_or_default(),
+    }
 }
 
 fn read_text<T: ReadTxn>(txn: &T, text: &XmlTextRef) -> Vec<Inline> {
@@ -268,6 +279,7 @@ fn plain_text(blocks: &[Block]) -> Vec<char> {
                         match inline {
                             Inline::Text { text, .. } => out.extend(text.chars()),
                             Inline::HardBreak => out.push('\n'),
+                            Inline::Image { alt, .. } => out.extend(alt.chars()),
                             Inline::PageLink { page_id } => out.extend(page_id.chars()),
                         }
                     }
@@ -394,6 +406,7 @@ type Run<'a> = Vec<(&'a str, &'a Marks)>;
 enum Part<'a> {
     Run(Run<'a>),
     Break,
+    Image { src: &'a str, alt: &'a str },
     PageLink(&'a str),
 }
 
@@ -402,6 +415,7 @@ fn parts(inlines: &[Inline]) -> Vec<Part<'_>> {
     for inline in inlines {
         match (inline, parts.last_mut()) {
             (Inline::HardBreak, _) => parts.push(Part::Break),
+            (Inline::Image { src, alt }, _) => parts.push(Part::Image { src, alt }),
             (Inline::PageLink { page_id }, _) => parts.push(Part::PageLink(page_id)),
             (Inline::Text { text, marks }, Some(Part::Run(run))) => run.push((text, marks)),
             (Inline::Text { text, marks }, _) => parts.push(Part::Run(vec![(text, marks)])),
@@ -415,6 +429,8 @@ enum Child {
     /// than text and cannot be changed in place.
     Text(XmlTextRef, Option<Vec<char>>),
     Break,
+    /// Always an `Inline::Image`.
+    Image(Inline),
     /// A Page link, by the ID of its Page; without one it is not a Page link
     /// anyone can follow, and is removed like any other unwanted child.
     PageLink(Option<String>),
@@ -430,7 +446,7 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
         .iter()
         .map(|part| match part {
             Part::Run(run) => run.iter().flat_map(|(text, _)| text.chars()).collect(),
-            Part::Break | Part::PageLink(_) => Vec::new(),
+            Part::Break | Part::Image { .. } | Part::PageLink(_) => Vec::new(),
         })
         .collect();
     let children: Vec<Child> = element
@@ -442,6 +458,7 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                 Child::Text(text, said)
             }
             XmlOut::Element(child) if child.tag().as_ref() == "hardBreak" => Child::Break,
+            XmlOut::Element(child) if child.tag().as_ref() == "image" => Child::Image(read_image(txn, &child)),
             XmlOut::Element(child) if child.tag().as_ref() == PAGE_LINK => {
                 Child::PageLink(string_attribute(txn, &child, PAGE_ID))
             }
@@ -457,6 +474,11 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                 Fit::Similar(1 + common_edges(said, &new_text[j]) as u32)
             }
             (Child::Break, Part::Break) => Fit::Same(1),
+            (Child::Image(Inline::Image { src, alt }), Part::Image { src: wanted_src, alt: wanted_alt })
+                if src == wanted_src && alt == wanted_alt =>
+            {
+                Fit::Same(1)
+            }
             (Child::PageLink(Some(has)), Part::PageLink(wanted)) if has == wanted => Fit::Same(1),
             _ => Fit::No,
         },
@@ -483,6 +505,11 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                     }
                     Part::Break => {
                         element.insert(txn, at, XmlElementPrelim::empty("hardBreak"));
+                    }
+                    Part::Image { src, alt } => {
+                        let image = element.insert(txn, at, XmlElementPrelim::empty("image"));
+                        image.insert_attribute(txn, "src", Any::from(*src));
+                        image.insert_attribute(txn, "alt", Any::from(*alt));
                     }
                     Part::PageLink(page_id) => {
                         let link = element.insert(txn, at, XmlElementPrelim::empty(PAGE_LINK));
@@ -731,6 +758,33 @@ mod tests {
         write(&doc, &blocks);
         assert_eq!(read(&doc), blocks);
         assert_eq!(to_markdown(&read(&doc)), to_markdown(&blocks));
+    }
+
+    #[test]
+    fn an_image_is_the_editors_image_node() {
+        // The editor stores an image as an `image` element in the paragraph,
+        // with its address and alternative text as attributes.
+        let doc = Doc::new();
+        {
+            let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+            let mut txn = doc.transact_mut();
+            let paragraph = fragment.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+            paragraph.push_back(&mut txn, XmlTextPrelim::new("Logo: "));
+            let image = paragraph.push_back(&mut txn, XmlElementPrelim::empty("image"));
+            image.insert_attribute(&mut txn, "src", Any::from("/api/attachments/a1"));
+            image.insert_attribute(&mut txn, "alt", Any::from("logo.png"));
+        }
+        assert_eq!(to_markdown(&read(&doc)), "Logo: ![logo.png](</api/attachments/a1>)\n");
+
+        let written = Doc::new();
+        write(&written, &read(&doc));
+        let fragment = written.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = written.transact();
+        let Some(XmlOut::Element(paragraph)) = fragment.get(&txn, 0) else { panic!("a paragraph") };
+        let Some(XmlOut::Element(image)) = paragraph.get(&txn, 1) else { panic!("an image") };
+        assert_eq!(image.tag().as_ref(), "image");
+        assert_eq!(string_attribute(&txn, &image, "src").as_deref(), Some("/api/attachments/a1"));
+        assert_eq!(string_attribute(&txn, &image, "alt").as_deref(), Some("logo.png"));
     }
 
     #[test]

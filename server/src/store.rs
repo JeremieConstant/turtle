@@ -227,6 +227,18 @@ const MIGRATIONS: &[&str] = &[
          agent_id TEXT REFERENCES agents (id) ON DELETE SET NULL,
          agent TEXT NOT NULL DEFAULT ''
      );",
+    // The file itself is in the data directory under its content hash, which
+    // several Attachments share when they hold the same file.
+    "CREATE TABLE attachments (
+         id TEXT PRIMARY KEY,
+         page_id TEXT NOT NULL REFERENCES nodes (id) ON DELETE CASCADE,
+         name TEXT NOT NULL,
+         size INTEGER NOT NULL,
+         content_type TEXT NOT NULL,
+         content_hash TEXT NOT NULL,
+         attached_at INTEGER NOT NULL
+     );
+     CREATE INDEX attachments_by_page ON attachments (page_id, attached_at);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

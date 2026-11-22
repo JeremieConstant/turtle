@@ -9,15 +9,19 @@
   import { onDestroy, untrack } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import * as Y from 'yjs'
+  import { attach } from '../lib/attachments'
   import { beginAgentChange, endAgentChange, unmarkAgentChange } from '../lib/agent-changes'
   import { Connection, type ChangingAgent, type Status } from '../lib/connection'
-  import type { Page } from '../lib/operations.gen'
+  import { call } from '../lib/ops'
+  import type { Attachment, Page } from '../lib/operations.gen'
   import { currentPerson, type Present } from '../lib/person'
   import { router } from '../lib/router.svelte'
   import { areaAddress, pageAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
   import { exactTime, relativeTime } from '../lib/time'
+  import { reportFailure } from '../lib/toasts'
   import { authorName } from '../lib/versions'
+  import Attachments from './Attachments.svelte'
   import ConnectionStatus from './ConnectionStatus.svelte'
   import Editor from './Editor.svelte'
   import MarkdownView from './MarkdownView.svelte'
@@ -54,6 +58,27 @@
    * or by anyone else, so an answer arriving late never shows older Tags.
    */
   let tags = $state<string[]>(untrack(() => page.tags))
+
+  let attachments = $state<Attachment[]>([])
+
+  function loadAttachments() {
+    call('list_attachments', { id })
+      .then(listed => (attachments = listed.attachments))
+      .catch(caught => reportFailure(caught, 'The Attachments of this Page could not be loaded.'))
+  }
+  loadAttachments()
+
+  /** Attaches a file, reporting a failure, and lists it with the others. */
+  async function attachFile(file: File) {
+    try {
+      const attached = await attach(id, file)
+      attachments = [...attachments, attached]
+      return attached
+    } catch (caught) {
+      reportFailure(caught, `${file.name || 'The file'} could not be attached. Try again.`)
+      return null
+    }
+  }
 
   // Relative times ("4 minutes ago") move on while the Page is open.
   let now = $state(Math.floor(Date.now() / 1000))
@@ -205,8 +230,10 @@
       <!-- The editor starts only once the stored content is here, so it never
            writes into an empty Page that is about to be filled. -->
       {#if loaded}
-        <Editor {doc} {connection} {person} {editable} onready={started => (editor = started)} />
+        <Editor {doc} {connection} {person} {editable} attach={attachFile} onready={started => (editor = started)} />
       {/if}
+
+      <Attachments {attachments} writable={editable} onattach={files => files.forEach(file => void attachFile(file))} />
     </div>
 
     {#if markdownShown}

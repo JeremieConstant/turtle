@@ -37,13 +37,14 @@ struct Mcp {
 }
 
 pub fn router(core: Arc<Core>) -> Router {
+    let limit = crate::http_api::input_limit(&core);
     let mcp = Arc::new(Mcp {
         core,
         catalogue: ops::catalogue(),
     });
     // GET would open an event stream and DELETE would end a session; this
     // endpoint has neither, so both are answered with 405.
-    Router::new().route("/mcp", post(receive)).with_state(mcp)
+    Router::new().route("/mcp", post(receive)).layer(limit).with_state(mcp)
 }
 
 async fn receive(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: String) -> Response {

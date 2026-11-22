@@ -36,8 +36,9 @@ Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you t
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `TURTLE_DATA` | `turtle-data` in the directory Turtle is started from | The data directory. It is created on the first start and holds the database, `turtle.db`. |
+| `TURTLE_DATA` | `turtle-data` in the directory Turtle is started from | The data directory. It is created on the first start and holds the database, `turtle.db`, and the Attachments, each under the hash of its content in `attachments/`. |
 | `TURTLE_PORT` | `4100` | The port Turtle listens on. |
+| `TURTLE_MAX_ATTACHMENT_MB` | `25` | The largest file, in MB, that can be attached to a Page. |
 | `TURTLE_LOG_SAVES` | unset | When set, Turtle prints a line for each save of changed Pages and how long it took, to see whether saving keeps up. |
 
 Settings are environment variables:
