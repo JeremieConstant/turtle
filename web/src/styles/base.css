@@ -1,5 +1,5 @@
-/* Defaults for the browser's own elements and the few shared classes.
-   Everything else is scoped to its component. */
+/* Defaults for the browser's own elements and the shared classes that
+   components are built from. Anything only one component shows is scoped to it. */
 *,
 *::before,
 *::after {
@@ -48,8 +48,8 @@ a {
 }
 
 /*
- * Buttons and fields that carry no class of their own, as on the screens
- * that are not yet in the new look, get the quiet look of .btn. :where()
+ * Buttons and fields that carry no class of their own, as on the Area and
+ * Page screens until they are in the new look, get the quiet look of .btn. :where()
  * keeps this weaker than any component's own style.
  */
 :where(button) {
@@ -186,6 +186,320 @@ dialog::backdrop {
 .menu-item:focus-visible {
   background: var(--color-hover);
   outline: none;
+}
+
+/*
+ * The shared look of the settings screens (Members, Agents, Tokens), the
+ * Grants of an Area and the screens outside the shell. These screens keep no
+ * styles of their own.
+ */
+
+/* One column with a large title, as on the prototype's screens. */
+.screen {
+  max-width: calc(var(--width-text) + 2 * var(--space-6));
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-6) var(--space-16);
+}
+
+.screen > h1 {
+  margin: 0;
+  font-size: var(--text-h1);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-display);
+  line-height: var(--leading-tight);
+}
+
+@media (max-width: 800px) {
+  .screen {
+    padding: var(--space-8) var(--space-4) var(--space-12);
+  }
+}
+
+/* The line under a title that says what the screen is for. */
+.lede {
+  margin: var(--space-2) 0 var(--space-8);
+  color: var(--color-muted);
+  font-size: var(--text-m);
+}
+
+.lede code {
+  overflow-wrap: anywhere;
+}
+
+/* A part of a screen under a small heading. */
+.section {
+  margin-top: var(--space-8);
+}
+
+.section-title {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-s);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-small);
+  text-transform: uppercase;
+}
+
+.muted {
+  color: var(--color-muted);
+  font-size: var(--text-m);
+}
+
+/* Small grey text under a field or a name. */
+.hint {
+  color: var(--color-muted);
+  font-size: var(--text-s);
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+/* Things laid out top to bottom, buttons at their own width. */
+.stack {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+
+.stack > :not(button) {
+  justify-self: stretch;
+}
+
+.stack > p,
+.stack > h2 {
+  margin: 0;
+}
+
+/* Controls side by side, the .grow one taking the room that is left. */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.controls > .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A labelled field: the label above, a hint below. */
+.field {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-s);
+  font-weight: var(--weight-medium);
+}
+
+.field > .hint {
+  font-weight: var(--weight-normal);
+}
+
+.input {
+  height: var(--height-control);
+  padding: 0 var(--space-3);
+  border: var(--line) solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface);
+  font-size: var(--text-m);
+  font-weight: var(--weight-normal);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 var(--ring) var(--color-focus-soft);
+}
+
+.input:disabled {
+  opacity: var(--opacity-disabled);
+}
+
+/* A checkbox with its words beside it. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-m);
+}
+
+.choices {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-m);
+}
+
+.choices > legend {
+  padding: 0 var(--space-1);
+  font-size: var(--text-s);
+  font-weight: var(--weight-medium);
+}
+
+/* Something new to copy and pass on, set off from what is around it. */
+.notice {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-l);
+  background: var(--color-side);
+  font-size: var(--text-m);
+}
+
+.notice > p {
+  margin: 0;
+}
+
+.notice code {
+  overflow-wrap: anywhere;
+}
+
+/* A list of Members, Agents, Tokens or Grants: one row each, with its actions at the end. */
+/* :where() lets .section give a list the space above it. */
+:where(.list) {
+  margin: 0;
+}
+
+.list {
+  padding: 0;
+  border-top: var(--line) solid var(--color-line);
+  list-style: none;
+}
+
+.list > li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: var(--line) solid var(--color-line);
+}
+
+.list > li > form {
+  flex: 1;
+}
+
+.item {
+  display: grid;
+  gap: var(--space-half);
+  min-width: 0;
+}
+
+.item-name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.inactive .item-name {
+  color: var(--color-muted);
+}
+
+/* What opens under a row, such as an Agent's Tokens. */
+.list .detail {
+  flex-basis: 100%;
+  padding: var(--space-4);
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-l);
+}
+
+/* Controls at both ends of a line, such as a heading and its button. */
+.controls.spread {
+  justify-content: space-between;
+}
+
+/*
+ * A list to pick one from, such as the Versions of a Page. Its rows are
+ * quiet like the sidebar's and the open one is marked.
+ */
+.picker {
+  display: grid;
+  gap: var(--space-half);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picker-row {
+  display: grid;
+  gap: var(--space-half);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-m);
+  background: none;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.picker-row:hover {
+  background: var(--color-hover);
+}
+
+.picker-row[aria-pressed='true'] {
+  background: var(--color-selected);
+}
+
+/* Text shown as written, such as a Version's Markdown or a comparison. */
+.code-block {
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-m);
+  background: var(--color-side);
+  font: var(--text-s) / var(--leading-code) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-block .added {
+  color: var(--color-focus);
+}
+
+.code-block .removed {
+  color: var(--color-danger);
+  text-decoration: line-through;
+}
+
+/* The screens outside the shell: setup, signing in, an invitation and a password reset. */
+.standalone {
+  display: grid;
+  place-items: center;
+  min-height: var(--height-screen);
+  padding: var(--space-6) var(--space-4);
+  background: var(--color-side);
+}
+
+.standalone-card {
+  display: grid;
+  gap: var(--space-6);
+  width: min(var(--width-form), 100%);
+  padding: var(--space-8);
+  border: var(--line) solid var(--color-line);
+  border-radius: var(--radius-l);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+}
+
+.standalone-card h1 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-h2);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-heading);
+  line-height: var(--leading-tight);
+}
+
+.wordmark {
+  font-size: var(--text-m);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-heading);
 }
 
 .visually-hidden {

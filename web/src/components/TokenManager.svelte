@@ -103,11 +103,17 @@
 {#if loadFailed}
   <p class="muted">The Tokens could not be loaded. Reload the page to try again.</p>
 {:else if tokens !== null}
-  <form onsubmit={create}>
-    <h2>New Token</h2>
+  <form class="stack" onsubmit={create}>
+    <h2 class="section-title">New Token</h2>
     <label class="field">
       <span>Name</span>
-      <input required autocomplete="off" placeholder={agent_id ? 'Where it is used, e.g. CI pipeline' : 'What the Agent is, e.g. Claude on my laptop'} bind:value={name} />
+      <input
+        class="input"
+        required
+        autocomplete="off"
+        placeholder={agent_id ? 'Where it is used, e.g. CI pipeline' : 'What the Agent is, e.g. Claude on my laptop'}
+        bind:value={name}
+      />
     </label>
     <label class="check">
       <input type="checkbox" bind:checked={readOnly} />
@@ -118,7 +124,7 @@
       Only chosen Areas
     </label>
     {#if limitAreas}
-      <fieldset>
+      <fieldset class="choices">
         <legend>Areas the Agent can reach</legend>
         {#each areas as area (area.id)}
           <label class="check">
@@ -130,151 +136,44 @@
     {/if}
     <label class="field">
       <span>Last day it works</span>
-      <input type="date" min={today} bind:value={lastDay} />
-      <small class="muted">Leave empty for a Token that does not expire.</small>
+      <input class="input" type="date" min={today} bind:value={lastDay} />
+      <small class="hint">Leave empty for a Token that does not expire.</small>
     </label>
-    <button type="submit" disabled={busy || (limitAreas && chosenAreas.length === 0)}>Create Token</button>
+    <button type="submit" class="btn primary" disabled={busy || (limitAreas && chosenAreas.length === 0)}>Create Token</button>
   </form>
 
   {#if created}
-    <section class="created" aria-live="polite">
+    <section class="section notice" aria-live="polite">
       <strong>{created.token.name}</strong>
       <p>Copy this Token now. Turtle shows it only once.</p>
-      <div class="row">
-        <input readonly aria-label="The new Token" value={created.value} onfocus={event => event.currentTarget.select()} />
-        <button type="button" onclick={() => copy(created!.value)}>{copied ? 'Copied' : 'Copy'}</button>
+      <div class="controls">
+        <input class="input grow" readonly aria-label="The new Token" value={created.value} onfocus={event => event.currentTarget.select()} />
+        <button type="button" class="btn" onclick={() => copy(created!.value)}>{copied ? 'Copied' : 'Copy'}</button>
       </div>
-      <small class="muted">The Agent sends it as <code>Authorization: Bearer …</code></small>
+      <small class="hint">The Agent sends it as <code>Authorization: Bearer …</code></small>
     </section>
   {/if}
 
   {#if error}
-    <p class="error" role="alert">{error}</p>
+    <p class="error section" role="alert">{error}</p>
   {/if}
 
   {#if tokens.length === 0}
-    <p class="muted">{agent_id ? 'This Agent has' : 'You have'} no Tokens yet.</p>
+    <p class="muted section">{agent_id ? 'This Agent has' : 'You have'} no Tokens yet.</p>
   {:else}
-    <ul>
+    <ul class="list section">
       {#each tokens as token (token.id)}
         <li>
-          <div>
-            <span>{token.name}</span>
-            <small class="muted">{limits(token)}</small>
-            <small class="muted">
+          <div class="item">
+            <span class="item-name">{token.name}</span>
+            <small class="hint">{limits(token)}</small>
+            <small class="hint">
               {token.last_used_at ? `Last used ${when(token.last_used_at)}` : 'Never used'} · Created {when(token.created_at)}
             </small>
           </div>
-          <button type="button" disabled={busy} onclick={() => revoke(token)}>Revoke</button>
+          <button type="button" class="btn" disabled={busy} onclick={() => revoke(token)}>Revoke</button>
         </li>
       {/each}
     </ul>
   {/if}
 {/if}
-
-<style>
-  h2 {
-    margin-bottom: 0;
-    font-size: var(--text-base);
-    line-height: var(--leading-tight);
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .field span,
-  legend {
-    font-size: var(--text-m);
-    font-weight: var(--weight-strong);
-  }
-
-  .check {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  fieldset {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    margin: 0;
-    padding: var(--space-2) var(--space-3);
-    border: var(--line) solid var(--color-line);
-    border-radius: var(--radius-m);
-  }
-
-  form button {
-    align-self: flex-start;
-  }
-
-  .row {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  .row input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .created {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    margin-top: var(--space-4);
-    padding: var(--space-3);
-    border: var(--line) solid var(--color-focus);
-    border-radius: var(--radius-m);
-  }
-
-  .created p {
-    margin: 0;
-  }
-
-  code {
-    overflow-wrap: anywhere;
-  }
-
-  ul {
-    padding: 0;
-    list-style: none;
-  }
-
-  li {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) 0;
-    border-bottom: var(--line) solid var(--color-line);
-  }
-
-  li > div {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .muted {
-    color: var(--color-muted);
-    font-size: var(--text-m);
-  }
-
-  small.muted {
-    font-size: var(--text-s);
-  }
-
-  .error {
-    color: var(--color-danger);
-  }
-</style>

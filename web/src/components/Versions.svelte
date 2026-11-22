@@ -77,38 +77,38 @@
     new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 </script>
 
-<aside>
-  <div class="heading">
-    <h2>Versions</h2>
-    <button type="button" onclick={() => void load()}>Refresh</button>
+<aside class="stack">
+  <div class="controls spread">
+    <h2 class="section-title">Versions</h2>
+    <button type="button" class="btn" onclick={() => void load()}>Refresh</button>
   </div>
   {#if problem}
-    <p class="problem" role="alert">{problem}</p>
+    <p class="error" role="alert">{problem}</p>
   {/if}
   {#if versions === null}
     <!-- Loading. -->
   {:else if versions.length === 0}
-    <p class="muted">No Versions yet. One is recorded when the last editor leaves, every two minutes while editing goes on, and for each change an Agent makes.</p>
+    <p class="hint">No Versions yet. One is recorded when the last editor leaves, every two minutes while editing goes on, and for each change an Agent makes.</p>
   {:else}
-    <ol>
+    <ol class="picker">
       {#each versions as listed (listed.number)}
         <li>
           <button
             type="button"
-            class="entry"
+            class="picker-row"
             aria-pressed={selected === listed.number}
             onclick={() => select(listed.number)}
           >
-            <span class="title">{versionTitle(listed)}</span>
-            <span class="muted">{when(listed.recorded_at)} · {authorNames(listed.authors)}</span>
+            <span class="item-name">{versionTitle(listed)}</span>
+            <span class="hint">{when(listed.recorded_at)} · {authorNames(listed.authors)}</span>
           </button>
           {#if selected === listed.number}
-            <div class="detail">
-              <div class="actions">
+            <div class="stack">
+              <div class="controls">
                 {#if versions.length > 1}
-                  <label>
+                  <label class="controls hint">
                     Compare with
-                    <select bind:value={comparedWith}>
+                    <select class="input" bind:value={comparedWith}>
                       <option value={null}>Nothing, show the content</option>
                       {#each versions.filter(other => other.number !== listed.number) as other (other.number)}
                         <option value={other.number}>Version {other.number}</option>
@@ -117,15 +117,15 @@
                   </label>
                 {/if}
                 {#if editable}
-                  <button type="button" disabled={restoring} onclick={() => void restore(listed.number)}>Restore</button>
+                  <button type="button" class="btn" disabled={restoring} onclick={() => void restore(listed.number)}>Restore</button>
                 {/if}
               </div>
               {#if comparison}
-                <pre>{#each comparison.lines as line}<span class={line.change}
+                <pre class="code-block">{#each comparison.lines as line}<span class={line.change}
                       >{line.change === 'added' ? '+ ' : line.change === 'removed' ? '− ' : '  '}{line.text}
 </span>{/each}</pre>
               {:else if version}
-                <pre>{version.markdown}</pre>
+                <pre class="code-block">{version.markdown}</pre>
               {/if}
             </div>
           {/if}
@@ -135,99 +135,3 @@
   {/if}
 </aside>
 
-<style>
-  .heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--space-2);
-  }
-
-  h2 {
-    margin: 0;
-    color: var(--color-muted);
-    font-size: var(--text-s);
-    font-weight: var(--weight-strong);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-small);
-  }
-
-  ol {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .entry {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    width: 100%;
-    padding: var(--space-2) var(--space-3);
-    border: var(--line) solid var(--color-line);
-    border-radius: var(--radius-l);
-    background: var(--color-surface);
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .entry[aria-pressed='true'] {
-    border-color: var(--color-focus);
-  }
-
-  .title {
-    font-weight: var(--weight-strong);
-  }
-
-  .muted {
-    color: var(--color-muted);
-    font-size: var(--text-s);
-  }
-
-  .problem {
-    color: var(--color-danger);
-  }
-
-  .detail {
-    margin-top: var(--space-2);
-  }
-
-  label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: var(--text-s);
-  }
-
-  .actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    margin-bottom: var(--space-2);
-  }
-
-  pre {
-    margin: 0;
-    padding: var(--space-3);
-    border: var(--line) solid var(--color-line);
-    border-radius: var(--radius-l);
-    background: var(--color-surface);
-    font: var(--text-s) / var(--leading-code) var(--font-mono);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .added {
-    color: var(--color-focus);
-  }
-
-  .removed {
-    color: var(--color-danger);
-    text-decoration: line-through;
-  }
-</style>
