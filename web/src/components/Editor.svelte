@@ -7,6 +7,7 @@
   import type * as Y from 'yjs'
   import { AgentChanges } from '../lib/agent-changes'
   import { Image, type ImageOptions } from '../lib/image'
+  import { PageLink } from '../lib/pageLink'
   import { personColor, type Person } from '../lib/person'
 
   const {
@@ -65,6 +66,7 @@
         }),
         AgentChanges,
         Image.configure({ attach }),
+        PageLink,
       ],
       editable,
       autofocus: editable,
@@ -134,6 +136,39 @@
 
   .editor :global(.tiptap a:hover) {
     text-decoration-color: var(--color-text);
+  }
+
+  /* A Page link reads as a link, with a small page in front of its title. */
+  .editor :global(.tiptap .page-link) {
+    cursor: pointer;
+  }
+
+  .editor :global(.tiptap .page-link::before) {
+    content: '';
+    display: inline-block;
+    width: var(--size-page-link-icon);
+    height: var(--size-page-link-icon);
+    margin-right: var(--space-hair);
+    vertical-align: var(--offset-page-link-icon);
+    background: var(--color-muted);
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linejoin='round'%3E%3Cpath d='M4 2.5h5l3 3v8H4zM9 2.5v3h3'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+
+  .editor :global(.tiptap .page-link.loading) {
+    color: var(--color-muted);
+  }
+
+  /* One the reader may not follow: no title, no underline, nothing to click. */
+  .editor :global(.tiptap .page-link.unavailable) {
+    color: var(--color-muted);
+    font-style: italic;
+    text-decoration: none;
+    cursor: default;
+  }
+
+  .editor :global(.tiptap .page-link.ProseMirror-selectednode) {
+    border-radius: var(--radius-s);
+    background: var(--color-selected);
   }
 
   .editor :global(.tiptap code) {

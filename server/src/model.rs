@@ -20,6 +20,20 @@ pub enum Inline {
     /// An image, shown where it stands in the text. Formatting does not
     /// apply to it.
     Image { src: String, alt: String },
+    /// A link to another Page by its ID. It holds no text: it is shown with
+    /// the Page's current title, so renaming or moving the Page never breaks
+    /// it, and with nothing to someone who may not read the Page.
+    PageLink { page_id: String },
+}
+
+/// How a Page link is written as a link address: `turtle:` and the Page's ID.
+pub const PAGE_ADDRESS_SCHEME: &str = "turtle:";
+
+/// The ID of the Page a link address points at, when it is a Page link.
+pub fn page_id_of(address: &str) -> Option<&str> {
+    let id = address.strip_prefix(PAGE_ADDRESS_SCHEME)?;
+    let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    valid.then_some(id)
 }
 
 // The variants are named as Markdown and the editor name them, so a code
@@ -85,6 +99,9 @@ fn normalize_block(block: Block) -> Option<Block> {
 
 fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
     let mut out: Vec<Inline> = Vec::new();
+    // The Page that the text just before links to, so one link stays one
+    // Page link where its formatting changes partway.
+    let mut linked_page: Option<String> = None;
     for inline in inlines {
         let inline = match inline {
             Inline::HardBreak if in_heading => Inline::Text {
@@ -94,11 +111,21 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
             other => other,
         };
         match inline {
-            Inline::HardBreak => out.push(Inline::HardBreak),
-            Inline::Image { src, alt } => out.push(Inline::Image {
-                src: src.replace(['\n', '\r'], ""),
-                alt: alt.replace(['\n', '\r'], " "),
-            }),
+            Inline::HardBreak => {
+                linked_page = None;
+                out.push(Inline::HardBreak)
+            }
+            Inline::PageLink { page_id } => {
+                linked_page = None;
+                out.push(Inline::PageLink { page_id })
+            }
+            Inline::Image { src, alt } => {
+                linked_page = None;
+                out.push(Inline::Image {
+                    src: src.replace(['\n', '\r'], ""),
+                    alt: alt.replace(['\n', '\r'], " "),
+                })
+            }
             Inline::Text { text, mut marks } => {
                 let text = text.replace(['\n', '\r'], " ");
                 if text.is_empty() {
@@ -110,6 +137,16 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
                         ..Marks::default()
                     };
                 }
+                // Text linked to a Page is that Page link, however it is
+                // formatted; its words give way to the Page's title.
+                if let Some(page_id) = marks.link.as_deref().and_then(page_id_of) {
+                    if linked_page.as_deref() != Some(page_id) {
+                        out.push(Inline::PageLink { page_id: page_id.to_string() });
+                        linked_page = Some(page_id.to_string());
+                    }
+                    continue;
+                }
+                linked_page = None;
                 match out.last_mut() {
                     Some(Inline::Text {
                         text: prev,
@@ -129,6 +166,33 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
     out
 }
 
+/// The IDs of the Pages the content links to, each once, in order.
+pub fn linked_pages(blocks: &[Block]) -> Vec<String> {
+    fn collect(blocks: &[Block], out: &mut Vec<String>) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(content) | Block::Heading { content, .. } => {
+                    for inline in content {
+                        if let Inline::PageLink { page_id } = inline {
+                            if !out.contains(page_id) {
+                                out.push(page_id.clone());
+                            }
+                        }
+                    }
+                }
+                Block::Blockquote(children) => collect(children, out),
+                Block::BulletList(items) | Block::OrderedList { items, .. } => {
+                    items.iter().for_each(|item| collect(item, out))
+                }
+                Block::CodeBlock { .. } | Block::HorizontalRule => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    collect(blocks, &mut out);
+    out
+}
+
 /// The words of the content without any formatting, one line per paragraph,
 /// heading, list item or line of code. Search indexes this.
 pub fn plain_text(blocks: &[Block]) -> String {
@@ -138,6 +202,8 @@ pub fn plain_text(blocks: &[Block]) -> String {
                 Inline::Text { text, .. } => out.push_str(text),
                 Inline::HardBreak => out.push('\n'),
                 Inline::Image { alt, .. } => out.push_str(alt),
+                // The linked Page's title is not this Page's to give away.
+                Inline::PageLink { .. } => out.push(' '),
             }
         }
         out.push('\n');

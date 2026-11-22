@@ -163,15 +163,19 @@ fn summaries(db: &Connection, page_id: &str, limit: Option<u32>) -> rusqlite::Re
 
 pub fn get_version(core: &Core, principal: &Principal, input: VersionOfPage) -> OpResult<Version> {
     readable_page(core, principal, &input.page_id)?;
-    Ok(version(&core.db(), &input.page_id, input.number)?.into())
+    let mut found = version(&core.db(), &input.page_id, input.number)?;
+    found.markdown = super::links::stored_markdown_for(core, principal, &found.markdown)?;
+    Ok(found.into())
 }
 
 pub fn compare_versions(core: &Core, principal: &Principal, input: TwoVersions) -> OpResult<Comparison> {
     readable_page(core, principal, &input.page_id)?;
-    let db = core.db();
-    let from = version(&db, &input.page_id, input.from)?;
-    let to = version(&db, &input.page_id, input.to)?;
-    let lines = compare_lines(&from.markdown, &to.markdown);
+    let (from, to) = {
+        let db = core.db();
+        (version(&db, &input.page_id, input.from)?, version(&db, &input.page_id, input.to)?)
+    };
+    let titled = |markdown: &str| super::links::stored_markdown_for(core, principal, markdown);
+    let lines = compare_lines(&titled(&from.markdown)?, &titled(&to.markdown)?);
     Ok(Comparison { from: from.summary, to: to.summary, lines }.into())
 }
 

@@ -221,6 +221,16 @@ export type PageTags = {
   tags: string[]
 }
 
+export type PageTitle = {
+  id: string
+  title: string
+}
+
+export type PageTitles = {
+  /** The Pages the caller can read, in the order they were asked for, each once. */
+  pages: PageTitle[]
+}
+
 export type PathEntry = {
   /** Its ID; a Page opens by it with `get_page`. */
   id: string
@@ -797,14 +807,14 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
     }
     output: Restored
   }
-  /** Gets the content of a Page as Markdown. Needs the Read Role. */
+  /** Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. Needs the Read Role. */
   get_page_markdown: {
     input: {
       page_id: string
     }
     output: PageMarkdown
   }
-  /** Makes the content of a Page say what the given Markdown says. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
+  /** Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
   replace_page: {
     input: {
       markdown: string
@@ -815,7 +825,9 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
   /** Replaces one Section of a Page with the given Markdown. A Section is a heading and everything up to the next heading of the same or a higher level, so its subsections go with it; the Markdown replaces the heading too, so start it with the heading to keep one. The Section is found by its heading's text, and by its position among Sections with the same heading when there are several. Changed like replace_page, as a Version of its own. Needs the Write Role. */
   replace_section: {
     input: {
-      /** The text of the Section's heading, without the leading `#`s. */
+      /** The text of the Section's heading, without the leading `#`s, and with a
+Page link in it written as its title, as in "See Setup" for
+`## See [Setup](turtle:ID)`. */
       heading: string
       /** What replaces the Section, heading included. */
       markdown: string
@@ -833,6 +845,14 @@ of the Page. Needed only when several Sections have this heading. */
       page_id: string
     }
     output: Written
+  }
+  /** Gets the current titles of the given Pages, as Page links show them. A Page the caller cannot read, or that is in the Trash, is left out, so its link shows no title. */
+  get_page_titles: {
+    input: {
+      /** The IDs of the Pages, as Page links name them. Only the first 500 count. */
+      page_ids: string[]
+    }
+    output: PageTitles
   }
   /** Creates a Token that lets an Agent act as the caller, or, for a Workspace Admin, one for a standalone Agent to act as itself; optionally only reading, only in chosen Areas, and until a date. Its value is shown only in this answer. */
   create_token: {
