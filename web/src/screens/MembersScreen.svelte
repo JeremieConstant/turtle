@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { MemberEntry, SingleUseLink } from '../lib/operations.gen'
   import { session } from '../lib/session.svelte'
@@ -62,8 +63,14 @@
     return attempt(async () => changed(await call('set_workspace_admin', { id: member.id, workspace_admin })))
   }
 
-  function deactivate(member: MemberEntry) {
-    if (!confirm(`Deactivate ${member.name}? They are signed out at once and can no longer sign in.`)) return
+  async function deactivate(member: MemberEntry) {
+    const sure = await ask({
+      title: `Deactivate ${member.name}?`,
+      message: 'They are signed out at once and can no longer sign in.',
+      action: 'Deactivate',
+      destructive: true,
+    })
+    if (!sure) return
     return attempt(async () => changed(await call('deactivate_member', { id: member.id })))
   }
 

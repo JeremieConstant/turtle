@@ -90,6 +90,46 @@ dialog::backdrop {
   background: var(--color-backdrop);
 }
 
+/* Every dialog is narrow, pops in, and keeps its buttons at the bottom right. */
+dialog {
+  width: min(var(--width-form), var(--width-floating-max));
+}
+
+dialog[open] {
+  animation: dialog-pop var(--dur-base) var(--ease-out);
+}
+
+@keyframes dialog-pop {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-1)) scale(var(--press-scale));
+  }
+}
+
+.dialog-body {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.dialog-body h2 {
+  margin: 0;
+  font-size: var(--text-l);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-heading);
+  line-height: var(--leading-tight);
+}
+
+.dialog-body p {
+  margin: 0;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
 [popover] {
   margin: 0;
   padding: var(--space-1);
@@ -133,6 +173,18 @@ dialog::backdrop {
 
 .btn.primary:hover {
   background: var(--color-text-2);
+}
+
+/* The button that removes or ends something. */
+.btn.danger {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: var(--color-on-color);
+}
+
+.btn.danger:hover {
+  background: var(--color-danger);
+  opacity: var(--opacity-hover-danger);
 }
 
 .btn:disabled {

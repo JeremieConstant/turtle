@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { Comparison, Version, VersionSummary } from '../lib/operations.gen'
   import { authorNames, previousNumber, versionTitle } from '../lib/versions'
@@ -59,7 +60,12 @@
   })
 
   async function restore(number: number) {
-    if (!confirm(`Make this Page say what Version ${number} said? This is recorded as a new Version.`)) return
+    const sure = await ask({
+      title: `Restore Version ${number}?`,
+      message: `The Page says again what Version ${number} said. This is recorded as a new Version.`,
+      action: 'Restore',
+    })
+    if (!sure) return
     restoring = true
     problem = ''
     try {

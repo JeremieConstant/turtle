@@ -1,5 +1,6 @@
 <script lang="ts">
   import TokenManager from '../components/TokenManager.svelte'
+  import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { AgentEntry } from '../lib/operations.gen'
 
@@ -65,8 +66,14 @@
     })
   }
 
-  function deactivate(agent: AgentEntry) {
-    if (!confirm(`Deactivate ${agent.name}? Its Tokens stop working at once.`)) return
+  async function deactivate(agent: AgentEntry) {
+    const sure = await ask({
+      title: `Deactivate ${agent.name}?`,
+      message: 'Its Tokens stop working at once.',
+      action: 'Deactivate',
+      destructive: true,
+    })
+    if (!sure) return
     return attempt(async () => {
       changed(await call('deactivate_agent', { id: agent.id }))
       if (openTokens === agent.id) openTokens = null

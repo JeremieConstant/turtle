@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
+  import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { Area, CreatedToken, TokenSummary } from '../lib/operations.gen'
 
@@ -70,8 +71,14 @@
     })
   }
 
-  function revoke(token: TokenSummary) {
-    if (!confirm(`Revoke ${token.name}? Agents using it lose access at once.`)) return
+  async function revoke(token: TokenSummary) {
+    const sure = await ask({
+      title: `Revoke ${token.name}?`,
+      message: 'Agents using it lose access at once.',
+      action: 'Revoke',
+      destructive: true,
+    })
+    if (!sure) return
     return attempt(async () => {
       await call('revoke_token', { id: token.id, agent_id })
       tokens = tokens?.filter(known => known.id !== token.id) ?? null
