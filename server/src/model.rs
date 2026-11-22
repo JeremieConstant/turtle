@@ -156,6 +156,33 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
     out
 }
 
+/// The IDs of the Pages the content links to, each once, in order.
+pub fn linked_pages(blocks: &[Block]) -> Vec<String> {
+    fn collect(blocks: &[Block], out: &mut Vec<String>) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(content) | Block::Heading { content, .. } => {
+                    for inline in content {
+                        if let Inline::PageLink { page_id } = inline {
+                            if !out.contains(page_id) {
+                                out.push(page_id.clone());
+                            }
+                        }
+                    }
+                }
+                Block::Blockquote(children) => collect(children, out),
+                Block::BulletList(items) | Block::OrderedList { items, .. } => {
+                    items.iter().for_each(|item| collect(item, out))
+                }
+                Block::CodeBlock { .. } | Block::HorizontalRule => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    collect(blocks, &mut out);
+    out
+}
+
 /// The words of the content without any formatting, one line per paragraph,
 /// heading, list item or line of code. Search indexes this.
 pub fn plain_text(blocks: &[Block]) -> String {

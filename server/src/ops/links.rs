@@ -71,27 +71,33 @@ pub(super) fn readable_title(db: &Connection, principal: &Principal, page_id: &s
     Ok(permissions::role_on(db, principal, page_id)?.map(|_| title))
 }
 
+/// The titles the principal may see of the Pages some content links to, by
+/// ID; a Page they may not see is left out.
+pub(super) fn linked_titles(
+    core: &Core,
+    principal: &Principal,
+    blocks: &[crate::model::Block],
+) -> rusqlite::Result<std::collections::HashMap<String, String>> {
+    let db = core.db();
+    let mut titles = std::collections::HashMap::new();
+    for page_id in crate::model::linked_pages(blocks) {
+        if let Some(title) = readable_title(&db, principal, &page_id)? {
+            titles.insert(page_id, title);
+        }
+    }
+    Ok(titles)
+}
+
 /// The Markdown of some content as the principal sees it, each Page link
 /// with the title `readable_title` gives it.
-pub(super) fn markdown_for(core: &Core, principal: &Principal, blocks: &[crate::model::Block]) -> anyhow::Result<String> {
-    let db = core.db();
-    let failed = std::cell::RefCell::new(None);
-    let titles = |page_id: &str| {
-        readable_title(&db, principal, page_id).unwrap_or_else(|error| {
-            failed.borrow_mut().get_or_insert(error);
-            None
-        })
-    };
-    let markdown = crate::markdown::to_markdown_with_titles(blocks, &titles);
-    match failed.into_inner() {
-        Some(error) => Err(error.into()),
-        None => Ok(markdown),
-    }
+pub(super) fn markdown_for(core: &Core, principal: &Principal, blocks: &[crate::model::Block]) -> rusqlite::Result<String> {
+    let titles = linked_titles(core, principal, blocks)?;
+    Ok(crate::markdown::to_markdown_with_titles(blocks, &|page_id| titles.get(page_id).cloned()))
 }
 
 /// Stored Markdown, such as a Version's, as the principal sees it. Stored
 /// Markdown holds no titles, so none is kept from the time it was written.
-pub(super) fn stored_markdown_for(core: &Core, principal: &Principal, stored: &str) -> anyhow::Result<String> {
+pub(super) fn stored_markdown_for(core: &Core, principal: &Principal, stored: &str) -> rusqlite::Result<String> {
     markdown_for(core, principal, &crate::markdown::from_markdown(stored))
 }
 

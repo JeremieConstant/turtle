@@ -10,6 +10,7 @@ use super::{Catalogue, Core, OpError, OpResult, Principal};
 use crate::model::{Block, Inline};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
@@ -58,7 +59,9 @@ pub struct NewContent {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct NewSection {
     pub page_id: String,
-    /// The text of the Section's heading, without the leading `#`s.
+    /// The text of the Section's heading, without the leading `#`s, and with a
+    /// Page link in it written as its title, as in "See Setup" for
+    /// `## See [Setup](turtle:ID)`.
     pub heading: String,
     /// Which of the Sections with this heading, counting from 1 at the top
     /// of the Page. Needed only when several Sections have this heading.
@@ -89,8 +92,14 @@ pub fn replace_page(core: &Core, principal: &Principal, input: NewContent) -> Op
 
 pub fn replace_section(core: &Core, principal: &Principal, input: NewSection) -> OpResult<Written> {
     let replacement = crate::markdown::from_markdown(&input.markdown);
+    // A heading is matched as get_page_markdown shows it, with its Page links'
+    // titles. They are looked up beforehand, because the change itself runs
+    // while the Page is locked; a link added in between counts as untitled.
+    page_to_change(core, principal, &input.page_id)?;
+    let current = crate::ydoc::read(&core.live().open(&input.page_id)?.doc);
+    let titles = super::links::linked_titles(core, principal, &current)?;
     write(core, principal, &input.page_id, |blocks| {
-        let range = section(&blocks, &input.heading, input.occurrence)?;
+        let range = section(&blocks, &input.heading, input.occurrence, &titles)?;
         let mut blocks = blocks;
         blocks.splice(range, replacement);
         Ok(blocks)
@@ -107,13 +116,18 @@ pub fn append_to_page(core: &Core, principal: &Principal, input: NewContent) -> 
 
 /// Where in the content the Section with the given heading is: from its
 /// heading to the next heading of the same or a higher level, or the end.
-fn section(blocks: &[Block], heading: &str, occurrence: Option<u32>) -> Result<std::ops::Range<usize>, OpError> {
+fn section(
+    blocks: &[Block],
+    heading: &str,
+    occurrence: Option<u32>,
+    titles: &HashMap<String, String>,
+) -> Result<std::ops::Range<usize>, OpError> {
     let heading = heading.trim();
     let headings: Vec<(usize, u8, String)> = blocks
         .iter()
         .enumerate()
         .filter_map(|(index, block)| match block {
-            Block::Heading { level, content } => Some((index, *level, text_of(content))),
+            Block::Heading { level, content } => Some((index, *level, text_of(content, titles))),
             _ => None,
         })
         .collect();
@@ -148,14 +162,14 @@ fn section(blocks: &[Block], heading: &str, occurrence: Option<u32>) -> Result<s
     Ok(start..end)
 }
 
-/// A heading's words without formatting.
-fn text_of(content: &[Inline]) -> String {
+/// A heading's words without formatting, each Page link as its title.
+fn text_of(content: &[Inline], titles: &HashMap<String, String>) -> String {
     let text: String = content
         .iter()
         .map(|inline| match inline {
             Inline::Text { text, .. } => text.as_str(),
             Inline::HardBreak => " ",
-            Inline::PageLink { .. } => "",
+            Inline::PageLink { page_id } => titles.get(page_id).map_or("", String::as_str),
         })
         .collect();
     text.trim().to_string()
@@ -297,6 +311,24 @@ Open it.
 
         replace_section(&core, &grace, section(&page_id, "Notes", Some(2), "## Notes\n\nChanged.")).unwrap();
         assert_eq!(markdown(&core, &grace, &page_id), "## Notes\n\nFirst.\n\n## Notes\n\nChanged.\n");
+    }
+
+    #[test]
+    fn a_heading_with_a_page_link_is_matched_as_the_caller_sees_it() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let page_id = page(&core, &grace);
+        let area_id = crate::ops::tree::get_page(&core, &grace, PageId { id: page_id.clone() }).unwrap().output.area.id;
+        let input = NewEntry { area_id, parent_id: None, title: "Setup".into() };
+        let setup = create_page(&core, &grace, input.into()).unwrap().output.id;
+        write_page(&core, &grace, &page_id, &format!("## Before [x](turtle:{setup})\n\nOld.\n\n## Other\n\nStays."));
+
+        replace_section(&core, &grace, section(&page_id, "Before Setup", None, "## Before\n\nNew.")).unwrap();
+        assert_eq!(markdown(&core, &grace, &page_id), "## Before\n\nNew.\n\n## Other\n\nStays.\n");
+
+        write_page(&core, &grace, &page_id, &format!("## [x](turtle:{setup})\n\nOld."));
+        let missing = replace_section(&core, &grace, section(&page_id, "Gone", None, "## Gone")).unwrap_err();
+        assert_eq!(missing.message(), "No Section is headed \u{201c}Gone\u{201d}. The headings are: \u{201c}Setup\u{201d}.");
     }
 
     #[test]

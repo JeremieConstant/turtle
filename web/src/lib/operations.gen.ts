@@ -772,7 +772,9 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
   /** Replaces one Section of a Page with the given Markdown. A Section is a heading and everything up to the next heading of the same or a higher level, so its subsections go with it; the Markdown replaces the heading too, so start it with the heading to keep one. The Section is found by its heading's text, and by its position among Sections with the same heading when there are several. Changed like replace_page, as a Version of its own. Needs the Write Role. */
   replace_section: {
     input: {
-      /** The text of the Section's heading, without the leading `#`s. */
+      /** The text of the Section's heading, without the leading `#`s, and with a
+Page link in it written as its title, as in "See Setup" for
+`## See [Setup](turtle:ID)`. */
       heading: string
       /** What replaces the Section, heading included. */
       markdown: string
