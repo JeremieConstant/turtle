@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Toaster } from 'svelte-sonner'
   import Icon from './components/Icon.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import { get_page } from './lib/mock/ops.svelte'
@@ -56,6 +57,9 @@
     {/if}
   </main>
 </div>
+
+<!-- Short confirmations that stack in the corner and leave on their own. -->
+<Toaster position="bottom-right" visibleToasts={4} gap={8} offset={20} duration={4000} />
 
 <style>
   .app {

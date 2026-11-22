@@ -24,4 +24,6 @@ npm run dev
 
 ## What is simulated
 
-`src/lib/mock/live.ts` stands in for the editing connection: it moves the two cursors, types Lena's sentence and inserts the Agent's paragraph. Quick Notes have a `list_quick_notes` operation that the real catalogue does not have yet.
+`src/lib/mock/live.ts` stands in for the editing connection: it moves the two cursors, types Lena's sentence and inserts the Agent's paragraph. Some operations here are not in the real catalogue yet: `list_quick_notes`, `trash_entry` and `restore_entry` (the Trash), and `list_tags`, `add_tag` and `remove_tag` (Tags). A search word written as `#tag` finds the Pages with that Tag.
+
+Toasts come from [svelte-sonner](https://github.com/wobsoriano/svelte-sonner), dressed in the tokens in `src/styles/base.css`. Undo in a toast is one more operation: `restore_entry` after a delete, `move_entry` back after a move.

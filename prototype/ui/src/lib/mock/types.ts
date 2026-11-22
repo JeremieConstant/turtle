@@ -42,6 +42,8 @@ export type Page = {
   html: string
   edited_at: number
   edited_by: Author
+  /** Free-form Tags, shared across the Workspace. */
+  tags: string[]
   /** The Member's Role on this Page, inherited from its Area. */
   role: Role
 }

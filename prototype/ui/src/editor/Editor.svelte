@@ -125,7 +125,9 @@
       },
       onTransaction: ({ editor: ed, transaction }) => {
         if (transaction.docChanged) onchange?.(ed, (transaction.getMeta('remote') as Author | undefined) ?? null)
-        if (editable) readSlash(ed)
+        // Only typing and caret moves can open the menu. A blur also arrives as a
+        // transaction, sometimes while Svelte is removing the editor.
+        if (editable && (transaction.docChanged || transaction.selectionSet)) readSlash(ed)
       },
       onBlur: () => setTimeout(() => (slash = null), 120),
     }))

@@ -3,10 +3,14 @@
    * One Page: where it sits, its title, when and by whom it was last edited,
    * and its content. On "Deploying to production" two Members and the Docs
    * Agent are working at the same time.
+   *
+   * Leaving a Page you changed says so in a toast.
    */
   import type { Editor as TipTap } from '@tiptap/core'
   import { untrack } from 'svelte'
+  import { toast } from 'svelte-sonner'
   import Presence from '../components/Presence.svelte'
+  import Tags from '../components/Tags.svelte'
   import Editor from '../editor/Editor.svelte'
   import { EDITING, startLiveEditing } from '../lib/mock/live'
   import { get_page, rename_page, replace_page } from '../lib/mock/ops.svelte'
@@ -14,6 +18,7 @@
   import { router } from '../lib/router.svelte'
   import { areaAddress, pageAddress } from '../lib/routes'
   import { exactTime, relativeTime } from '../lib/time'
+  import { ui } from '../lib/ui.svelte'
 
   let { page_id }: { page_id: string } = $props()
 
@@ -29,6 +34,11 @@
   let title = $state('')
   let titleEl = $state<HTMLTextAreaElement>()
   let saveTimer: ReturnType<typeof setTimeout> | undefined
+  /** Content typed in the last moment that the store has not taken yet. */
+  let pending: { page_id: string; html: string; by: Author | null } | null = null
+  /** Whether the signed-in Member changed this Page since opening it. */
+  let changed = false
+  let editor = $state.raw<TipTap>()
 
   $effect(() => {
     const t = setInterval(() => (now = Date.now()), 15_000)
@@ -36,8 +46,44 @@
   })
 
   $effect(() => {
-    title = untrack(() => page?.title ?? '')
-    agentActive = false
+    void page_id
+    untrack(() => (agentActive = false))
+  })
+
+  // The title follows renames from elsewhere (the tree) unless it is being edited.
+  $effect(() => {
+    const next = page?.title ?? ''
+    untrack(() => document.activeElement !== titleEl && (title = next))
+  })
+
+  function save(p: NonNullable<typeof pending>) {
+    if (get_page({ page_id: p.page_id })) replace_page({ page_id: p.page_id, html: p.html, by: p.by ?? undefined })
+    now = Date.now()
+  }
+
+  // On the way out: store what is still waiting, and say that it is stored.
+  // The store is written a moment later, outside Svelte's teardown.
+  $effect(() => {
+    void page_id
+    return () => {
+      clearTimeout(saveTimer)
+      const p = pending
+      const done = changed && untrack(() => title)
+      pending = null
+      changed = false
+      queueMicrotask(() => {
+        if (p) save(p)
+        if (done) toast('Changes saved', { description: done })
+      })
+    }
+  })
+
+  // "Edit" in the Entry menu puts the cursor into the content.
+  $effect(() => {
+    if (editor && ui.focusEditor === page_id) {
+      ui.focusEditor = null
+      editor.commands.focus('start')
+    }
   })
 
   // Keep the title part of the address current (ADR-0007).
@@ -58,27 +104,33 @@
 
   function saveTitle() {
     const next = title.trim() || 'Untitled'
-    if (page && next !== page.title) rename_page({ page_id: page.id, title: next })
+    if (page && next !== page.title) {
+      rename_page({ page_id: page.id, title: next })
+      changed = true
+    }
     title = next
   }
 
   /* The real editor syncs every keystroke over the CRDT. The mock stores the
      content a moment after typing stops, under the name of whoever typed. */
   function onchange(editor: TipTap, by: Author | null) {
+    if (!by) changed = true
     clearTimeout(saveTimer)
+    // Read now: by the time the Page is left, the editor may already be gone.
+    const p = (pending = { page_id, html: editor.getHTML(), by })
     saveTimer = setTimeout(() => {
-      if (!page) return
-      replace_page({ page_id: page.id, html: editor.getHTML(), by: by ?? undefined })
-      now = Date.now()
+      pending = null
+      save(p)
     }, 400)
   }
 
   let stopLive: (() => void) | null = null
-  function onready(editor: TipTap) {
+  function onready(ready: TipTap) {
+    editor = ready
     stopLive?.()
     stopLive = null
     if (!live) return
-    stopLive = startLiveEditing(editor, {
+    stopLive = startLiveEditing(ready, {
       onAgent: () => {
         agentActive = true
         setTimeout(() => (agentActive = false), 7000)
@@ -104,19 +156,25 @@
 {#if page}
   <article class="page">
     <header class="bar">
-      <nav class="path" aria-label="Where this Page sits">
-        <a href={areaAddress(page.area.id, page.area.name)} onclick={(e) => router.follow(e, areaAddress(page.area.id, page.area.name))}>
-          {page.area.name}
-        </a>
-        {#each page.path as step (step.id)}
-          <span class="sep" aria-hidden="true">/</span>
-          {#if step.kind === 'page'}
-            <a href={pageAddress(step.id, step.title)} onclick={(e) => router.follow(e, pageAddress(step.id, step.title))}>{step.title}</a>
-          {:else}
-            <span>{step.title}</span>
-          {/if}
-        {/each}
-      </nav>
+      <div class="where">
+        <nav class="path" aria-label="Where this Page sits">
+          <a href={areaAddress(page.area.id, page.area.name)} onclick={(e) => router.follow(e, areaAddress(page.area.id, page.area.name))}>
+            {page.area.name}
+          </a>
+          {#each page.path as step (step.id)}
+            <span class="sep" aria-hidden="true">/</span>
+            {#if step.kind === 'page'}
+              <a href={pageAddress(step.id, step.title)} onclick={(e) => router.follow(e, pageAddress(step.id, step.title))}>{step.title}</a>
+            {:else}
+              <span>{step.title}</span>
+            {/if}
+          {/each}
+        </nav>
+        {#if page.tags.length || writable}
+          <span class="rule" aria-hidden="true"></span>
+          <div class="bar-tags"><Tags id="bar-tags" page_id={page.id} tags={page.tags} {writable} /></div>
+        {/if}
+      </div>
       {#if live}
         <Presence editing={EDITING} {agentActive} />
       {/if}
@@ -160,6 +218,11 @@
               <span class="role">You can read this Page</span>
             {/if}
           </p>
+          {#if page.tags.length || writable}
+            <div class="meta-tags">
+              <Tags id="meta-tags" page_id={page.id} tags={page.tags} {writable} />
+            </div>
+          {/if}
         </div>
         <Editor html={initialHtml} editable={writable} {onready} {onchange} />
       {/key}
@@ -215,6 +278,45 @@
 
   .sep {
     color: var(--color-faint);
+  }
+
+  .where {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .bar-tags {
+    flex: none;
+  }
+
+  .bar-tags :global(.tags) {
+    flex-wrap: nowrap;
+  }
+
+  .rule {
+    flex: none;
+    width: var(--line);
+    height: 14px;
+    margin: 0 var(--space-2);
+    background: var(--color-line-strong);
+  }
+
+  .meta-tags {
+    display: none;
+    margin-top: var(--space-3);
+  }
+
+  /* Where the bar has no room beside the path, the Tags move under the title. */
+  @media (max-width: 1180px) {
+    .rule,
+    .bar-tags {
+      display: none;
+    }
+
+    .meta-tags {
+      display: block;
+    }
   }
 
   .body {

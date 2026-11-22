@@ -171,8 +171,22 @@ export type Record_ = Entry & {
   edited_at: number
   edited_by: Author
   created_at: number
+  /** Tags on a Page, free-form and shared across the Workspace. Folders have none. */
+  tags: string[]
+  /** Set while the Entry sits in the Trash; its whole Subtree carries the same time. */
+  trashed_at?: number
   /** Set on Pages made through create_quick_note; it stays when the note is moved. */
   quick_note?: boolean
+}
+
+/* Tags the dataset starts with, guessed from what kind of Page it is. */
+function tagsFor(kind: Kind, title: string, section: string): string[] {
+  if (kind === 'folder') return []
+  if (title.startsWith('ADR-')) return ['adr']
+  if (/^\d{4}-\d{2}-\d{2}/.test(title)) return ['incident']
+  if (section === 'API') return ['api']
+  if (section === 'Runbooks' || section === 'Infrastructure') return ['runbook']
+  return []
 }
 
 const people = Object.values(MEMBERS)
@@ -199,6 +213,7 @@ export function buildRecords(): Record_[] {
           edited_at: now - ((n * 7919) % 40) * HOUR - (n % 50) * MINUTE,
           edited_by: people[n % people.length],
           created_at: now - 90 * DAY,
+          tags: tagsFor(spec.kind, spec.title, sectionName),
         })
         walk(spec.children, id, sectionName, depth + 1)
       })
@@ -219,6 +234,7 @@ export function buildRecords(): Record_[] {
       edited_at: now - note.ago,
       edited_by: MEMBERS.me,
       created_at: now - note.ago,
+      tags: [],
       quick_note: true,
     })
   })
@@ -227,5 +243,6 @@ export function buildRecords(): Record_[] {
   const deploy = records.find((r) => r.id === 'p-deploy')!
   deploy.edited_at = now - 4 * MINUTE
   deploy.edited_by = MEMBERS.lena
+  deploy.tags = ['runbook', 'deploy', 'production']
   return records
 }

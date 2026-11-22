@@ -12,10 +12,13 @@ import type { Area, Author, Entry, Fragment, Page, QuickNote, SearchHit, TreeEnt
 
 const db = $state({ records: buildRecords(), areas: AREAS })
 
-const byId = (id: string) => db.records.find((r) => r.id === id)
+/* Entries in the Trash are invisible to every operation but restore_entry. */
+const live = () => db.records.filter((r) => !r.trashed_at)
+const byId = (id: string) => live().find((r) => r.id === id)
 const areaOf = (id: string) => db.areas.find((a) => a.id === id)
 const childrenOf = (area_id: string, parent_id: string | null) =>
-  db.records.filter((r) => r.area_id === area_id && r.parent_id === parent_id).sort((a, b) => a.position - b.position)
+  live().filter((r) => r.area_id === area_id && r.parent_id === parent_id).sort((a, b) => a.position - b.position)
+const subtree = (record: Record_): Record_[] => [record, ...live().filter((c) => c.parent_id === record.id).flatMap(subtree)]
 const toEntry = ({ id, area_id, parent_id, kind, title, position }: Record_): Entry => ({
   id,
   area_id,
@@ -97,11 +100,7 @@ export function move_entry({
   siblings.splice(Math.max(0, Math.min(index, siblings.length)), 0, record)
   record.parent_id = parent_id
   if (record.area_id !== area_id) {
-    const moveSubtree = (r: Record_) => {
-      r.area_id = area_id
-      db.records.filter((c) => c.parent_id === r.id).forEach(moveSubtree)
-    }
-    moveSubtree(record)
+    subtree(record).forEach((r) => (r.area_id = area_id))
   }
   siblings.forEach((r, i) => (r.position = i))
   renumber(from.area, from.parent)
@@ -121,6 +120,7 @@ export function get_page({ page_id }: { page_id: string }): Page | undefined {
     html: r.html,
     edited_at: r.edited_at,
     edited_by: r.edited_by,
+    tags: [...r.tags],
     role: area.role,
   }
 }
@@ -140,6 +140,7 @@ function create(kind: 'page' | 'folder', area_id: string, parent_id: string | nu
     edited_at: now,
     edited_by: by,
     created_at: now,
+    tags: [],
   })
   return id
 }
@@ -160,12 +161,70 @@ export function create_folder({
   return create('folder', area_id, parent_id, title, MEMBERS.me)
 }
 
-export function rename_page({ page_id, title }: { page_id: string; title: string }) {
-  const r = byId(page_id)
-  if (!r || !canWrite(areaOf(r.area_id))) throw new Error('Write Role needed')
+function rename(id: string, kind: 'page' | 'folder', title: string) {
+  const r = byId(id)
+  if (!r || r.kind !== kind) throw new Error(`No such ${kind === 'page' ? 'Page' : 'Folder'}`)
+  if (!canWrite(areaOf(r.area_id))) throw new Error('Write Role needed')
   r.title = title
   r.edited_at = Date.now()
   r.edited_by = MEMBERS.me
+}
+
+export function rename_page({ page_id, title }: { page_id: string; title: string }) {
+  rename(page_id, 'page', title)
+}
+
+export function rename_folder({ folder_id, title }: { folder_id: string; title: string }) {
+  rename(folder_id, 'folder', title)
+}
+
+/* ---- Trash ------------------------------------------------------------- */
+/* Not in the real catalogue yet. The Trash keeps an Entry with its Subtree,
+   so it can come back where it was. */
+
+export function trash_entry({ entry_id }: { entry_id: string }) {
+  const r = byId(entry_id)
+  if (!r) throw new Error('No such Entry')
+  if (!canWrite(areaOf(r.area_id))) throw new Error('Write Role needed')
+  const at = Date.now()
+  subtree(r).forEach((e) => (e.trashed_at = at))
+  renumber(r.area_id, r.parent_id)
+}
+
+export function restore_entry({ entry_id }: { entry_id: string }) {
+  const r = db.records.find((e) => e.id === entry_id)
+  if (!r?.trashed_at) throw new Error('Not in the Trash')
+  const at = r.trashed_at
+  const siblings = childrenOf(r.area_id, r.parent_id)
+  db.records.filter((e) => e.trashed_at === at).forEach((e) => delete e.trashed_at)
+  siblings.splice(Math.min(r.position, siblings.length), 0, r)
+  siblings.forEach((e, i) => (e.position = i))
+}
+
+/* ---- Tags -------------------------------------------------------------- */
+/* Not in the real catalogue yet. A Tag exists while one Page carries it. */
+
+const normalTag = (tag: string) => tag.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-')
+
+/** Every Tag in the Workspace, the most used first. */
+export function list_tags(): string[] {
+  const count = new Map<string, number>()
+  live().forEach((r) => r.tags.forEach((t) => count.set(t, (count.get(t) ?? 0) + 1)))
+  return [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t]) => t)
+}
+
+export function add_tag({ page_id, tag }: { page_id: string; tag: string }) {
+  const r = byId(page_id)
+  const name = normalTag(tag)
+  if (!r || r.kind !== 'page') throw new Error('No such Page')
+  if (!canWrite(areaOf(r.area_id))) throw new Error('Write Role needed')
+  if (name && !r.tags.includes(name)) r.tags.push(name)
+}
+
+export function remove_tag({ page_id, tag }: { page_id: string; tag: string }) {
+  const r = byId(page_id)
+  if (!r || !canWrite(areaOf(r.area_id))) throw new Error('Write Role needed')
+  r.tags = r.tags.filter((t) => t !== tag)
 }
 
 /**
@@ -205,6 +264,7 @@ export function create_quick_note({ text }: { text: string }): string {
     edited_at: now,
     edited_by: MEMBERS.me,
     created_at: now,
+    tags: [],
     quick_note: true,
   })
   return id
@@ -212,7 +272,7 @@ export function create_quick_note({ text }: { text: string }): string {
 
 /** The Member's most recent Quick Notes, wherever they sit now. */
 export function list_quick_notes({ limit = 5 }: { limit?: number } = {}): QuickNote[] {
-  return db.records
+  return live()
     .filter((r) => r.quick_note)
     .sort((a, b) => b.created_at - a.created_at)
     .slice(0, limit)
@@ -221,16 +281,20 @@ export function list_quick_notes({ limit = 5 }: { limit?: number } = {}): QuickN
 
 /* ---- Search ----------------------------------------------------------- */
 
+/** Finds Pages and Folders by their words; a word written as #tag finds the Pages with that Tag. */
 export function search({ query, limit = 20 }: { query: string; limit?: number }): SearchHit[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-  if (!words.length) return []
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const tags = terms.filter((t) => t.startsWith('#') && t.length > 1).map((t) => t.slice(1))
+  const words = terms.filter((t) => !t.startsWith('#'))
+  if (!words.length && !tags.length) return []
   const scored: { r: Record_; score: number; text: string }[] = []
-  for (const r of db.records) {
+  for (const r of live()) {
+    if (!tags.every((t) => r.tags.includes(t))) continue
     const title = r.title.toLowerCase()
     const text = plain(r.html)
     const lower = text.toLowerCase()
     if (!words.every((w) => title.includes(w) || lower.includes(w))) continue
-    const score = words.reduce((s, w) => s + (title.includes(w) ? 10 : 0) + (title.startsWith(w) ? 5 : 0) + (lower.includes(w) ? 1 : 0), 0)
+    const score = tags.length + words.reduce((s, w) => s + (title.includes(w) ? 10 : 0) + (title.startsWith(w) ? 5 : 0) + (lower.includes(w) ? 1 : 0), 0)
     scored.push({ r, score, text })
   }
   return scored
@@ -252,6 +316,7 @@ function snippet(text: string, words: string[]): Fragment[] {
   const first = Math.min(...words.map((w) => lower.indexOf(w)).filter((i) => i >= 0), Infinity)
   const start = first === Infinity ? 0 : Math.max(0, text.lastIndexOf(' ', Math.max(0, first - 60)) + 1)
   const slice = (start > 0 ? '… ' : '') + text.slice(start, start + 180) + (start + 180 < text.length ? ' …' : '')
+  if (!words.length) return [{ text: slice, match: false }]
   const pattern = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
   return slice
     .split(pattern)

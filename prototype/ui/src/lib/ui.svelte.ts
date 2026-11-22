@@ -12,6 +12,8 @@ export const ui = $state({
   settled: null as string | null,
   /** The navigation drawer on narrow screens. */
   drawerOpen: false,
+  /** A Page whose editor should take the focus once it is on screen ("Edit"). */
+  focusEditor: null as string | null,
 })
 
 /** Entries whose children are hidden. Everything is expanded by default. */
