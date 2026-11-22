@@ -21,6 +21,10 @@
   import NameDialog from './NameDialog.svelte'
   import SearchBox from './SearchBox.svelte'
   import SidebarTree from './SidebarTree.svelte'
+  // PROTOTYPE (issue #14): where the way into the Trash sits, per variant.
+  import { inArea, proto, prototyping, trash } from '../prototype/trash/state.svelte'
+
+  const trashAddress = (areaId?: string) => `/prototype/trash?variant=${proto.variant}${areaId ? `&area=${encodeURIComponent(areaId)}` : ''}`
 
   const route = $derived(router.route)
   const currentPageId = $derived(route.screen === 'page' ? route.id : null)
@@ -188,6 +192,17 @@
               {:else}
                 <p class="note indented">No Pages yet</p>
               {/if}
+              {#if prototyping && proto.variant === 'A'}
+                <a class="trash-row in-tree" href={trashAddress(area.id)} onclick={event => router.follow(event, trashAddress(area.id))}>
+                  <Icon name="trash" size={14} /> <span class="title">Trash</span>
+                  <span class="count">{inArea(area.id).length || ''}</span>
+                </a>
+              {/if}
+              {#if prototyping && proto.variant === 'C'}
+                <a class="trash-row in-tree" href={trashAddress(area.id)} onclick={event => router.follow(event, trashAddress(area.id))}>
+                  <span class="title">(C: the switch is on the Area screen)</span>
+                </a>
+              {/if}
             </div>
           {/if}
         </section>
@@ -199,6 +214,12 @@
   </div>
 
   <div class="foot">
+    {#if prototyping && proto.variant === 'B'}
+      <a class="trash-row" href={trashAddress()} onclick={event => router.follow(event, trashAddress())}>
+        <Icon name="trash" size={14} /> <span class="title">Trash</span>
+        <span class="count">{trash.items.length || ''}</span>
+      </a>
+    {/if}
     <button
       type="button"
       class="account"
@@ -370,6 +391,38 @@
   .new-area:hover {
     background: var(--color-hover);
     color: var(--color-text);
+  }
+
+  /* PROTOTYPE (issue #14) */
+  .trash-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: var(--height-row);
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-s);
+    color: var(--color-muted);
+    font-size: var(--text-m);
+    text-decoration: none;
+  }
+
+  .trash-row.in-tree {
+    margin-top: var(--space-1);
+    padding-left: calc(var(--space-2) + var(--space-5));
+  }
+
+  .trash-row:hover {
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
+
+  .trash-row .title {
+    flex: 1;
+  }
+
+  .trash-row .count {
+    font-size: var(--text-s);
+    font-variant-numeric: tabular-nums;
   }
 
   .foot {

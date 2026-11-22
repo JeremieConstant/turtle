@@ -21,6 +21,8 @@
   import SignInScreen from './screens/SignInScreen.svelte'
   import StartScreen from './screens/StartScreen.svelte'
   import TokensScreen from './screens/TokensScreen.svelte'
+  import PrototypeBar from './prototype/trash/PrototypeBar.svelte'
+  import TrashPrototype from './prototype/trash/TrashPrototype.svelte'
 
   const route = $derived(router.route)
 
@@ -164,10 +166,13 @@
         <TokensScreen />
       {:else if route.screen === 'agents'}
         <AgentsScreen />
+      {:else if route.screen === 'prototype-trash'}
+        <TrashPrototype variant={route.variant} area={route.area} />
       {:else}
         <NotFoundScreen />
       {/if}
     </div>
+    <PrototypeBar />
   </div>
 {/if}
 

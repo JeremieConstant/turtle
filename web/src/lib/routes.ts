@@ -14,12 +14,18 @@ export type Route =
   | { screen: 'invitation'; secret: string }
   /** Where a password reset link leads. */
   | { screen: 'password-reset'; secret: string }
+  /** PROTOTYPE (issue #14): the variants of the Trash. Never on main. */
+  | { screen: 'prototype-trash'; variant: string | null; area: string | null }
   | { screen: 'not-found' }
 
 /** Reads an address: its path, and its query part as the address bar holds it, with the question mark. */
 export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/') return { screen: 'home' }
   if (pathname === '/search') return { screen: 'search', query: new URLSearchParams(query).get('q') ?? '' }
+  if (pathname === '/prototype/trash') {
+    const params = new URLSearchParams(query)
+    return { screen: 'prototype-trash', variant: params.get('variant'), area: params.get('area') }
+  }
   if (pathname === '/setup') return { screen: 'setup' }
   if (pathname === '/sign-in') return { screen: 'sign-in' }
   if (pathname === '/settings/members') return { screen: 'members' }
