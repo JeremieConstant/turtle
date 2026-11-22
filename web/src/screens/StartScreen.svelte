@@ -1,11 +1,14 @@
 <script lang="ts">
-  /* The start screen answers one question first: where is what I need. */
+  /* The start screen answers two questions: where is what I need, and can I write it down right now. */
+  import QuickNotes from '../components/QuickNotes.svelte'
   import SearchField from '../components/SearchField.svelte'
   import SearchResults from '../components/SearchResults.svelte'
   import { liveSearch } from '../lib/liveSearch.svelte'
+  import { navigation } from '../lib/navigation.svelte'
   import { router } from '../lib/router.svelte'
   import { pageAddress, searchAddress } from '../lib/routes'
   import { moveMark } from '../lib/search'
+  import { session } from '../lib/session.svelte'
 
   /** How many results show under the field; the rest are on the search screen. */
   const SHOWN = 6
@@ -21,6 +24,8 @@
   const results = $derived(search.error ? [] : (search.results ?? []))
   const open = $derived(focused && text !== '' && (search.results !== null || search.error !== null))
   const everything = $derived(searchAddress(text))
+  // Quick Notes land in the Personal Area, so whoever has none gets no box.
+  const personal = $derived(navigation.areas?.find(area => area.personal))
 
   $effect(() => {
     document.title = 'Turtle'
@@ -76,6 +81,9 @@
       </div>
     {/if}
   </div>
+  {#if personal && session.member}
+    <QuickNotes {personal} memberId={session.member.id} />
+  {/if}
 </main>
 
 <style>

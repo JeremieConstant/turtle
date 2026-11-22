@@ -190,6 +190,21 @@ pub(super) fn readable_area(db: &Connection, principal: &Principal, id: &str) ->
     })
 }
 
+/// The principal's own Personal Area, or `None` when they have none they can
+/// reach: a standalone Agent, or a Token limited to other Areas.
+pub(super) fn personal_area_of(db: &Connection, principal: &Principal) -> Result<Option<Area>, OpError> {
+    let Principal::Member { id, .. } = principal else { return Ok(None) };
+    let area_id: Option<String> = db
+        .query_row("SELECT id FROM areas WHERE personal_member_id = ?1", [id], |row| row.get(0))
+        .optional()?;
+    let Some(area_id) = area_id else { return Ok(None) };
+    match readable_area(db, principal, &area_id) {
+        Ok(area) => Ok(Some(area)),
+        Err(OpError::NotFound(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub fn list_areas(core: &Core, principal: &Principal, _: Nothing) -> OpResult<AreaList> {
     signed_in(principal)?;
     let db = core.db();

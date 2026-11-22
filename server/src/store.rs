@@ -200,6 +200,11 @@ const MIGRATIONS: &[&str] = &[
          PRIMARY KEY (page_id, tag)
      );
      CREATE INDEX page_tags_by_tag ON page_tags (tag);",
+    // A Quick Note is a Page that stays known as its Member's wherever it is
+    // moved, so the mark is on the node rather than on the Personal Area.
+    "ALTER TABLE nodes ADD COLUMN quick_note_member_id TEXT REFERENCES members (id);
+     CREATE INDEX quick_notes_by_member ON nodes (quick_note_member_id, created_at)
+         WHERE quick_note_member_id IS NOT NULL;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

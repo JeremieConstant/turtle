@@ -66,6 +66,9 @@ fn table() -> Vec<Row> {
         ("create_folder", |f| json!({"area_id": f.area_id, "title": "New"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("rename_page", |f| json!({"id": f.page_id, "title": "Renamed"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("rename_folder", |f| json!({"id": f.folder_id, "title": "Renamed"}), [OK, OK, REFUSED, HIDDEN, OK]),
+        // Every caller is a Member with a Personal Area, where Quick Notes land.
+        ("create_quick_note", |_| json!({"text": "Idea"}), [OK; 5]),
+        ("list_quick_notes", |_| json!({}), [OK; 5]),
         ("get_page", |f| json!({"id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("get_tree", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         ("search", |f| json!({"query": "notes", "area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),

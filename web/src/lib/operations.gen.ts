@@ -184,6 +184,20 @@ export type PathEntry = {
   title: string
 }
 
+export type QuickNote = {
+  /** The Area it sits in now: the Personal Area until it is moved. */
+  area: Area
+  /** When it was written, in seconds since the Unix epoch. */
+  created_at: number
+  /** The ID of its Page, which opens with `get_page`. */
+  id: string
+  title: string
+}
+
+export type QuickNoteList = {
+  quick_notes: QuickNote[]
+}
+
 export type Restored = {
   /** The new Version, which says what the restored one said. None when the
 Page already said that and its last Version did too. */
@@ -519,6 +533,22 @@ export type Operations = {
       area_id: string
     }
     output: Tree
+  }
+  /** Writes a Quick Note: a Page at the top of the caller's Personal Area. The first line of the text becomes its title and the rest its content, in Markdown. Only a Member can, also through a Token that reaches their Personal Area. */
+  create_quick_note: {
+    input: {
+      /** What was written: the first line becomes the title, the rest the content. */
+      text: string
+    }
+    output: QuickNote
+  }
+  /** Lists the caller's most recent Quick Notes, newest first, each with the Area it sits in now, also after it was moved. Those the caller can no longer read are left out. Empty for anyone without a Personal Area. */
+  list_quick_notes: {
+    input: {
+      /** How many to list, from 1 to 50; 5 if absent. */
+      limit?: number | null
+    }
+    output: QuickNoteList
   }
   /** Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear. */
   search: {

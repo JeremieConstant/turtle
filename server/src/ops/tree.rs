@@ -4,7 +4,7 @@ use super::accounts::random_hex;
 use super::areas::{self, Area};
 use super::permissions::{self, Role};
 use super::versions::{self, Author};
-use super::{Catalogue, Core, OpError, OpResult, Principal};
+use super::{Catalogue, Core, OpError, OpResult, Principal, Reply};
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -151,19 +151,38 @@ pub struct TreeOfArea {
 }
 
 pub fn create_page(core: &Core, principal: &Principal, input: NewPage) -> OpResult<Entry> {
-    let created = create(core, principal, input.entry, Kind::Page)?;
-    if let Some(markdown) = input.markdown {
+    let created = create(core, principal, input.entry, Kind::Page, Placement::Last)?;
+    write_first_content(core, principal, created, input.markdown)
+}
+
+/// Creates a Page first among its siblings, marked as the given Member's
+/// Quick Note, a mark it keeps wherever it is moved.
+pub(super) fn create_quick_note_page(core: &Core, principal: &Principal, input: NewPage, member_id: &str) -> OpResult<Entry> {
+    let created = create(core, principal, input.entry, Kind::Page, Placement::FirstAsQuickNoteOf(member_id))?;
+    write_first_content(core, principal, created, input.markdown)
+}
+
+fn write_first_content(core: &Core, principal: &Principal, created: Reply<Entry>, markdown: Option<String>) -> OpResult<Entry> {
+    if let Some(markdown) = markdown {
         let page_id = created.output.id.clone();
         super::content::replace_page(core, principal, super::content::NewContent { page_id, markdown })?;
     }
     Ok(created)
 }
 
-pub fn create_folder(core: &Core, principal: &Principal, input: NewEntry) -> OpResult<Entry> {
-    create(core, principal, input, Kind::Folder)
+/// Where among its siblings a new Page or Folder goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placement<'a> {
+    Last,
+    /// First, as the Quick Note of this Member.
+    FirstAsQuickNoteOf(&'a str),
 }
 
-fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind) -> OpResult<Entry> {
+pub fn create_folder(core: &Core, principal: &Principal, input: NewEntry) -> OpResult<Entry> {
+    create(core, principal, input, Kind::Folder, Placement::Last)
+}
+
+fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind, placement: Placement<'_>) -> OpResult<Entry> {
     areas::signed_in(principal)?;
     let id = random_hex(16)?;
     let now = core.now();
@@ -192,11 +211,19 @@ fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind) -> Op
         ));
     }
     let title = valid_title(&input.title)?;
+    // Positions may go below zero, so putting an Entry first moves no sibling.
+    let (position, quick_note_of) = match placement {
+        Placement::Last => ("(SELECT COALESCE(MAX(position), 0) + 1 FROM nodes WHERE parent_id = ?3)", None),
+        Placement::FirstAsQuickNoteOf(member_id) => {
+            ("(SELECT COALESCE(MIN(position), 1) - 1 FROM nodes WHERE parent_id = ?3)", Some(member_id))
+        }
+    };
     db.execute(
-        "INSERT INTO nodes (id, area_id, parent_id, kind, title, position, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5,
-                 (SELECT COALESCE(MAX(position), 0) + 1 FROM nodes WHERE parent_id = ?3), ?6)",
-        rusqlite::params![id, area.id, parent_id, kind.stored(), title, now],
+        &format!(
+            "INSERT INTO nodes (id, area_id, parent_id, kind, title, position, created_at, quick_note_member_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, {position}, ?6, ?7)"
+        ),
+        rusqlite::params![id, area.id, parent_id, kind.stored(), title, now, quick_note_of],
     )?;
     if kind == Kind::Page {
         core.page_changed(&id);
@@ -401,7 +428,7 @@ pub(super) fn root_of(db: &Connection, area_id: &str) -> Result<String, OpError>
 }
 
 /// Long enough for any sensible title, short enough to fit the tree.
-const MAX_TITLE_LENGTH: usize = 200;
+pub(super) const MAX_TITLE_LENGTH: usize = 200;
 
 fn valid_title(title: &str) -> Result<String, OpError> {
     let title = title.trim();
