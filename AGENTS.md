@@ -1,8 +1,12 @@
 ## Checks
 
-`scripts/check.sh` is the definition of done: it runs everything CI runs. Coding standards for review are in `CODING_STANDARDS.md`.
+`scripts/check.sh` is the definition of done: it runs everything CI runs. The pre-commit hook runs it, so commit to run it. Coding standards for review are in `CODING_STANDARDS.md`.
 
 The server is a binary crate: run some of its unit tests with `cargo test --bin turtle <name>` from `server/`.
+
+## Trying it by hand
+
+`scripts/preview.sh` builds and runs Turtle at `http://127.0.0.1:4100`; `scripts/seed.sh` then gives a fresh one an account, Areas and Pages.
 
 ## Commits
 
