@@ -4,7 +4,7 @@ The web app grows from one editor page into sign-in, Area lists, the tree, Grant
 
 The web app reaches the server only through the operation catalogue (ADR-0005) and the editing WebSocket. TypeScript types for every operation are generated from the catalogue at build time, so a changed operation breaks the web app's type check instead of drifting silently.
 
-Styling is plain component-scoped CSS. Colours, spacing and type are CSS custom properties defined in one place; there is no utility framework and no component library, and dialogs and menus build on the browser's own elements. A later design pass is meant to change values, not structure. Toasts are the one exception to building on the browser's own elements: they come from svelte-sonner, dressed in the same custom properties, because stacking, timing and announcing them to screen readers is more than the browser offers.
+Styling is plain component-scoped CSS. Colours, spacing and type are CSS custom properties defined in one place; there is no utility framework and no component library, and dialogs and menus build on the browser's own elements: every dialog is a `<dialog>` dressed in the same custom properties, and a question before an action that cannot be taken back goes through `ask()`, which opens `ConfirmDialog`. The browser's `confirm`, `alert` and `prompt` cannot be dressed, so the app does not use them, and a test holds it to that. A later design pass is meant to change values, not structure. Toasts are the one exception to building on the browser's own elements: they come from svelte-sonner, dressed in the same custom properties, because stacking, timing and announcing them to screen readers is more than the browser offers.
 
 ## Addresses
 
