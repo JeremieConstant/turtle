@@ -24,6 +24,8 @@ pub struct TestServer {
     /// When the server reports each save (`TURTLE_LOG_SAVES`): the saves
     /// it reported that nobody has taken yet.
     saves: Option<Arc<Mutex<Vec<Save>>>>,
+    /// `TURTLE_MAX_ATTACHMENT_MB`, when the test sets it.
+    attachment_limit_mb: Option<u32>,
 }
 
 /// One round of saving changed Pages, as the server reports it.
@@ -37,23 +39,29 @@ pub struct Save {
 impl TestServer {
     /// Starts a server with an empty data directory of its own.
     pub async fn start() -> TestServer {
-        TestServer::start_with(None).await
+        TestServer::start_with(None, None).await
+    }
+
+    /// Starts a server that takes files of at most this many MB.
+    pub async fn start_with_attachment_limit(mb: u32) -> TestServer {
+        TestServer::start_with(None, Some(mb)).await
     }
 
     /// Starts a server that reports each save it makes; `next_save` and
     /// `take_saves` return them.
     pub async fn start_reporting_saves() -> TestServer {
-        TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new())))).await
+        TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new()))), None).await
     }
 
-    async fn start_with(saves: Option<Arc<Mutex<Vec<Save>>>>) -> TestServer {
+    async fn start_with(saves: Option<Arc<Mutex<Vec<Save>>>>, attachment_limit_mb: Option<u32>) -> TestServer {
         let data_dir = tempfile::tempdir().expect("creating a temporary data directory");
-        let (process, addr) = launch(data_dir.path(), saves.clone()).await;
+        let (process, addr) = launch(data_dir.path(), saves.clone(), attachment_limit_mb).await;
         TestServer {
             process: Some(process),
             addr,
             data_dir,
             saves,
+            attachment_limit_mb,
         }
     }
 
@@ -201,14 +209,22 @@ impl TestServer {
         if self.process.is_some() {
             self.stop().await;
         }
-        let (process, addr) = launch(self.data_dir.path(), self.saves.clone()).await;
+        let (process, addr) = launch(self.data_dir.path(), self.saves.clone(), self.attachment_limit_mb).await;
         self.process = Some(process);
         self.addr = addr;
     }
 }
 
-async fn launch(data_dir: &Path, saves: Option<Arc<Mutex<Vec<Save>>>>) -> (Child, SocketAddr) {
+async fn launch(
+    data_dir: &Path,
+    saves: Option<Arc<Mutex<Vec<Save>>>>,
+    attachment_limit_mb: Option<u32>,
+) -> (Child, SocketAddr) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_turtle"));
+    match attachment_limit_mb {
+        Some(mb) => command.env("TURTLE_MAX_ATTACHMENT_MB", mb.to_string()),
+        None => command.env_remove("TURTLE_MAX_ATTACHMENT_MB"),
+    };
     if saves.is_some() {
         command.env("TURTLE_LOG_SAVES", "1");
     } else {

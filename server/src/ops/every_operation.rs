@@ -22,6 +22,8 @@ struct Fixture {
     ken_id: String,
     /// A standalone Agent without a Role, the subject of Agent operations.
     agent_id: String,
+    /// An Attachment of the Page.
+    attachment_id: String,
 }
 
 /// The outcome expected from each column: "ok" or the kind of error.
@@ -107,6 +109,10 @@ fn table() -> Vec<Row> {
         ("list_tags", |_| json!({}), [OK; 5]),
         ("add_tag", |f| json!({"page_id": f.page_id, "tag": "Runbook"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("remove_tag", |f| json!({"page_id": f.page_id, "tag": "Runbook"}), [OK, OK, REFUSED, HIDDEN, OK]),
+        // "hello" in base64.
+        ("attach_file", |f| json!({"page_id": f.page_id, "name": "a.txt", "content": "aGVsbG8="}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("list_attachments", |f| json!({"id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
+        ("read_attachment", |f| json!({"id": f.attachment_id}), [OK, OK, OK, HIDDEN, OK]),
         ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),
@@ -158,10 +164,16 @@ fn every_operation_respects_the_role_of_its_caller() {
                     _ => unreachable!(),
                 },
                 agent_id: "agent-archivist".into(),
+                attachment_id: String::new(),
             };
             core.db()
                 .execute("INSERT INTO agents (id, name, created_at) VALUES ('agent-archivist', 'Archivist', 0)", [])
                 .unwrap();
+            let attached = catalogue
+                .call(&core, &grace, "attach_file", json!({"page_id": fixture.page_id, "name": "b.txt", "content": ""}))
+                .unwrap()
+                .output;
+            let fixture = Fixture { attachment_id: attached["id"].as_str().unwrap().to_string(), ..fixture };
             let page = core.live().open(&fixture.page_id).unwrap();
             core.live().connected(&page);
             let Principal::Member { id: grace_id, .. } = &grace else { unreachable!() };
@@ -221,10 +233,16 @@ fn a_personal_area_answers_to_its_member_alone() {
                     _ => unreachable!(),
                 },
                 agent_id: "agent-archivist".into(),
+                attachment_id: String::new(),
             };
             core.db()
                 .execute("INSERT INTO agents (id, name, created_at) VALUES ('agent-archivist', 'Archivist', 0)", [])
                 .unwrap();
+            let attached = catalogue
+                .call(&core, &grace, "attach_file", json!({"page_id": fixture.page_id, "name": "b.txt", "content": ""}))
+                .unwrap()
+                .output;
+            let fixture = Fixture { attachment_id: attached["id"].as_str().unwrap().to_string(), ..fixture };
             core.db()
                 .execute("INSERT INTO versions (page_id, number, markdown, recorded_at) VALUES (?1, 1, 'Notes.', 0)", [&fixture.page_id])
                 .unwrap();
@@ -236,7 +254,7 @@ fn a_personal_area_answers_to_its_member_alone() {
 
             let input = input(&fixture);
             let text = input.to_string();
-            let addresses_it = [&fixture.area_id, &fixture.page_id, &fixture.folder_id, &fixture.trashed_id].iter().any(|id| text.contains(id.as_str()));
+            let addresses_it = [&fixture.area_id, &fixture.page_id, &fixture.folder_id, &fixture.trashed_id, &fixture.attachment_id].iter().any(|id| text.contains(id.as_str()));
             let expected = match (caller_is, addresses_it) {
                 ("its Member", true) if NEVER_IN_A_PERSONAL_AREA.contains(&name) => REFUSED,
                 ("its Member", true) => by_role[0],

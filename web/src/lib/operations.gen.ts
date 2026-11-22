@@ -27,6 +27,34 @@ export type AreaList = {
   areas: Area[]
 }
 
+export type Attachment = {
+  /** Seconds since the Unix epoch. */
+  attached_at: number
+  /** What kind of file it is, such as "image/png", judged by its name. */
+  content_type: string
+  id: string
+  name: string
+  page_id: string
+  /** Whether it is an image a Page can show. Other files, SVG images
+among them since they can carry scripts, are only downloaded. */
+  shown_as_image: boolean
+  /** In bytes. */
+  size: number
+  /** Where it is downloaded from, and the address to show an image by. */
+  url: string
+}
+
+export type AttachmentContent = {
+  attachment: Attachment
+  /** The file's content, in base64. */
+  content: string
+}
+
+export type Attachments = {
+  /** The oldest first. */
+  attachments: Attachment[]
+}
+
 export type Author = {
   id: string
   kind: "member"
@@ -440,6 +468,31 @@ export type Operations = {
       id: string
     }
     output: AgentEntry
+  }
+  /** Attaches an image or file to a Page and returns the Attachment. The content is sent in base64. An image is shown in the Page by putting its `url` in the content, in Markdown as ![description](url). Files larger than the limit Turtle was started with (25 MB unless set otherwise) are refused. Needs the Write Role. */
+  attach_file: {
+    input: {
+      /** The file's content, in base64. */
+      content: string
+      /** The file's name, such as "diagram.png". Any folders before it are left out. */
+      name: string
+      page_id: string
+    }
+    output: Attachment
+  }
+  /** Lists the Attachments of a Page, the oldest first, with their names and sizes. */
+  list_attachments: {
+    input: {
+      id: string
+    }
+    output: Attachments
+  }
+  /** Returns an Attachment with its content in base64. In a browser, its `url` downloads it. */
+  read_attachment: {
+    input: {
+      id: string
+    }
+    output: AttachmentContent
   }
   /** Invites a person by email address and returns a single-use link for them that expires. Only for a Workspace Admin. */
   invite_member: {

@@ -17,6 +17,9 @@ pub struct Marks {
 pub enum Inline {
     Text { text: String, marks: Marks },
     HardBreak,
+    /// An image, shown where it stands in the text. Formatting does not
+    /// apply to it.
+    Image { src: String, alt: String },
 }
 
 // The variants are named as Markdown and the editor name them, so a code
@@ -92,6 +95,10 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
         };
         match inline {
             Inline::HardBreak => out.push(Inline::HardBreak),
+            Inline::Image { src, alt } => out.push(Inline::Image {
+                src: src.replace(['\n', '\r'], ""),
+                alt: alt.replace(['\n', '\r'], " "),
+            }),
             Inline::Text { text, mut marks } => {
                 let text = text.replace(['\n', '\r'], " ");
                 if text.is_empty() {
@@ -130,6 +137,7 @@ pub fn plain_text(blocks: &[Block]) -> String {
             match inline {
                 Inline::Text { text, .. } => out.push_str(text),
                 Inline::HardBreak => out.push('\n'),
+                Inline::Image { alt, .. } => out.push_str(alt),
             }
         }
         out.push('\n');

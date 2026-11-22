@@ -3,7 +3,7 @@
 //! turning cookies and Tokens into principals and errors into status codes.
 
 use crate::ops::{self, Catalogue, Core, OpError, Principal, SessionChange};
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
@@ -18,13 +18,22 @@ struct Api {
     catalogue: Catalogue,
 }
 
+/// The largest request an operation is called with. An attached file
+/// arrives in base64, a third larger than the file, with room for the rest
+/// of the input.
+pub fn input_limit(core: &Core) -> DefaultBodyLimit {
+    DefaultBodyLimit::max((core.attachment_limit().div_ceil(3) * 4 + 64 * 1024) as usize)
+}
+
 pub fn router(core: Arc<Core>) -> Router {
+    let limit = input_limit(&core);
     let api = Arc::new(Api {
         core,
         catalogue: ops::catalogue(),
     });
     Router::new()
         .route("/api/{operation}", post(call))
+        .layer(limit)
         .with_state(api)
 }
 

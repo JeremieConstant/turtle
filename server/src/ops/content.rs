@@ -155,6 +155,7 @@ fn text_of(content: &[Inline]) -> String {
         .map(|inline| match inline {
             Inline::Text { text, .. } => text.as_str(),
             Inline::HardBreak => " ",
+            Inline::Image { alt, .. } => alt.as_str(),
         })
         .collect();
     text.trim().to_string()
