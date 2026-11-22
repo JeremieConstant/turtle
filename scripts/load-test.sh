@@ -5,6 +5,7 @@
 # TURTLE_LOAD_PAGES, TURTLE_LOAD_SECONDS and TURTLE_LOAD_KEYSTROKE_MS.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/find-cargo.sh
 
 # Every editor holds a connection, an open file on both ends; the default
 # limit (256 on macOS) is far too low.

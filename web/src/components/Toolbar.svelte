@@ -89,7 +89,7 @@
     flex-wrap: wrap;
     gap: var(--space-1);
     padding: var(--space-2) var(--space-4);
-    border-bottom: var(--line-width) solid var(--color-line);
+    border-bottom: var(--line) solid var(--color-line);
   }
 
   .end {

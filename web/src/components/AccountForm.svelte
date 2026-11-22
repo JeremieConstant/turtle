@@ -55,7 +55,7 @@
   }
 
   .brand {
-    color: var(--color-accent);
+    color: var(--color-focus);
   }
 
   h1 {

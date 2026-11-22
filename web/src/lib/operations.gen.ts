@@ -16,6 +16,9 @@ export type AgentList = {
 export type Area = {
   id: string
   name: string
+  /** Whether this is the caller's Personal Area: theirs alone, never
+granted, renamed or deleted. Nobody else ever sees it. */
+  personal: boolean
   /** The Role the caller holds on the Area. */
   role: Role
 }
@@ -391,12 +394,12 @@ export type Operations = {
     }
     output: Area
   }
-  /** Lists the Areas the caller can read, by name. */
+  /** Lists the Areas the caller can read: their own Personal Area first, then the others by name. */
   list_areas: {
     input: Record<string, never>
     output: AreaList
   }
-  /** Renames an Area. Needs the Admin Role on it. */
+  /** Renames an Area. Needs the Admin Role on it. A Personal Area cannot be renamed. */
   rename_area: {
     input: {
       id: string
@@ -404,14 +407,14 @@ export type Operations = {
     }
     output: Area
   }
-  /** Lists the Grants of an Area, and the active Members and standalone Agents one can be given to. Needs the Admin Role on the Area. */
+  /** Lists the Grants of an Area, and the active Members and standalone Agents one can be given to. Needs the Admin Role on the Area. A Personal Area has no Grants. */
   list_grants: {
     input: {
       area_id: string
     }
     output: GrantList
   }
-  /** Gives a Member, a standalone Agent, or all Members at once, a Role on an Area, replacing the Role they held there. A Grant to all Members does not include standalone Agents. Someone holding several Grants gets the highest Role. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area. */
+  /** Gives a Member, a standalone Agent, or all Members at once, a Role on an Area, replacing the Role they held there. A Grant to all Members does not include standalone Agents. Someone holding several Grants gets the highest Role. The last Admin of an Area who is a person keeps that Role. Needs the Admin Role on the Area. Nobody can be given a Role on a Personal Area. */
   set_grant: {
     input: {
       area_id: string

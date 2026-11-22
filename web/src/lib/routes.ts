@@ -56,3 +56,11 @@ function address(prefix: 'a' | 'p', id: string, label: string): string {
   const fixed = `/${prefix}/${encodeURIComponent(id)}`
   return readable ? `${fixed}/${encodeURIComponent(readable)}` : fixed
 }
+
+/** The screens that have no place in the shell: nobody is signed in on them, or need not be. */
+const OUTSIDE_SHELL: Route['screen'][] = ['setup', 'sign-in', 'invitation', 'password-reset']
+
+/** Whether a screen sits in the shell, beside the sidebar. */
+export function inShell(route: Route): boolean {
+  return !OUTSIDE_SHELL.includes(route.screen)
+}

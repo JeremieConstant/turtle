@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { areaAddress, pageAddress, parseAddress } from './routes'
+import { areaAddress, inShell, pageAddress, parseAddress } from './routes'
 
 test('a Page address carries the ID and a readable title', () => {
   expect(parseAddress('/p/abc123/release-notes')).toEqual({ screen: 'page', id: 'abc123' })
@@ -90,4 +90,16 @@ test('the Tokens screen has its own address under settings', () => {
 
 test('the Agents screen has its own address under settings', () => {
   expect(parseAddress('/settings/agents')).toEqual({ screen: 'agents' })
+})
+
+test('the screens of a signed-in person sit in the shell', () => {
+  for (const address of ['/', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/tokens', '/settings/agents', '/nowhere']) {
+    expect(inShell(parseAddress(address)), address).toBe(true)
+  }
+})
+
+test('setup, signing in and the links someone was given stay outside the shell', () => {
+  for (const address of ['/setup', '/sign-in', '/join/s3cret', '/reset-password/s3cret']) {
+    expect(inShell(parseAddress(address)), address).toBe(false)
+  }
 })

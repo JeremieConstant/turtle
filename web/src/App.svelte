@@ -1,10 +1,14 @@
 <script lang="ts">
+  import { tick } from 'svelte'
+  import { Toaster } from 'svelte-sonner'
+  import Icon from './components/Icon.svelte'
+  import Sidebar from './components/Sidebar.svelte'
   import { router } from './lib/router.svelte'
-  import type { Route } from './lib/routes'
+  import { inShell, type Route } from './lib/routes'
   import { session } from './lib/session.svelte'
+  import { ui } from './lib/ui.svelte'
   import AgentsScreen from './screens/AgentsScreen.svelte'
   import AreaScreen from './screens/AreaScreen.svelte'
-  import AreasScreen from './screens/AreasScreen.svelte'
   import InvitationScreen from './screens/InvitationScreen.svelte'
   import MembersScreen from './screens/MembersScreen.svelte'
   import NotFoundScreen from './screens/NotFoundScreen.svelte'
@@ -12,6 +16,7 @@
   import PasswordResetScreen from './screens/PasswordResetScreen.svelte'
   import SetupScreen from './screens/SetupScreen.svelte'
   import SignInScreen from './screens/SignInScreen.svelte'
+  import StartScreen from './screens/StartScreen.svelte'
   import TokensScreen from './screens/TokensScreen.svelte'
 
   const route = $derived(router.route)
@@ -41,45 +46,205 @@
     if (target === '/sign-in' && route.screen !== 'setup') returnTo = location.pathname
     router.replace(target)
   })
+
+  let content = $state<HTMLElement | null>(null)
+  let side = $state<HTMLElement | null>(null)
+  let opener = $state<HTMLElement | null>(null)
+
+  /** What is on the screen. A corrected address (ADR-0007) changes the path but not this. */
+  const shown = $derived('id' in route ? `${route.screen} ${route.id}` : route.screen)
+
+  // Another screen starts at its top, and the drawer has done its job.
+  $effect(() => {
+    void shown
+    content?.scrollTo({ top: 0 })
+    ui.drawerOpen = false
+  })
+
+  async function openDrawer() {
+    ui.drawerOpen = true
+    await tick()
+    side?.querySelector<HTMLElement>('a, button, input')?.focus()
+  }
+
+  function closeDrawer() {
+    if (!ui.drawerOpen) return
+    ui.drawerOpen = false
+    opener?.focus()
+  }
+
+  function onkeydown(event: KeyboardEvent) {
+    // Escape closes a menu or dialog that is open in the drawer before it closes the drawer.
+    if (event.key === 'Escape' && !document.querySelector(':popover-open, dialog[open]')) closeDrawer()
+  }
 </script>
+
+<svelte:window {onkeydown} />
 
 {#if failed}
   <main class="message">Turtle cannot be reached. Reload the page to try again.</main>
 {:else if !session.loaded || target !== null}
   <!-- Nothing is shown until it is clear who is here and where they may go. -->
-{:else if route.screen === 'setup'}
-  <SetupScreen />
-{:else if route.screen === 'sign-in'}
-  <SignInScreen {returnTo} />
-{:else if route.screen === 'home'}
-  <AreasScreen />
-{:else if route.screen === 'area'}
-  {#key route.id}
-    <AreaScreen id={route.id} />
-  {/key}
-{:else if route.screen === 'page'}
-  {#key route.id}
-    <PageScreen id={route.id} />
-  {/key}
-{:else if route.screen === 'members'}
-  <MembersScreen />
-{:else if route.screen === 'tokens'}
-  <TokensScreen />
-{:else if route.screen === 'agents'}
-  <AgentsScreen />
-{:else if route.screen === 'invitation'}
-  {#key route.secret}
-    <InvitationScreen secret={route.secret} />
-  {/key}
-{:else if route.screen === 'password-reset'}
-  {#key route.secret}
-    <PasswordResetScreen secret={route.secret} />
-  {/key}
-{:else if route.screen === 'not-found'}
-  <NotFoundScreen />
+{:else if !inShell(route)}
+  {#if route.screen === 'setup'}
+    <SetupScreen />
+  {:else if route.screen === 'sign-in'}
+    <SignInScreen {returnTo} />
+  {:else if route.screen === 'invitation'}
+    {#key route.secret}
+      <InvitationScreen secret={route.secret} />
+    {/key}
+  {:else if route.screen === 'password-reset'}
+    {#key route.secret}
+      <PasswordResetScreen secret={route.secret} />
+    {/key}
+  {/if}
+{:else}
+  <div class="app" class:drawer={ui.drawerOpen}>
+    <a class="skip" href="#content">Skip to the content</a>
+    <div class="bar">
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label="Open the sidebar"
+        aria-expanded={ui.drawerOpen}
+        bind:this={opener}
+        onclick={openDrawer}
+      >
+        <Icon name="menu" size={18} />
+      </button>
+    </div>
+    <div class="side" bind:this={side}><Sidebar /></div>
+    <button type="button" class="scrim" aria-label="Close the sidebar" tabindex="-1" onclick={closeDrawer}></button>
+    <div class="content" id="content" tabindex="-1" bind:this={content}>
+      {#if route.screen === 'home'}
+        <StartScreen />
+      {:else if route.screen === 'area'}
+        {#key route.id}
+          <AreaScreen id={route.id} />
+        {/key}
+      {:else if route.screen === 'page'}
+        {#key route.id}
+          <PageScreen id={route.id} />
+        {/key}
+      {:else if route.screen === 'members'}
+        <MembersScreen />
+      {:else if route.screen === 'tokens'}
+        <TokensScreen />
+      {:else if route.screen === 'agents'}
+        <AgentsScreen />
+      {:else}
+        <NotFoundScreen />
+      {/if}
+    </div>
+  </div>
 {/if}
 
+<!-- Short messages that stack in the corner and leave on their own. -->
+<Toaster position="bottom-right" visibleToasts={4} gap={8} offset={20} duration={4000} />
+
 <style>
+  .app {
+    display: grid;
+    grid-template-columns: var(--width-side) 1fr;
+    height: var(--height-screen);
+  }
+
+  .side {
+    min-height: 0;
+  }
+
+  .content {
+    min-width: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    outline: none;
+  }
+
+  .bar,
+  .scrim {
+    display: none;
+  }
+
+  /* Out of sight until the keyboard reaches it. */
+  .skip {
+    position: fixed;
+    top: var(--space-2);
+    left: var(--space-2);
+    z-index: var(--layer-menu);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-m);
+    background: var(--color-text);
+    color: var(--color-bg);
+    font-size: var(--text-m);
+    transform: translateY(calc(-1 * var(--space-16)));
+  }
+
+  .skip:focus {
+    transform: none;
+  }
+
+  /* On a narrow window the sidebar becomes a drawer over the screen. */
+  @media (max-width: 800px) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: var(--height-bar) 1fr;
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      padding: 0 var(--space-3);
+      border-bottom: var(--line) solid var(--color-line);
+    }
+
+    .bar .icon-btn {
+      width: var(--space-8);
+      height: var(--space-8);
+      color: var(--color-text);
+    }
+
+    /* Hidden, not only moved away, so the keyboard does not land in it while it is closed. */
+    .side {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: var(--layer-drawer);
+      width: min(var(--width-side), var(--width-drawer-max));
+      visibility: hidden;
+      transform: translateX(-100%);
+      transition:
+        transform var(--dur-slow) var(--ease-out),
+        visibility var(--dur-slow);
+    }
+
+    .drawer .side {
+      visibility: visible;
+      transform: none;
+      box-shadow: var(--shadow-float);
+      /* Visible at once, so the focus can move into it as it opens. */
+      transition: transform var(--dur-slow) var(--ease-out);
+    }
+
+    .scrim {
+      position: fixed;
+      inset: 0;
+      z-index: calc(var(--layer-drawer) - 1);
+      display: block;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: var(--color-scrim);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--dur-slow) var(--ease-out);
+    }
+
+    .drawer .scrim {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
   .message {
     max-width: var(--width-form);
     margin: 0 auto;

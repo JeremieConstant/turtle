@@ -1,12 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import AppHeader from '../components/AppHeader.svelte'
   import PageView from '../components/PageView.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { Page } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
+  import { ui } from '../lib/ui.svelte'
   import NotFoundScreen from './NotFoundScreen.svelte'
 
   // The screen is created anew for every Page, so the ID never changes underneath it.
@@ -57,6 +57,11 @@
     if (page) document.title = `${page.title} · Turtle`
   })
 
+  // The sidebar shows the tree of the Area the Page is in.
+  $effect(() => {
+    if (page) ui.openArea = page.area.id
+  })
+
   $effect(() => {
     if (!page) return
     // An address with an outdated or missing title is corrected in place (ADR-0007).
@@ -68,7 +73,6 @@
 {#if missing}
   <NotFoundScreen />
 {:else if loadFailed}
-  <AppHeader />
   <main class="message">This Page could not be loaded. Reload the page to try again.</main>
 {:else if page}
   <PageView {page} ondisconnect={checkAccess} />

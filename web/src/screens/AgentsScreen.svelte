@@ -1,5 +1,4 @@
 <script lang="ts">
-  import AppHeader from '../components/AppHeader.svelte'
   import TokenManager from '../components/TokenManager.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { AgentEntry } from '../lib/operations.gen'
@@ -74,8 +73,6 @@
     })
   }
 </script>
-
-<AppHeader />
 
 <main>
   <h1>Agents</h1>
@@ -169,7 +166,7 @@
     align-items: center;
     gap: var(--space-2) var(--space-3);
     padding: var(--space-2) 0;
-    border-bottom: var(--line-width) solid var(--color-line);
+    border-bottom: var(--line) solid var(--color-line);
   }
 
   li > div:first-child {
@@ -194,7 +191,7 @@
   .tokens {
     flex-basis: 100%;
     padding: var(--space-3);
-    border: var(--line-width) solid var(--color-line);
+    border: var(--line) solid var(--color-line);
     border-radius: var(--radius-m);
   }
 

@@ -133,6 +133,11 @@ fn owners_role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusq
     if holders.is_empty() {
         return Ok(None);
     }
+    // A Personal Area answers to its Member alone (ADR-0008): no Grant
+    // reaches into it, and being Workspace Admin does not either.
+    if let Some(owner) = personal_member_of(db, node_id)? {
+        return Ok(matches!(principal, Principal::Member { id, .. } if *id == owner).then_some(Role::Admin));
+    }
     if matches!(principal, Principal::Member { workspace_admin: true, .. }) {
         let exists: bool = db.query_row(
             "SELECT EXISTS (SELECT 1 FROM nodes WHERE id = ?1)",
@@ -166,6 +171,19 @@ fn owners_role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusq
     Ok(rank.and_then(Role::from_rank))
 }
 
+/// The Member whose Personal Area the node is in, or `None` when it is in
+/// another Area or does not exist.
+pub fn personal_member_of(db: &Connection, node_id: &str) -> rusqlite::Result<Option<String>> {
+    let owner = db
+        .query_row(
+            "SELECT areas.personal_member_id FROM nodes JOIN areas ON areas.id = nodes.area_id WHERE nodes.id = ?1",
+            [node_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    Ok(owner.flatten())
+}
+
 /// The node whose Grants apply to this one: the nearest at or above it that
 /// carries any, or the root of its Area when none does. `None` when the node
 /// does not exist.
@@ -193,23 +211,49 @@ pub fn governing_node(db: &Connection, node_id: &str) -> rusqlite::Result<Option
 
 /// The nodes whose Grants let the principal read: everything a node in this
 /// list governs (see `governing_node`) is readable to them, and nothing else
-/// is. `None` for a Workspace Admin, who reads everything.
-pub fn readable_through(db: &Connection, principal: &Principal) -> rusqlite::Result<Option<Vec<String>>> {
-    if matches!(principal, Principal::Member { workspace_admin: true, .. }) {
-        return Ok(None);
+/// is. A Member reads through the root of their Personal Area, and a
+/// Workspace Admin through every node that governs any other Area's Pages.
+/// A Token limited to chosen Areas reads through the nodes in those alone.
+pub fn readable_through(db: &Connection, principal: &Principal) -> rusqlite::Result<Vec<String>> {
+    let nodes = owner_reads_through(db, principal)?;
+    let Some(areas) = principal.token().and_then(|token| token.areas.as_ref()) else { return Ok(nodes) };
+    let mut statement = db.prepare("SELECT area_id FROM nodes WHERE id = ?1")?;
+    let mut within = Vec::new();
+    for node in nodes {
+        let area_id: String = statement.query_row([&node], |row| row.get(0))?;
+        if areas.contains(&area_id) {
+            within.push(node);
+        }
     }
-    let holders = holders_of(principal);
-    if holders.is_empty() {
-        return Ok(Some(Vec::new()));
-    }
+    Ok(within)
+}
+
+/// What `readable_through` gives the Member or Agent behind a principal,
+/// whatever Token they act through.
+fn owner_reads_through(db: &Connection, principal: &Principal) -> rusqlite::Result<Vec<String>> {
+    let (holders, member_id) = match principal {
+        Principal::Anonymous => return Ok(Vec::new()),
+        Principal::Member { id, workspace_admin: true, .. } => {
+            let mut statement = db.prepare(
+                "SELECT nodes.id FROM nodes JOIN areas ON areas.id = nodes.area_id
+                 WHERE (nodes.parent_id IS NULL OR EXISTS (SELECT 1 FROM grants WHERE grants.node_id = nodes.id))
+                   AND (areas.personal_member_id IS NULL OR areas.personal_member_id = ?1)",
+            )?;
+            return statement.query_map([id], |row| row.get(0))?.collect();
+        }
+        Principal::Member { id, .. } => (holders_of(principal), Some(id)),
+        Principal::Agent { .. } => (holders_of(principal), None),
+    };
     // Every Role includes Read, so any Grant that applies to them will do.
-    let mut statement =
-        db.prepare("SELECT DISTINCT node_id FROM grants WHERE holder IN (SELECT value FROM json_each(?1))")?;
+    let mut statement = db.prepare(
+        "SELECT DISTINCT node_id FROM grants WHERE holder IN (SELECT value FROM json_each(?1))
+         UNION
+         SELECT nodes.id FROM nodes JOIN areas ON areas.id = nodes.area_id
+         WHERE nodes.parent_id IS NULL AND areas.personal_member_id = ?2",
+    )?;
     let holders = serde_json::to_string(&holders).map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-    let nodes = statement
-        .query_map([holders], |row| row.get(0))?
-        .collect::<rusqlite::Result<Vec<String>>>()?;
-    Ok(Some(nodes))
+    let nodes = statement.query_map(rusqlite::params![holders, member_id], |row| row.get(0))?;
+    nodes.collect()
 }
 
 /// The stored holders whose Grants apply to a principal: a Member's own and

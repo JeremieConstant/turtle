@@ -209,7 +209,7 @@
     gap: var(--space-1);
     margin: 0;
     padding: var(--space-2) var(--space-3);
-    border: var(--line-width) solid var(--color-line);
+    border: var(--line) solid var(--color-line);
     border-radius: var(--radius-m);
   }
 
@@ -233,7 +233,7 @@
     gap: var(--space-2);
     margin-top: var(--space-4);
     padding: var(--space-3);
-    border: var(--line-width) solid var(--color-accent);
+    border: var(--line) solid var(--color-focus);
     border-radius: var(--radius-m);
   }
 
@@ -256,7 +256,7 @@
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-2) 0;
-    border-bottom: var(--line-width) solid var(--color-line);
+    border-bottom: var(--line) solid var(--color-line);
   }
 
   li > div {

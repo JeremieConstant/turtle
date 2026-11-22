@@ -138,7 +138,7 @@
     align-items: center;
     gap: var(--space-2) var(--space-3);
     padding: var(--space-2) 0;
-    border-bottom: var(--line-width) solid var(--color-line);
+    border-bottom: var(--line) solid var(--color-line);
   }
 
   .row {

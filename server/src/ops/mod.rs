@@ -428,22 +428,33 @@ pub(crate) mod testing {
         }
     }
 
-    /// A signed-in Member, created directly so a test needs no invitation.
+    /// A signed-in Member with their Personal Area, created directly so a
+    /// test needs no invitation.
     pub fn member(core: &Core, name: &str, workspace_admin: bool) -> Principal {
         let id = format!("member-{}", name.to_lowercase());
-        core.db()
-            .execute(
-                "INSERT INTO members (id, email, name, password_hash, workspace_admin, created_at)
-                 VALUES (?1, ?2, ?3, 'no password', ?4, 0)",
-                rusqlite::params![id, format!("{id}@example.org"), name, workspace_admin],
-            )
-            .unwrap();
+        let db = core.db();
+        db.execute(
+            "INSERT INTO members (id, email, name, password_hash, workspace_admin, created_at)
+             VALUES (?1, ?2, ?3, 'no password', ?4, 0)",
+            rusqlite::params![id, format!("{id}@example.org"), name, workspace_admin],
+        )
+        .unwrap();
+        areas::create_personal_area(&db, &id, 0).unwrap();
+        drop(db);
         Principal::Member {
             id,
             workspace_admin,
             session: None,
             token: None,
         }
+    }
+
+    /// The ID of a Member's Personal Area, as they see it listed first.
+    pub fn personal_area(core: &Core, of: &Principal) -> String {
+        let list = areas::list_areas(core, of, accounts::Nothing {}).unwrap().output;
+        let first = list.areas.into_iter().next().expect("a Member has a Personal Area");
+        assert!(first.personal, "the Personal Area is listed first");
+        first.id
     }
 
     /// Gives a Member a Role on an Area. Grants are not an operation yet.

@@ -8,7 +8,6 @@
   import { router } from '../lib/router.svelte'
   import { areaAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
-  import AppHeader from './AppHeader.svelte'
   import ConnectionStatus from './ConnectionStatus.svelte'
   import Editor from './Editor.svelte'
   import MarkdownView from './MarkdownView.svelte'
@@ -53,12 +52,12 @@
   })
 </script>
 
-<AppHeader areaId={page.area.id}>
+<header>
   <a class="area" href={areaLink} onclick={event => router.follow(event, areaLink)}>{page.area.name}</a>
   <span class="title">{page.title}</span>
-  <People awareness={connection.awareness} />
+  <span class="present"><People awareness={connection.awareness} /></span>
   <ConnectionStatus {status} />
-</AppHeader>
+</header>
 
 <!-- Someone who can only read gets no formatting buttons. -->
 <Toolbar editor={editable ? editor : null}>
@@ -90,11 +89,28 @@
 </main>
 
 <style>
-  .area,
-  .title {
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: var(--height-bar);
+    padding: var(--space-2) var(--space-4);
+    border-bottom: var(--line) solid var(--color-line);
+    font-size: var(--text-m);
+  }
+
+  .area {
     color: var(--color-muted);
   }
 
+  .title {
+    font-weight: var(--weight-medium);
+  }
+
+  .present {
+    margin-left: auto;
+  }
 
   main {
     display: flex;

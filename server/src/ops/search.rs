@@ -67,7 +67,7 @@ pub fn search(core: &Core, principal: &Principal, input: SearchQuery) -> OpResul
     let hits = core.search.search(&crate::search::Search {
         text: &input.query,
         area_id: input.area_id.as_deref(),
-        readable: readable.as_deref(),
+        readable: Some(&readable),
         limit: MAX_RESULTS,
     })?;
     let db = core.db();
@@ -308,6 +308,46 @@ mod tests {
         let outsider = member(&core, "Ken", false);
         assert_eq!(found(&core, &outsider, "nobody"), Vec::<String>::new());
         assert_eq!(seen(&outsider), ["Roadmap news"]);
+    }
+
+    #[test]
+    fn pages_in_a_personal_area_are_found_by_its_member_alone() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let linus = member(&core, "Linus", false);
+        let ada = member(&core, "Ada", true);
+        let personal = crate::ops::testing::personal_area(&core, &grace);
+        let personal = crate::ops::areas::get_area(&core, &grace, crate::ops::areas::AreaId { id: personal })
+            .unwrap()
+            .output;
+        let note = page(&core, &grace, &personal, "Salary thoughts");
+        write(&core, &note, "Ask for a raise in March.\n");
+        let handbook = area(&core, &ada, "Handbook");
+        page(&core, &ada, &handbook, "Salary bands");
+        give_role(&core, &handbook.id, &grace, Role::Read);
+        give_role(&core, &handbook.id, &linus, Role::Read);
+
+        let seen = |principal| {
+            let mut titles = found(&core, principal, "salary");
+            titles.sort();
+            titles
+        };
+        assert_eq!(seen(&grace), ["Salary bands", "Salary thoughts"]);
+        assert_eq!(seen(&linus), ["Salary bands"]);
+        assert_eq!(seen(&ada), ["Salary bands"]);
+        assert!(found(&core, &ada, "raise").is_empty());
+
+        // A Token limited to chosen Areas searches only those.
+        let limited = crate::ops::tokens::NewToken {
+            name: "Handbook only".into(),
+            read_only: false,
+            area_ids: Some(vec![handbook.id.clone()]),
+            expires_at: None,
+            agent_id: None,
+        };
+        let created = crate::ops::tokens::create_token(&core, &grace, limited).unwrap().output;
+        let acting = crate::ops::tokens::principal_for_token(&core, &created.value).unwrap().unwrap();
+        assert_eq!(seen(&acting), ["Salary bands"]);
     }
 
     #[test]
