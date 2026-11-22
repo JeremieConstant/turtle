@@ -137,20 +137,28 @@ pub struct VersionList {
 
 pub fn list_versions(core: &Core, principal: &Principal, input: VersionsOfPage) -> OpResult<VersionList> {
     readable_page(core, principal, &input.page_id)?;
-    let db = core.db();
+    let versions = summaries(&core.db(), &input.page_id, None)?;
+    Ok(VersionList { versions }.into())
+}
+
+/// The Versions of a Page without their content, newest first; only the
+/// newest `limit` of them if given.
+fn summaries(db: &Connection, page_id: &str, limit: Option<u32>) -> rusqlite::Result<Vec<VersionSummary>> {
     let mut statement = db.prepare(
-        "SELECT number, recorded_at, restored_from FROM versions WHERE page_id = ?1 ORDER BY number DESC",
+        "SELECT number, recorded_at, restored_from FROM versions WHERE page_id = ?1 ORDER BY number DESC LIMIT ?2",
     )?;
-    let rows = statement.query_map([&input.page_id], |row| {
+    // SQLite takes a negative limit as none.
+    let limit = limit.map_or(-1, i64::from);
+    let rows = statement.query_map(rusqlite::params![page_id, limit], |row| {
         Ok((row.get::<_, u32>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<u32>>(2)?))
     })?;
     let mut versions = Vec::new();
     for row in rows {
         let (number, recorded_at, restored_from) = row?;
-        let authors = authors_of(&db, &input.page_id, number)?;
+        let authors = authors_of(db, page_id, number)?;
         versions.push(VersionSummary { number, recorded_at, authors, restored_from });
     }
-    Ok(VersionList { versions }.into())
+    Ok(versions)
 }
 
 pub fn get_version(core: &Core, principal: &Principal, input: VersionOfPage) -> OpResult<Version> {
@@ -211,6 +219,12 @@ pub(super) fn version(db: &Connection, page_id: &str, number: u32) -> Result<Ver
         found.ok_or_else(|| OpError::NotFound("There is no such Version.".into()))?;
     let authors = authors_of(db, page_id, number)?;
     Ok(Version { summary: VersionSummary { number, recorded_at, authors, restored_from }, markdown })
+}
+
+/// The newest Version of a Page, without its content; none before the first.
+/// Not an operation: `get_page` reports it as when the Page was last edited.
+pub(super) fn newest(db: &Connection, page_id: &str) -> rusqlite::Result<Option<VersionSummary>> {
+    Ok(summaries(db, page_id, Some(1))?.pop())
 }
 
 /// Checks that the principal can read the Page; one they cannot read is not found.

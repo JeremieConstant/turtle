@@ -3,6 +3,7 @@
 use super::accounts::random_hex;
 use super::areas::{self, Area};
 use super::permissions::{self, Role};
+use super::versions::{self, Author};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
@@ -33,7 +34,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "get_page",
-            "Gets a Page by its ID, with its Area and the caller's Role on it. A Page the caller cannot read is reported as not found.",
+            "Gets a Page by its ID, with its Area, the Folders and Pages it is beneath, when and by whom it was last edited, and the caller's Role on it. A Page the caller cannot read is reported as not found.",
             get_page,
         )
         .changes = false;
@@ -101,8 +102,34 @@ pub struct Page {
     pub title: String,
     /// The Area the Page is in.
     pub area: Area,
+    /// The Folders and Pages the Page is beneath, from the top of the Area
+    /// down. Those the caller cannot read are left out.
+    pub path: Vec<PathEntry>,
     /// The Role the caller holds on the Page.
     pub role: Role,
+    /// Its newest Version: when it was recorded and whose changes it holds.
+    /// None for a Page nobody has written in yet. Changes made since then
+    /// count once they are recorded as a Version.
+    pub last_edited: Option<LastEdited>,
+}
+
+/// A Folder or Page above a Page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct PathEntry {
+    /// Its ID; a Page opens by it with `get_page`.
+    pub id: String,
+    /// Whether it is a Folder or a Page.
+    pub kind: Kind,
+    pub title: String,
+}
+
+/// When a Page was last edited and by whom, as its newest Version says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct LastEdited {
+    /// Seconds since the Unix epoch.
+    pub at: i64,
+    /// Members, Agents acting for a Member, and standalone Agents, told apart.
+    pub by: Vec<Author>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -211,13 +238,50 @@ pub fn get_page(core: &Core, principal: &Principal, input: PageId) -> OpResult<P
     let db = core.db();
     let found = readable_entry(&db, principal, &input.id, Kind::Page)?;
     let area = areas::readable_area(&db, principal, &found.area_id)?;
+    let path = path_to(&db, principal, &input.id)?;
+    let last_edited = versions::newest(&db, &input.id)?.map(|newest| LastEdited {
+        at: newest.recorded_at,
+        by: newest.authors,
+    });
     Ok(Page {
         id: input.id,
         title: found.title,
         area,
+        path,
         role: found.role,
+        last_edited,
     }
     .into())
+}
+
+/// The Folders and Pages above an Entry that the principal can read, from
+/// the top of the Area down, without the Area's hidden root.
+fn path_to(db: &Connection, principal: &Principal, id: &str) -> Result<Vec<PathEntry>, OpError> {
+    let mut statement = db.prepare(
+        "WITH RECURSIVE upward (id, parent_id, kind, title, depth) AS (
+             SELECT id, parent_id, kind, title, 0 FROM nodes WHERE id = ?1
+             UNION ALL
+             SELECT nodes.id, nodes.parent_id, nodes.kind, nodes.title, upward.depth + 1
+             FROM nodes JOIN upward ON nodes.id = upward.parent_id
+         )
+         SELECT id, kind, title FROM upward
+         WHERE depth > 0 AND parent_id IS NOT NULL
+         ORDER BY depth DESC",
+    )?;
+    let rows = statement.query_map([id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+    let mut path = Vec::new();
+    for row in rows {
+        let (id, kind, title) = row?;
+        let kind = Kind::from_stored(&kind)
+            .ok_or_else(|| anyhow::anyhow!("node {id} has the unknown kind {kind}"))?;
+        // Hidden is not found: an Entry the caller cannot read is not named.
+        if permissions::role_on(db, principal, &id)?.is_some() {
+            path.push(PathEntry { id, kind, title });
+        }
+    }
+    Ok(path)
 }
 
 /// A Page whose content the principal may change: with the Write Role. Not an
@@ -577,6 +641,66 @@ mod tests {
             let outcome = get_page(&core, principal, PageId { id: id.clone() });
             assert_eq!(outcome.unwrap_err().kind(), kind, "{principal:?} {id}");
         }
+    }
+
+    /// The path of a Page as "kind title" pairs.
+    fn path_of(core: &Core, principal: &Principal, page: &Entry) -> Vec<String> {
+        let opened = get_page(core, principal, PageId { id: page.id.clone() }).unwrap().output;
+        opened.path.iter().map(|step| format!("{} {}", step.kind.stored(), step.title)).collect()
+    }
+
+    #[test]
+    fn a_page_comes_with_the_folders_and_pages_it_is_beneath_from_the_top_down() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area = area(&core, &grace);
+        let guides = create_folder(&core, &grace, at_top(&area, "Guides")).unwrap().output;
+        let handbook = create_page(&core, &grace, beneath(&area, &guides, "Handbook").into()).unwrap().output;
+        let setup = create_page(&core, &grace, beneath(&area, &handbook, "Setup").into()).unwrap().output;
+        let top = create_page(&core, &grace, at_top(&area, "Welcome").into()).unwrap().output;
+
+        assert_eq!(path_of(&core, &grace, &setup), ["folder Guides", "page Handbook"]);
+        assert_eq!(path_of(&core, &grace, &handbook), ["folder Guides"]);
+        assert_eq!(path_of(&core, &grace, &top), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_page_says_when_it_was_last_edited_and_by_whom() {
+        use crate::ops::content::{replace_page, NewContent};
+        use crate::ops::versions::Author;
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area = area(&core, &grace);
+        let empty = create_page(&core, &grace, at_top(&area, "Empty").into()).unwrap().output;
+        let notes = create_page(
+            &core,
+            &grace,
+            NewPage { entry: at_top(&area, "Notes"), markdown: Some("First.".into()) },
+        )
+        .unwrap()
+        .output;
+        let dennis = member(&core, "Dennis", false);
+        give_role(&core, &area.id, &dennis, Role::Write);
+
+        let opened = |id: &str| get_page(&core, &grace, PageId { id: id.into() }).unwrap().output;
+        assert_eq!(opened(&empty.id).last_edited, None, "a Page nobody has written in");
+        assert_eq!(
+            opened(&notes.id).last_edited,
+            Some(LastEdited {
+                at: 1_700_000_000,
+                by: vec![Author::Member { id: "member-grace".into(), name: "Grace".into() }],
+            })
+        );
+
+        core.advance(300);
+        replace_page(&core, &dennis, NewContent { page_id: notes.id.clone(), markdown: "Second.".into() }).unwrap();
+        assert_eq!(
+            opened(&notes.id).last_edited,
+            Some(LastEdited {
+                at: 1_700_000_300,
+                by: vec![Author::Member { id: "member-dennis".into(), name: "Dennis".into() }],
+            })
+        );
     }
 
     #[test]

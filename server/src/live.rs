@@ -252,16 +252,25 @@ impl Pages {
             let after = crate::markdown::to_markdown(&crate::ydoc::read(&page.doc));
             (before, state.unrecorded.take(), after, update)
         };
+        let changed = update.is_some();
         if let Some(update) = update {
             let _ = page.frames.send((FROM_TURTLE, frame(FRAME_UPDATE, &update)));
+        }
+        // Editors take the announcement as their cue to show who changed the
+        // Page, also in its last edit, so it comes once the Version is there.
+        let announce = || {
+            if !changed {
+                return;
+            }
             // Only presence: the change stands even when it cannot be shown.
             if let Err(error) = self.announce_agent(page, by) {
                 eprintln!("announcing an Agent on Page {} failed: {error:#}", page.id);
             }
-        }
+        };
         let now = (self.clock)();
         if let Some(taken) = taken {
             if let Err(error) = self.insert_version(&page.id, &before, now, None, &taken.authors) {
+                announce();
                 // Both wait for the next round, together.
                 let mut authors = taken.authors;
                 authors.insert(by.clone());
@@ -273,6 +282,7 @@ impl Pages {
         if recorded.is_err() {
             self.put_back(page, Unrecorded { since: now, authors: BTreeSet::from([by.clone()]) });
         }
+        announce();
         recorded.map(Ok)
     }
 

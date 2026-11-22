@@ -4,7 +4,7 @@
  * put a menu beside its trigger and to move through it with the arrow keys.
  */
 
-const items = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+const items = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')]
 
 /** Opens a menu at its trigger, above or below it, kept inside the window, with the first item focused. */
 export function openMenu(menu: HTMLElement, trigger: HTMLElement, side: 'below' | 'above' = 'below') {
