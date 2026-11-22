@@ -14,9 +14,17 @@ _Avoid_: Tenant, Mandant, organisation, instance
 A top-level container in the Workspace that holds one tree of Pages and Folders and is the unit permissions are granted on.
 _Avoid_: Space, Bereich, project, wiki
 
+**Personal Area**:
+The Area that belongs to one Member alone: only that Member sees it, and nothing in it can be granted or shared; to share something, the Member moves it to another Area.
+_Avoid_: Private space, inbox, drafts, home
+
 **Page**:
 A document with content, placed in the tree of an Area; it may have Pages and Folders beneath it.
 _Avoid_: Site, Seite, document, article
+
+**Quick Note**:
+A Page a Member writes without choosing a place for it; it lands in their Personal Area and can be moved to another Area afterwards, and it stays known as that Member's Quick Note wherever it sits.
+_Avoid_: Note, draft, scratch, memo
 
 **Folder**:
 A container in the tree of an Area that groups Pages and other Folders and has no content of its own.
@@ -46,14 +54,14 @@ _Avoid_: Revision, snapshot, history entry
 Where deleted Pages and Folders are kept so they can be brought back.
 _Avoid_: Recycle bin, archive, Papierkorb
 
-### People and agents
-
 **Tag**:
-A free-form label on a Page, shared across the whole Workspace.
+A free-form label on a Page, shared across the whole Workspace; it ignores upper and lower case and exists as long as one Page carries it.
 _Avoid_: Label, category, keyword
 
+### People and agents
+
 **Member**:
-A person who belongs to the organisation and has an account in the Workspace.
+A person who belongs to the organisation and has an account in the Workspace, and with it a Personal Area.
 _Avoid_: User, account, Nutzer
 
 **Guest**:
@@ -61,7 +69,7 @@ An outside person with an account who is invited to specific Areas or Subtrees, 
 _Avoid_: External user, collaborator, visitor
 
 **Workspace Admin**:
-A Member who manages the other Members and can see every Area.
+A Member who manages the other Members and can see every Area except the Personal Areas of other active Members.
 _Avoid_: Superuser, owner, root
 
 **Agent**:
