@@ -31,6 +31,8 @@
     undo: 'M5.5 3.5L2.5 6.5l3 3M2.5 6.5h7a3.5 3.5 0 0 1 0 7H7.5',
     redo: 'M10.5 3.5l3 3-3 3M13.5 6.5h-7a3.5 3.5 0 0 0 0 7h2',
     caret: 'M5 6.5l3 3 3-3',
+    // A menu of choices marks the one in force; words alone would not show which.
+    check: 'M3.5 8.5l3 3 6-7',
     // Dots drawn as strokes of almost no length, so they need a thicker stroke to show.
     more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
   } as const

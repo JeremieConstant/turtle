@@ -74,7 +74,7 @@
   }
 
   input::placeholder {
-    color: var(--color-faint);
+    color: var(--color-muted);
   }
 
   /* Escape clears the field, so the browser's own button would be a second way to say the same. */
@@ -88,7 +88,7 @@
     border-radius: var(--radius-s);
     font-family: var(--font-body);
     font-size: var(--text-xs);
-    color: var(--color-faint);
+    color: var(--color-muted);
   }
 
   @media (max-width: 800px) {

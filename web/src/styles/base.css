@@ -82,6 +82,7 @@ dialog {
   padding: 0;
   border: var(--line) solid var(--color-line);
   border-radius: var(--radius-l);
+  background: var(--color-surface);
   box-shadow: var(--shadow-float);
   color: inherit;
 }
@@ -579,8 +580,9 @@ dialog[open] {
   }
 }
 
-/* Toasts (svelte-sonner), dressed in the same tokens as everything else. */
-[data-sonner-toaster] {
+/* Toasts (svelte-sonner), dressed in the same tokens as everything else.
+   :root outweighs the colours svelte-sonner sets for its own light and dark theme. */
+:root [data-sonner-toaster][data-sonner-theme] {
   --width: var(--width-toast);
   --border-radius: var(--radius-l);
   --normal-bg: var(--color-surface);
@@ -595,7 +597,7 @@ dialog[open] {
   font-size: var(--text-m);
 }
 
-[data-sonner-toaster] [data-sonner-toast] [data-description] {
+:root [data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-description] {
   color: var(--color-muted);
   font-size: var(--text-s);
 }

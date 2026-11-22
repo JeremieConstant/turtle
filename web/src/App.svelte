@@ -4,6 +4,7 @@
   import ConfirmDialog from './components/ConfirmDialog.svelte'
   import Icon from './components/Icon.svelte'
   import Sidebar from './components/Sidebar.svelte'
+  import { appearance } from './lib/appearance.svelte'
   import { router } from './lib/router.svelte'
   import { inShell, type Route } from './lib/routes'
   import { asksForSearch } from './lib/search'
@@ -174,7 +175,7 @@
 <ConfirmDialog />
 
 <!-- Short messages that stack in the corner and leave on their own. -->
-<Toaster position="bottom-right" visibleToasts={4} gap={8} offset={20} duration={4000} />
+<Toaster theme={appearance.choice} position="bottom-right" visibleToasts={4} gap={8} offset={20} duration={4000} />
 
 <style>
   .app {

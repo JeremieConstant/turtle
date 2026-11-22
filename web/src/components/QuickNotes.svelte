@@ -177,7 +177,7 @@
   }
 
   textarea::placeholder {
-    color: var(--color-faint);
+    color: var(--color-muted);
   }
 
   .foot {
@@ -212,9 +212,9 @@
 
   kbd {
     padding: 0 var(--space-1);
-    border: var(--line) solid color-mix(in srgb, var(--color-on-color) 25%, transparent);
+    border: var(--line) solid color-mix(in srgb, var(--color-bg) 25%, transparent);
     border-radius: var(--radius-s);
-    color: color-mix(in srgb, var(--color-on-color) 75%, transparent);
+    color: color-mix(in srgb, var(--color-bg) 75%, transparent);
     font-family: inherit;
     font-size: var(--text-xs);
   }

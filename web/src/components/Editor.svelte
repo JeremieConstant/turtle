@@ -6,7 +6,7 @@
   import type { Awareness } from 'y-protocols/awareness'
   import type * as Y from 'yjs'
   import { AgentChanges } from '../lib/agent-changes'
-  import type { Person } from '../lib/person'
+  import { personColor, type Person } from '../lib/person'
 
   const {
     doc,
@@ -39,12 +39,23 @@
         CollaborationCaret.configure({
           provider: connection,
           user: person,
-          // Someone's selection is tinted in their colour and, on hover, names them.
-          // The colour arrives checked: anything but a plain colour is dropped.
+          // Someone's cursor carries their name, and their selection is tinted in their
+          // colour and, on hover, names them. The colour is looked up from the number
+          // they sent, so it is the one of this browser's appearance.
+          render: user => {
+            const caret = document.createElement('span')
+            caret.classList.add('collaboration-carets__caret')
+            caret.style.setProperty('--person', personColor(user))
+            const label = document.createElement('div')
+            label.classList.add('collaboration-carets__label')
+            label.textContent = String(user.name ?? '')
+            caret.append(label)
+            return caret
+          },
           selectionRender: user => ({
             nodeName: 'span',
             class: 'remote-selection',
-            style: `--person: ${user.color}`,
+            style: `--person: ${personColor(user)}`,
             title: String(user.name ?? ''),
           }),
         }),
@@ -171,7 +182,7 @@
   .editor :global(.collaboration-carets__caret) {
     position: relative;
     margin: 0 calc(-1 * var(--line));
-    border-left: var(--line-thick) solid;
+    border-left: var(--line-thick) solid var(--person);
     pointer-events: none;
     word-break: normal;
   }
@@ -182,6 +193,7 @@
     left: calc(-1 * var(--line-thick));
     padding: var(--space-hair) var(--space-1);
     border-radius: var(--radius-s) var(--radius-s) var(--radius-s) 0;
+    background: var(--person);
     color: var(--color-on-color);
     font-size: var(--text-xs);
     font-weight: var(--weight-medium);

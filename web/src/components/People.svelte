@@ -6,7 +6,7 @@
    * marked in the text.
    */
   import type { Awareness } from 'y-protocols/awareness'
-  import type { Present } from '../lib/person'
+  import { personColor, type Present } from '../lib/person'
   import Icon from './Icon.svelte'
 
   const {
@@ -59,7 +59,7 @@
         <span class="visually-hidden">{present.member ? `, Agent of ${present.member}` : ', Agent'}</span>
       </li>
     {:else}
-      <li class="person" style:--person={present.color} title={present.name}>
+      <li class="person" style:--person={personColor(present)} title={present.name}>
         <span aria-hidden="true">{initials(present.name)}</span>
         <span class="visually-hidden">{present.name}</span>
       </li>

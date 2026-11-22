@@ -2,9 +2,10 @@
   /*
    * The sidebar of every screen in the shell: the search, the Areas the
    * person can read with the tree of the open one beneath its name, and at
-   * the foot the menu with the settings and signing out.
+   * the foot the menu with the settings, the appearance and signing out.
    */
   import { onDestroy, untrack } from 'svelte'
+  import { APPEARANCES, appearance, chooseAppearance, type Appearance } from '../lib/appearance.svelte'
   import { cubicOut } from 'svelte/easing'
   import { menuKeys, openMenu } from '../lib/menu'
   import { dur } from '../lib/motion'
@@ -101,6 +102,11 @@
 
   function go(event: MouseEvent, address: string) {
     router.follow(event, address)
+    accountMenu.hidePopover()
+  }
+
+  function choose(choice: Appearance) {
+    chooseAppearance(choice)
     accountMenu.hidePopover()
   }
 
@@ -222,6 +228,22 @@
     <a class="menu-item" role="menuitem" href="/settings/agents" onclick={event => go(event, '/settings/agents')}>Agents</a>
   {/if}
   <a class="menu-item" role="menuitem" href="/settings/tokens" onclick={event => go(event, '/settings/tokens')}>Tokens</a>
+  <hr />
+  <div role="group" aria-labelledby="appearance-label">
+    <p class="menu-label" id="appearance-label">Appearance</p>
+    {#each APPEARANCES as { value, label } (value)}
+      <button
+        type="button"
+        class="menu-item choice"
+        role="menuitemradio"
+        aria-checked={appearance.choice === value}
+        onclick={() => choose(value)}
+      >
+        {label}
+        {#if appearance.choice === value}<Icon name="check" size={14} />{/if}
+      </button>
+    {/each}
+  </div>
   <hr />
   <button type="button" class="menu-item" role="menuitem" onclick={signOut}>Sign out</button>
 </div>
@@ -404,6 +426,21 @@
     inset: auto;
     z-index: var(--layer-menu);
     min-width: var(--width-menu-s);
+  }
+
+  .menu-label {
+    margin: 0;
+    padding: var(--space-1) var(--space-3);
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+  }
+
+  .choice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
   }
 
   .menu hr {

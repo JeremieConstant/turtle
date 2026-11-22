@@ -4,50 +4,59 @@
  * properties only, so a design pass changes values in this file, not
  * structure elsewhere.
  *
+ * Every colour has a light and a dark value (issue #50), so the dark
+ * appearance changes this file only.
+ *
  * The palette is monochrome. Colour appears only where it means something:
  * focus and the drop target (--color-focus), the people editing a Page
  * (--color-person-*), and an Agent's change (--color-agent).
  */
 :root {
-  color-scheme: light;
+  /* Each colour is light-dark(light, dark): the browser picks by color-scheme,
+     which follows the system unless the person chose an appearance. */
+  color-scheme: light dark;
 
   /* Neutrals */
-  --color-bg: #ffffff;
-  --color-side: #f7f7f6;
-  --color-surface: #ffffff;
-  --color-sunken: #f2f2f0;
-  --color-hover: #ececea;
-  --color-selected: #e4e4e1;
-  --color-line: #e6e6e3;
-  --color-line-strong: #d4d4d0;
-  --color-text: #1a1a19;
-  --color-text-2: #4a4a47;
-  --color-muted: #82827d;
-  --color-faint: #b0b0aa;
+  --color-bg: light-dark(#ffffff, #191918);
+  --color-side: light-dark(#f7f7f6, #1f1f1e);
+  --color-surface: light-dark(#ffffff, #242423);
+  --color-sunken: light-dark(#f2f2f0, #2a2a28);
+  --color-hover: light-dark(#ececea, #313130);
+  --color-selected: light-dark(#e4e4e1, #3a3a38);
+  /* Lines between rows only divide; the strong line shows where a field or button is. */
+  --color-line: light-dark(#e6e6e3, #30302e);
+  --color-line-strong: light-dark(#8a8a84, #74746f);
+  --color-text: light-dark(#1a1a19, #ececea);
+  --color-text-2: light-dark(#4a4a47, #c4c4bf);
+  --color-muted: light-dark(#63635e, #a6a6a0);
+  /* Only for what needs no contrast: a control that cannot be used, a separator. */
+  --color-faint: light-dark(#b0b0aa, #5c5c58);
 
   /* Meaning */
-  --color-focus: #2f6bdc;
-  --color-focus-soft: rgb(47 107 220 / 0.1);
-  --color-agent: #0f7b6c;
-  --color-agent-soft: rgb(15 123 108 / 0.1);
+  --color-focus: light-dark(#2f6bdc, #6b9bf5);
+  --color-focus-soft: light-dark(rgb(47 107 220 / 0.1), rgb(107 155 245 / 0.18));
+  --color-agent: light-dark(#0f7b6c, #3fbfa8);
+  --color-agent-soft: light-dark(rgb(15 123 108 / 0.1), rgb(63 191 168 / 0.14));
   /* How strongly another person's selection is tinted in their colour. */
   --mix-selection: 18%;
   /* A bar that stays at the top while the Page scrolls beneath it. */
-  --color-bar: rgb(255 255 255 / 0.9);
+  --color-bar: light-dark(rgb(255 255 255 / 0.9), rgb(25 25 24 / 0.9));
   --blur-bar: 12px;
-  /* The colours people are told apart by. One is picked per person and sent
-     to the others; person.ts knows how many there are. */
-  --color-person-1: #d9480f;
-  --color-person-2: #c2255c;
-  --color-person-3: #7c3aed;
-  --color-person-4: #1d4ed8;
-  --color-person-5: #4d7c0f;
-  --color-person-6: #b45309;
-  --color-on-color: #ffffff;
-  --color-danger: #b42318;
+  /* The colours people are told apart by. A person is sent the number of
+     theirs, never the colour itself, so everyone sees the same named colour
+     in their own appearance; person.ts knows how many there are. */
+  --color-person-1: light-dark(#c4410d, #ff8a5c);
+  --color-person-2: light-dark(#c2255c, #f472a6);
+  --color-person-3: light-dark(#7c3aed, #b197fc);
+  --color-person-4: light-dark(#1d4ed8, #74a0f7);
+  --color-person-5: light-dark(#4d7c0f, #94c94a);
+  --color-person-6: light-dark(#b45309, #f0a64a);
+  /* Text on one of the colours above, and on the danger colour. */
+  --color-on-color: light-dark(#ffffff, #191918);
+  --color-danger: light-dark(#b42318, #ff8a80);
   /* What lies over the page behind a dialog and behind the drawer. */
-  --color-backdrop: rgb(0 0 0 / 0.18);
-  --color-scrim: rgb(0 0 0 / 0.2);
+  --color-backdrop: light-dark(rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.5));
+  --color-scrim: light-dark(rgb(0 0 0 / 0.2), rgb(0 0 0 / 0.5));
   /* How much a control that cannot be used right now fades. */
   --opacity-disabled: 0.45;
   /* How much the red button lightens under the pointer. */
@@ -166,7 +175,9 @@
   --layer-drawer: 30;
 
   /* Depth: one shadow, used only on things that float above the page */
-  --shadow-float: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px rgb(0 0 0 / 0.1);
+  --shadow-float:
+    0 1px 2px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.3)),
+    0 8px 24px light-dark(rgb(0 0 0 / 0.1), rgb(0 0 0 / 0.45));
 
   /* Motion. Short and quiet; reduced motion sets every duration to 0. */
   --dur-instant: 80ms;
@@ -181,6 +192,15 @@
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --press-scale: 0.97;
   --press-scale-icon: 0.92;
+}
+
+/* A choice the person made in this browser; without one, the system decides. */
+:root[data-appearance='light'] {
+  color-scheme: light;
+}
+
+:root[data-appearance='dark'] {
+  color-scheme: dark;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -285,7 +285,7 @@
   }
 
   kbd {
-    color: var(--color-faint);
+    color: var(--color-muted);
     font-family: var(--font-body);
     font-size: var(--text-xs);
   }
