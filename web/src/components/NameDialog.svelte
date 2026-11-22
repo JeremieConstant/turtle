@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import { OperationError } from '../lib/ops'
 
-  /** A small dialog that asks for one name and acts on it: a new Area, Page or Folder. */
+  /** A small dialog that asks for one name and acts on it: a new Area, Page or Folder, or a new name for one. */
   const {
     label,
     action,
@@ -16,14 +17,19 @@
   } = $props()
 
   let dialog: HTMLDialogElement
+  let input: HTMLInputElement
   let name = $state('')
   let busy = $state(false)
   let error = $state<string | null>(null)
 
-  export function open() {
-    name = ''
+  /** Opens the dialog. A name given here is filled in and selected, so typing replaces it. */
+  export async function open(initial = '') {
+    name = initial
     error = null
     dialog.showModal()
+    // The name reaches the field once Svelte has updated it.
+    await tick()
+    input.select()
   }
 
   async function submit(event: SubmitEvent) {
@@ -46,7 +52,7 @@
     <label>
       <span>{label}</span>
       <!-- svelte-ignore a11y_autofocus -->
-      <input bind:value={name} autocomplete="off" autofocus />
+      <input bind:this={input} bind:value={name} autocomplete="off" autofocus />
     </label>
     {#if error}
       <p class="error" role="alert">{error}</p>

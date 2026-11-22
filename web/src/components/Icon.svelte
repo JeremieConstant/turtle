@@ -9,6 +9,8 @@
     collapse: 'M3 5.5h7.5V13H3zM5.5 3h7.5v7.5M4.75 9.25h4',
     expand: 'M3 5.5h7.5V13H3zM5.5 3h7.5v7.5M4.75 9.25h4M6.75 7.25v4',
     menu: 'M2.5 4.5h11M2.5 8h11M2.5 11.5h11',
+    // Dots drawn as strokes of almost no length, so they need a thicker stroke to show.
+    more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
   } as const
   export type IconName = keyof typeof PATHS
 </script>
@@ -18,7 +20,7 @@
 </script>
 
 <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-  <path d={PATHS[name]} stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path d={PATHS[name]} stroke="currentColor" stroke-width={name === 'more' ? 2.4 : 1.5} stroke-linecap="round" stroke-linejoin="round" />
 </svg>
 
 <style>
