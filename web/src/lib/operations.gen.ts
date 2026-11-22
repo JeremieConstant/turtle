@@ -120,6 +120,13 @@ export type GrantList = {
 
 export type Kind = "page" | "folder"
 
+export type LastEdited = {
+  /** Seconds since the Unix epoch. */
+  at: number
+  /** Members, Agents acting for a Member, and standalone Agents, told apart. */
+  by: Author[]
+}
+
 export type Member = {
   email: string
   id: string
@@ -144,6 +151,13 @@ export type Page = {
   /** The Area the Page is in. */
   area: Area
   id: string
+  /** Its newest Version: when it was recorded and whose changes it holds.
+None for a Page nobody has written in yet. Changes made since then
+count once they are recorded as a Version. */
+  last_edited?: LastEdited | null
+  /** The Folders and Pages the Page is beneath, from the top of the Area
+down. Those the caller cannot read are left out. */
+  path: PathEntry[]
   /** The Role the caller holds on the Page. */
   role: Role
   title: string
@@ -152,6 +166,14 @@ export type Page = {
 export type PageMarkdown = {
   id: string
   markdown: string
+  title: string
+}
+
+export type PathEntry = {
+  /** Its ID; a Page opens by it with `get_page`. */
+  id: string
+  /** Whether it is a Folder or a Page. */
+  kind: Kind
   title: string
 }
 
@@ -472,7 +494,7 @@ export type Operations = {
     }
     output: Entry
   }
-  /** Gets a Page by its ID, with its Area and the caller's Role on it. A Page the caller cannot read is reported as not found. */
+  /** Gets a Page by its ID, with its Area, the Folders and Pages it is beneath, when and by whom it was last edited, and the caller's Role on it. A Page the caller cannot read is reported as not found. */
   get_page: {
     input: {
       id: string

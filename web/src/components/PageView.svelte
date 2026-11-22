@@ -1,13 +1,23 @@
 <script lang="ts">
+  /*
+   * One open Page: where it sits, who is on it, its title, when and by whom it
+   * was last edited, and its content, edited live with the others. There is no
+   * "saved" message: every change goes over the connection as it is made, so
+   * the connection's state is the only signal about saving.
+   */
   import type { Editor as TipTap } from '@tiptap/core'
   import { onDestroy, untrack } from 'svelte'
+  import { SvelteSet } from 'svelte/reactivity'
   import * as Y from 'yjs'
-  import { Connection, type Status } from '../lib/connection'
+  import { beginAgentChange, endAgentChange, unmarkAgentChange } from '../lib/agent-changes'
+  import { Connection, type ChangingAgent, type Status } from '../lib/connection'
   import type { Page } from '../lib/operations.gen'
-  import { currentPerson } from '../lib/person'
+  import { currentPerson, type Present } from '../lib/person'
   import { router } from '../lib/router.svelte'
-  import { areaAddress } from '../lib/routes'
+  import { areaAddress, pageAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
+  import { exactTime, relativeTime } from '../lib/time'
+  import { authorName } from '../lib/versions'
   import ConnectionStatus from './ConnectionStatus.svelte'
   import Editor from './Editor.svelte'
   import MarkdownView from './MarkdownView.svelte'
@@ -18,21 +28,31 @@
   const {
     page,
     ondisconnect,
+    onagent,
   }: {
     /** A Page that has been found and may be read. It is opened once and stays open while this lives. */
     page: Page
     /** Called whenever the connection drops, so the screen can find out whether access is gone. */
     ondisconnect: () => void
+    /** Called when Turtle announces an Agent, once its change is recorded as a Version. */
+    onagent: () => void
   } = $props()
   const id = untrack(() => page.id)
   const editable = $derived(page.role !== 'read')
-
   const areaLink = $derived(areaAddress(page.area.id, page.area.name))
+
   let status = $state<Status>('connecting')
   let loaded = $state(false)
   let editor = $state.raw<TipTap | null>(null)
   let markdownShown = $state(false)
   let versionsShown = $state(false)
+
+  // Relative times ("4 minutes ago") move on while the Page is open.
+  let now = $state(Math.floor(Date.now() / 1000))
+  $effect(() => {
+    const ticking = setInterval(() => (now = Math.floor(Date.now() / 1000)), 30_000)
+    return () => clearInterval(ticking)
+  })
 
   // The app shows Pages only to a signed-in Member.
   const person = currentPerson(session.member?.name ?? 'Unknown')
@@ -45,89 +65,267 @@
       if (next === 'disconnected') ondisconnect()
     },
     () => (loaded = true),
+    agentChanged,
   )
+
+  /** As long as the mark holds and fades in the editor's styles. */
+  const AGENT_MARKED_MS = 7_400
+  let marks = 0
+  /** The Agents whose change is marked now. */
+  const working = new SvelteSet<string>()
+  /** How many of each Agent's changes are marked now, so each stays lit until its last one fades. */
+  const marked = new Map<string, number>()
+  const timers = new Set<ReturnType<typeof setTimeout>>()
+
+  /** An Agent's change arrives, naming the Agent: exactly that change is marked with its name. */
+  function agentChanged(agent: ChangingAgent, apply: () => void) {
+    const mark = `agent-${++marks}`
+    // The editor may still be starting; the change then shows without a mark.
+    const markedIn = editor && !editor.isDestroyed ? editor : null
+    markedIn?.view.dispatch(beginAgentChange(markedIn.state, agent.name, mark))
+    try {
+      apply()
+    } finally {
+      if (markedIn && !markedIn.isDestroyed) markedIn.view.dispatch(endAgentChange(markedIn.state))
+    }
+    working.add(agent.name)
+    marked.set(agent.name, (marked.get(agent.name) ?? 0) + 1)
+    const timer = setTimeout(() => {
+      timers.delete(timer)
+      if (markedIn && !markedIn.isDestroyed) markedIn.view.dispatch(unmarkAgentChange(markedIn.state, mark))
+      const left = (marked.get(agent.name) ?? 1) - 1
+      if (left > 0) marked.set(agent.name, left)
+      else {
+        marked.delete(agent.name)
+        working.delete(agent.name)
+      }
+    }, AGENT_MARKED_MS)
+    timers.add(timer)
+  }
+
+  // Turtle announces an Agent once its change is recorded as a Version, so
+  // that is when the Page reads who last edited it.
+  connection.awareness.on('update', ({ added, updated }: { added: number[]; updated: number[] }, origin: unknown) => {
+    if (origin !== connection) return
+    const states = connection.awareness.getStates()
+    const agentAnnounced = [...added, ...updated].some(client => {
+      const user = states.get(client)?.user as Present | undefined
+      return user !== undefined && 'agent' in user
+    })
+    if (agentAnnounced) onagent()
+  })
+
   onDestroy(() => {
+    timers.forEach(clearTimeout)
     connection.close()
     doc.destroy()
   })
+
+  const edited = $derived(page.last_edited)
+  /** Separates the names of the authors as a sentence does: "A, B and C". */
+  const joiner = (index: number, count: number) => (index === 0 ? '' : index === count - 1 ? ' and ' : ', ')
 </script>
 
-<header>
-  <a class="area" href={areaLink} onclick={event => router.follow(event, areaLink)}>{page.area.name}</a>
-  <span class="title">{page.title}</span>
-  <span class="present"><People awareness={connection.awareness} /></span>
-  <ConnectionStatus {status} />
-</header>
+<article class="page">
+  <header class="bar">
+    <nav class="path" aria-label="Where this Page is">
+      <a href={areaLink} onclick={event => router.follow(event, areaLink)}>{page.area.name}</a>
+      {#each page.path as entry (entry.id)}
+        <span class="separator" aria-hidden="true">/</span>
+        {#if entry.kind === 'page'}
+          {@const link = pageAddress(entry.id, entry.title)}
+          <a href={link} onclick={event => router.follow(event, link)}>{entry.title}</a>
+        {:else}
+          <span>{entry.title}</span>
+        {/if}
+      {/each}
+    </nav>
+    <div class="side">
+      <People awareness={connection.awareness} {working} />
+      <ConnectionStatus {status} />
+      {#if editor}
+        <!-- People never see Markdown unless they ask for it: this is that switch. -->
+        <button type="button" class="btn" aria-pressed={markdownShown} onclick={() => (markdownShown = !markdownShown)}>
+          Markdown
+        </button>
+      {/if}
+      <button type="button" class="btn" aria-pressed={versionsShown} onclick={() => (versionsShown = !versionsShown)}>
+        Versions
+      </button>
+    </div>
+  </header>
 
-<!-- Someone who can only read gets no formatting buttons. -->
-<Toolbar editor={editable ? editor : null}>
-  {#if editor}
-    <!-- People never see Markdown unless they ask for it: this is that switch. -->
-    <button type="button" onclick={() => (markdownShown = !markdownShown)}>
-      {markdownShown ? 'Hide Markdown' : 'Show Markdown'}
-    </button>
-  {/if}
-  <button type="button" onclick={() => (versionsShown = !versionsShown)}>
-    {versionsShown ? 'Hide Versions' : 'Versions'}
-  </button>
-</Toolbar>
+  <div class="columns">
+    <div class="body">
+      <div class="head">
+        <h1 class="title">{page.title}</h1>
+        <p class="meta">
+          {#if edited}
+            <span class="edited">
+              Edited
+              <time datetime={new Date(edited.at * 1000).toISOString()} title={exactTime(edited.at)}>
+                {relativeTime(edited.at, now)}
+              </time>
+              by
+              {#each edited.by as author, index}{joiner(index, edited.by.length)}<span class:agent={author.kind !== 'member'}
+                  >{authorName(author)}</span
+                >{:else}someone who is no longer here{/each}
+            </span>
+          {/if}
+          {#if !editable}
+            <span class="role">You can read this Page but not change it</span>
+          {/if}
+        </p>
+      </div>
 
-<main>
-  <div class="editor">
-    <!-- The editor starts only once the stored content is here, so it never
-         writes into an empty Page that is about to be filled. -->
-    {#if loaded}
-      <Editor {doc} {connection} {person} {editable} onready={started => (editor = started)} />
+      <!-- Someone who can only read gets no formatting buttons. -->
+      {#if editable && editor}
+        <Toolbar {editor} />
+      {/if}
+
+      <!-- The editor starts only once the stored content is here, so it never
+           writes into an empty Page that is about to be filled. -->
+      {#if loaded}
+        <Editor {doc} {connection} {person} {editable} onready={started => (editor = started)} />
+      {/if}
+    </div>
+
+    {#if markdownShown}
+      <aside class="panel"><MarkdownView pageId={id} {doc} /></aside>
+    {/if}
+    {#if versionsShown}
+      <aside class="panel"><Versions pageId={id} {editable} /></aside>
     {/if}
   </div>
-  {#if markdownShown}
-    <div class="side"><MarkdownView pageId={id} {doc} /></div>
-  {/if}
-  {#if versionsShown}
-    <div class="side"><Versions pageId={id} {editable} /></div>
-  {/if}
-</main>
+</article>
 
 <style>
-  header {
+  .page {
+    min-height: 100%;
+  }
+
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
     display: flex;
+    /* Where the path and the people do not fit side by side, the path keeps a row of its own. */
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3);
+    justify-content: space-between;
+    gap: var(--space-4);
     min-height: var(--height-bar);
-    padding: var(--space-2) var(--space-4);
-    border-bottom: var(--line) solid var(--color-line);
-    font-size: var(--text-m);
+    padding: var(--space-1) var(--space-6);
+    background: var(--color-bar);
+    backdrop-filter: blur(var(--blur-bar)) saturate(180%);
   }
 
-  .area {
-    color: var(--color-muted);
-  }
-
-  .title {
-    font-weight: var(--weight-medium);
-  }
-
-  .present {
-    margin-left: auto;
-  }
-
-  main {
+  .path {
+    flex: 1 1 var(--width-menu);
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-6);
-    max-width: var(--width-content);
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-4);
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    color: var(--color-muted);
+    font-size: var(--text-s);
+    white-space: nowrap;
+    overflow: hidden;
   }
 
-  .editor {
-    flex: 1 1 var(--width-editor);
-    min-width: 0;
+  .path > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .path a {
+    text-decoration: none;
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+
+  .path a:hover {
+    color: var(--color-text);
+  }
+
+  .path .separator {
+    flex: none;
+    color: var(--color-faint);
   }
 
   .side {
-    flex: 1 1 var(--width-side);
+    flex: none;
+    display: flex;
+    margin-left: auto;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .columns {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-8);
+    padding: var(--space-10) var(--space-6) 0;
+  }
+
+  .body {
+    flex: 1 1 var(--width-editor);
     min-width: 0;
+    max-width: var(--width-text);
+  }
+
+  .panel {
+    flex: 0 1 var(--width-side);
+    min-width: 0;
+  }
+
+  .head {
+    margin-bottom: var(--space-8);
+  }
+
+  .title {
+    margin: 0;
+    font-size: var(--text-h1);
+    font-weight: var(--weight-strong);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-display);
+    overflow-wrap: anywhere;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: var(--space-3) 0 0;
+    color: var(--color-muted);
+    font-size: var(--text-s);
+  }
+
+  .meta:empty {
+    display: none;
+  }
+
+  .edited .agent {
+    color: var(--color-agent);
+    font-weight: var(--weight-medium);
+  }
+
+  .role {
+    color: var(--color-text-2);
+  }
+
+  @media (max-width: 800px) {
+    /* Two rows of bar would hide too much of a small screen: it scrolls away with the Page. */
+    .bar {
+      position: static;
+      padding: var(--space-1) var(--space-4);
+    }
+
+    .columns {
+      padding: var(--space-6) var(--space-4) 0;
+    }
+
+    .title {
+      font-size: var(--text-h2);
+    }
   }
 </style>

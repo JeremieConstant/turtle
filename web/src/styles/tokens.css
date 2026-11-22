@@ -30,6 +30,11 @@
   --color-focus-soft: rgb(47 107 220 / 0.1);
   --color-agent: #0f7b6c;
   --color-agent-soft: rgb(15 123 108 / 0.1);
+  /* How strongly another person's selection is tinted in their colour. */
+  --mix-selection: 18%;
+  /* A bar that stays at the top while the Page scrolls beneath it. */
+  --color-bar: rgb(255 255 255 / 0.9);
+  --blur-bar: 12px;
   /* The colours people are told apart by. One is picked per person and sent
      to the others; person.ts knows how many there are. */
   --color-person-1: #d9480f;
@@ -87,6 +92,12 @@
   --text-search: 1.25rem;
   /* Relative to the surrounding text. */
   --text-code-inline: 0.9em;
+  /* The rhythm of a Page's content, relative to its text. */
+  --space-block: 0.85em;
+  --space-heading-above: 1.75em;
+  --space-heading-below: 0.5em;
+  --space-list-item: 0.2em;
+  --indent-list: 1.4em;
   /* How far a cursor's name sits above the line it is on. */
   --offset-caret-label: -1.4em;
   --leading-tight: 1.2;
@@ -129,6 +140,22 @@
   --size-icon-button: 26px;
   --size-chevron: 18px;
   --size-mark: 20px;
+  /* A person on a Page, as a round mark with their initials. */
+  --size-avatar: 26px;
+  --size-avatar-text: 0.6875rem;
+  /* The formatting toolbar: its buttons, separators and the text style menu. */
+  --size-tool: 30px;
+  --height-tool-separator: 18px;
+  --width-text-style: 116px;
+  --width-text-style-menu: 220px;
+  /* An Agent's change: how far its band reaches past the text on either
+     side, where its rule and its name sit, and the Agent mark beside it. */
+  --reach-agent-band: 10px;
+  --offset-agent-rule: 12px;
+  --offset-agent-label: 22px;
+  --offset-agent-label-top: 0.15em;
+  --size-agent-diamond: 6px;
+  --text-agent-label: 0.6875rem;
   --layer-drag: 50;
   --layer-menu: 40;
   --layer-drawer: 30;
@@ -142,6 +169,9 @@
   --dur-base: 200ms;
   --dur-slow: 320ms;
   --dur-agent: 2400ms;
+  /* How long an Agent's change stays marked before the mark fades. Not a
+     duration of movement, so it holds under reduced motion too. */
+  --delay-agent: 5s;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --press-scale: 0.97;

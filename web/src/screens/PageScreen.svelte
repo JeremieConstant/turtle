@@ -56,6 +56,27 @@
   }
 
   /**
+   * Reads the Page again for when and by whom it was last edited. An Agent's
+   * change is recorded as a Version at once; people's changes within two
+   * minutes, so an open Page looks again now and then.
+   */
+  function refresh() {
+    call('get_page', { id })
+      .then(found => (page = found))
+      // A Page that cannot be read now is found out when the connection drops.
+      .catch(() => {})
+  }
+  const REFRESH_INTERVAL = 30_000
+
+  // Once the Page is found; reading it again must not start the interval over.
+  const opened = $derived(page !== null)
+  $effect(() => {
+    if (!opened) return
+    const refreshing = setInterval(refresh, REFRESH_INTERVAL)
+    return () => clearInterval(refreshing)
+  })
+
+  /**
    * The title the sidebar's tree last showed for this Page. When it changes,
    * the Page was renamed from an Entry menu, and the screen follows. A tree
    * loaded before the Page is no newer than it, so its title is not taken.
@@ -94,7 +115,7 @@
 {:else if loadFailed}
   <main class="message">This Page could not be loaded. Reload the page to try again.</main>
 {:else if page}
-  <PageView {page} ondisconnect={checkAccess} />
+  <PageView {page} ondisconnect={checkAccess} onagent={refresh} />
 {/if}
 
 <style>

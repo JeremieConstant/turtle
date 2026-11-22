@@ -23,7 +23,8 @@ export function previousNumber(versions: Pick<VersionSummary, 'number'>[], numbe
   return index < 0 ? null : (versions[index + 1]?.number ?? null)
 }
 
-function authorName(author: Author): string {
+/** One author as a sentence names them, an Agent recognisable as one: "Claude (Agent of Ada)". */
+export function authorName(author: Author): string {
   switch (author.kind) {
     case 'member':
       return author.name

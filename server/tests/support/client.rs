@@ -24,6 +24,7 @@ use yrs::{
 const FRAME_UPDATE: u8 = 0;
 const FRAME_PRESENCE: u8 = 1;
 const FRAME_PRESENCE_REQUEST: u8 = 2;
+const FRAME_AGENT_UPDATE: u8 = 3;
 
 /// The fragment the editor binds the document to.
 const FRAGMENT: &str = "default";
@@ -108,7 +109,15 @@ impl TestClient {
                 let mut loaded = Some(loaded);
                 while let Some(Ok(message)) = stream.next().await {
                     let Message::Binary(data) = message else { continue };
-                    let Some((&kind, payload)) = data.split_first() else { continue };
+                    let Some((&kind, mut payload)) = data.split_first() else { continue };
+                    // An Agent's change is applied like any other; who made it is for people to see.
+                    let kind = if kind == FRAME_AGENT_UPDATE {
+                        let Some(len) = read_varuint(&mut payload) else { continue };
+                        payload = &payload[len as usize..];
+                        FRAME_UPDATE
+                    } else {
+                        kind
+                    };
                     match kind {
                         FRAME_UPDATE => {
                             let update = Update::decode_v1(payload).expect("the server sent an unreadable update");
