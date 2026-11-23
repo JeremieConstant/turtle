@@ -84,16 +84,29 @@ test('a link without a secret, or with more after it, is not found', () => {
   }
 })
 
-test('the Tokens screen has its own address under settings', () => {
-  expect(parseAddress('/settings/tokens')).toEqual({ screen: 'tokens' })
+test('Connected apps has its own address under settings', () => {
+  expect(parseAddress('/settings/connected-apps')).toEqual({ screen: 'connected-apps' })
+})
+
+test("every Member's connected apps, for a Workspace Admin, have their own address under settings", () => {
+  expect(parseAddress('/settings/all-connected-apps')).toEqual({ screen: 'all-connected-apps' })
+})
+
+test('the Tokens screen is gone, and its old address leads nowhere', () => {
+  expect(parseAddress('/settings/tokens')).toEqual({ screen: 'not-found' })
 })
 
 test('the Agents screen has its own address under settings', () => {
   expect(parseAddress('/settings/agents')).toEqual({ screen: 'agents' })
 })
 
+test('the Connect AI page has its own address', () => {
+  expect(parseAddress('/settings/connect-ai')).toEqual({ screen: 'connect-ai' })
+  expect(parseAddress('/connect-ai')).toEqual({ screen: 'not-found' })
+})
+
 test('the screens of a signed-in person sit in the shell', () => {
-  for (const address of ['/', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/tokens', '/settings/agents', '/nowhere']) {
+  for (const address of ['/', '/settings/connect-ai', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/connected-apps', '/settings/all-connected-apps', '/settings/agents', '/nowhere']) {
     expect(inShell(parseAddress(address)), address).toBe(true)
   }
 })
@@ -140,4 +153,10 @@ test('the Trash of an Area has an address of its own, after the Area’s', () =>
 
 test('the deleted Areas are among the settings', () => {
   expect(parseAddress('/settings/deleted-areas')).toEqual({ screen: 'deleted-areas' })
+})
+
+test('the consent page keeps the request of the app that asks to connect', () => {
+  const query = '?client_id=c1&redirect_uri=https%3A%2F%2Fclaude.ai%2Fcb&state=xyz'
+  expect(parseAddress('/authorize', query)).toEqual({ screen: 'authorize', query })
+  expect(inShell({ screen: 'authorize', query })).toBe(false)
 })

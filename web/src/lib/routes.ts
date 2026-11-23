@@ -10,7 +10,12 @@ export type Route =
   /** Every result for a query. The query is part of the address, so a search can be shared. */
   | { screen: 'search'; query: string }
   | { screen: 'members' }
-  | { screen: 'tokens' }
+  /** How to connect an AI client to Turtle. */
+  | { screen: 'connect-ai' }
+  /** Everything that can act as the signed-in Member: connected apps and Tokens made by hand. */
+  | { screen: 'connected-apps' }
+  /** Every Member's connected apps and Tokens, for a Workspace Admin to see and disconnect. */
+  | { screen: 'all-connected-apps' }
   | { screen: 'agents' }
   /** The deleted Areas, for a Workspace Admin to restore. */
   | { screen: 'deleted-areas' }
@@ -18,6 +23,8 @@ export type Route =
   | { screen: 'invitation'; secret: string }
   /** Where a password reset link leads. */
   | { screen: 'password-reset'; secret: string }
+  /** Where an app asking to connect sends the browser, with its OAuth request as the query (with the question mark). */
+  | { screen: 'authorize'; query: string }
   | { screen: 'not-found' }
 
 /** Reads an address: its path, and its query part as the address bar holds it, with the question mark. */
@@ -26,8 +33,11 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/search') return { screen: 'search', query: new URLSearchParams(query).get('q') ?? '' }
   if (pathname === '/setup') return { screen: 'setup' }
   if (pathname === '/sign-in') return { screen: 'sign-in' }
+  if (pathname === '/authorize') return { screen: 'authorize', query }
+  if (pathname === '/settings/connect-ai') return { screen: 'connect-ai' }
   if (pathname === '/settings/members') return { screen: 'members' }
-  if (pathname === '/settings/tokens') return { screen: 'tokens' }
+  if (pathname === '/settings/connected-apps') return { screen: 'connected-apps' }
+  if (pathname === '/settings/all-connected-apps') return { screen: 'all-connected-apps' }
   if (pathname === '/settings/agents') return { screen: 'agents' }
   if (pathname === '/settings/deleted-areas') return { screen: 'deleted-areas' }
   const link = pathname.match(/^\/(join|reset-password)\/([^/]+)$/)
@@ -91,7 +101,7 @@ function address(prefix: 'a' | 'p', id: string, label: string): string {
 }
 
 /** The screens that have no place in the shell: nobody is signed in on them, or need not be. */
-const OUTSIDE_SHELL: Route['screen'][] = ['setup', 'sign-in', 'invitation', 'password-reset']
+const OUTSIDE_SHELL: Route['screen'][] = ['setup', 'sign-in', 'invitation', 'password-reset', 'authorize']
 
 /** Whether a screen sits in the shell, beside the sidebar. */
 export function inShell(route: Route): boolean {

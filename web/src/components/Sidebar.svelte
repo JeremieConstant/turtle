@@ -243,10 +243,14 @@
 <div class="menu" role="menu" tabindex="-1" aria-label="Settings and signing out" popover bind:this={accountMenu} onkeydown={menuKeys}>
   {#if session.member?.workspace_admin}
     <a class="menu-item" role="menuitem" href="/settings/members" onclick={event => go(event, '/settings/members')}>Members</a>
+    <a class="menu-item" role="menuitem" href="/settings/all-connected-apps" onclick={event => go(event, '/settings/all-connected-apps')}
+      >All connected apps</a
+    >
     <a class="menu-item" role="menuitem" href="/settings/agents" onclick={event => go(event, '/settings/agents')}>Agents</a>
     <a class="menu-item" role="menuitem" href="/settings/deleted-areas" onclick={event => go(event, '/settings/deleted-areas')}>Deleted Areas</a>
   {/if}
-  <a class="menu-item" role="menuitem" href="/settings/tokens" onclick={event => go(event, '/settings/tokens')}>Tokens</a>
+  <a class="menu-item" role="menuitem" href="/settings/connect-ai" onclick={event => go(event, '/settings/connect-ai')}>Connect AI</a>
+  <a class="menu-item" role="menuitem" href="/settings/connected-apps" onclick={event => go(event, '/settings/connected-apps')}>Connected apps</a>
   <hr />
   <div role="group" aria-labelledby="appearance-label">
     <p class="menu-label" id="appearance-label">Appearance</p>

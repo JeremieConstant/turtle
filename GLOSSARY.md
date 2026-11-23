@@ -97,7 +97,7 @@ An Agent that acts as a Member through one of the Member's Tokens, with no ident
 _Avoid_: Personal agent, delegate
 
 **Token**:
-A credential that lets an Agent act, either as the Member who owns it or as a standalone Agent, and never with more access than its owner has.
+A credential that lets an Agent act, either as the Member who owns it or as a standalone Agent, and never with more access than its owner has. A Member creates one by hand, or an app creates one through OAuth once the Member allows it, named after the app; the app then holds only short-lived access tokens for it. The "Connected apps" page lists a Member's Tokens of both kinds as apps, and disconnecting one there revokes its Token. In code, a Token made through OAuth is called a connection.
 _Avoid_: API key, secret, access key
 
 ### Permissions

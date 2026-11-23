@@ -13,8 +13,9 @@ pub type File = (&'static str, &'static [u8]);
 pub const EMBEDDED: &[File] = include!(concat!(env!("OUT_DIR"), "/web_app_files.rs"));
 
 /// Addresses below these never belong to a screen of the web app, so an
-/// unknown one is an error instead of the app.
-const NOT_SCREENS: &[&str] = &["api", "ws", "assets"];
+/// unknown one is an error instead of the app. OAuth's addresses are among
+/// them, so a Turtle that does not offer OAuth says so to a client.
+const NOT_SCREENS: &[&str] = &["api", "ws", "assets", ".well-known", "oauth"];
 
 /// Answers every address no other route claims: a file of the web app with
 /// that file, and any other address the app could show with the app itself,

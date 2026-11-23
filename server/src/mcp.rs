@@ -62,7 +62,8 @@ async fn receive(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: String) 
         }
     }
     let Some(token) = bearer_token(&headers).map(str::to_string) else {
-        return unauthorized("Send a Token as Authorization: Bearer <token>. A Member creates one in Turtle.");
+        let refused = unauthorized("Send a Token as Authorization: Bearer <token>. A Member creates one in Turtle.");
+        return with_challenge(refused, &mcp.core, false);
     };
     let message: Value = match serde_json::from_str(&body) {
         Ok(message) => message,
@@ -74,6 +75,7 @@ async fn receive(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: String) 
 
     // Operations wait for the database and may hash, so they run off the
     // async workers, as in the HTTP API.
+    let core = mcp.core.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         let principal = principal_for_bearer(&mcp.core, &token)?;
         Ok::<_, Refusal>(answer(&mcp.core, &mcp.catalogue, &principal, message))
@@ -84,9 +86,17 @@ async fn receive(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: String) 
         Ok(Ok(Some(answer))) => Json(answer).into_response(),
         // A notification or a response arrived, which gets no answer.
         Ok(Ok(None)) => StatusCode::ACCEPTED.into_response(),
+        Ok(Err(Refusal::InvalidToken)) => with_challenge(Refusal::InvalidToken.into_response(), &core, true),
         Ok(Err(refused)) => refused.into_response(),
         Err(error) => error_response(OpError::Internal(error.into())),
     }
+}
+
+/// A refusal for want of a working Token, which tells a client that may
+/// sign in with OAuth where to start.
+fn with_challenge(mut refused: Response, core: &Core, invalid_token: bool) -> Response {
+    refused.headers_mut().insert(header::WWW_AUTHENTICATE, crate::oauth::challenge(core, invalid_token));
+    refused
 }
 
 /// Whether a request either comes from no browser page at all or from a page
@@ -206,7 +216,7 @@ mod tests {
     /// The operations that only make sense in a browser, so they have no MCP
     /// tool. Written out on purpose: an operation gets onto this list by a
     /// deliberate change here, never by accident.
-    const BROWSER_ONLY: [&str; 8] = [
+    const BROWSER_ONLY: [&str; 13] = [
         "create_first_account",
         "sign_in",
         "sign_out",
@@ -214,7 +224,12 @@ mod tests {
         "reset_password",
         "create_token",
         "list_tokens",
+        "list_members_tokens",
         "revoke_token",
+        "describe_connecting",
+        "set_connecting_ai",
+        "describe_connection_request",
+        "answer_connection_request",
     ];
 
     #[test]

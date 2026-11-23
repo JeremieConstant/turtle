@@ -26,6 +26,8 @@ pub struct TestServer {
     saves: Option<Arc<Mutex<Vec<Save>>>>,
     /// `TURTLE_MAX_ATTACHMENT_MB`, when the test sets it.
     attachment_limit_mb: Option<u32>,
+    /// `TURTLE_PUBLIC_URL`, when the test sets it.
+    public_url: Option<String>,
 }
 
 /// One round of saving changed Pages, as the server reports it.
@@ -39,29 +41,39 @@ pub struct Save {
 impl TestServer {
     /// Starts a server with an empty data directory of its own.
     pub async fn start() -> TestServer {
-        TestServer::start_with(None, None).await
+        TestServer::start_with(None, None, None).await
+    }
+
+    /// Starts a server that says it is reachable at `url`, so it offers OAuth.
+    pub async fn start_with_public_url(url: &str) -> TestServer {
+        TestServer::start_with(None, None, Some(url.to_string())).await
     }
 
     /// Starts a server that takes files of at most this many MB.
     pub async fn start_with_attachment_limit(mb: u32) -> TestServer {
-        TestServer::start_with(None, Some(mb)).await
+        TestServer::start_with(None, Some(mb), None).await
     }
 
     /// Starts a server that reports each save it makes; `next_save` and
     /// `take_saves` return them.
     pub async fn start_reporting_saves() -> TestServer {
-        TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new()))), None).await
+        TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new()))), None, None).await
     }
 
-    async fn start_with(saves: Option<Arc<Mutex<Vec<Save>>>>, attachment_limit_mb: Option<u32>) -> TestServer {
+    async fn start_with(
+        saves: Option<Arc<Mutex<Vec<Save>>>>,
+        attachment_limit_mb: Option<u32>,
+        public_url: Option<String>,
+    ) -> TestServer {
         let data_dir = tempfile::tempdir().expect("creating a temporary data directory");
-        let (process, addr) = launch(data_dir.path(), saves.clone(), attachment_limit_mb).await;
+        let (process, addr) = launch(data_dir.path(), saves.clone(), attachment_limit_mb, public_url.as_deref()).await;
         TestServer {
             process: Some(process),
             addr,
             data_dir,
             saves,
             attachment_limit_mb,
+            public_url,
         }
     }
 
@@ -209,7 +221,13 @@ impl TestServer {
         if self.process.is_some() {
             self.stop().await;
         }
-        let (process, addr) = launch(self.data_dir.path(), self.saves.clone(), self.attachment_limit_mb).await;
+        let (process, addr) = launch(
+            self.data_dir.path(),
+            self.saves.clone(),
+            self.attachment_limit_mb,
+            self.public_url.as_deref(),
+        )
+        .await;
         self.process = Some(process);
         self.addr = addr;
     }
@@ -219,8 +237,13 @@ async fn launch(
     data_dir: &Path,
     saves: Option<Arc<Mutex<Vec<Save>>>>,
     attachment_limit_mb: Option<u32>,
+    public_url: Option<&str>,
 ) -> (Child, SocketAddr) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_turtle"));
+    match public_url {
+        Some(url) => command.env("TURTLE_PUBLIC_URL", url),
+        None => command.env_remove("TURTLE_PUBLIC_URL"),
+    };
     match attachment_limit_mb {
         Some(mb) => command.env("TURTLE_MAX_ATTACHMENT_MB", mb.to_string()),
         None => command.env_remove("TURTLE_MAX_ATTACHMENT_MB"),

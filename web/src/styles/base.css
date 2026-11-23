@@ -320,7 +320,8 @@ dialog[open] {
 }
 
 .stack > p,
-.stack > h2 {
+.stack > h2,
+.stack > h3 {
   margin: 0;
 }
 

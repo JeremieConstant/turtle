@@ -6,7 +6,9 @@ mod live;
 mod markdown;
 mod mcp;
 mod model;
+mod oauth;
 mod ops;
+mod public_url;
 mod search;
 mod store;
 mod web_app;
@@ -84,11 +86,26 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => ops::attachments::DEFAULT_ATTACHMENT_LIMIT,
     };
 
+    // Where people and AI clients reach this Turtle from outside, if it is
+    // known; only then is OAuth offered (ADR-0010).
+    let public_url = match std::env::var("TURTLE_PUBLIC_URL") {
+        Ok(url) if !url.trim().is_empty() => Some(public_url::PublicUrl::parse(&url)?),
+        _ => None,
+    };
+
     // Opening the core brings the schema up to date.
     let db_path = store::database_in(&data_dir)?;
     let mut core = ops::Core::open(&db_path)?;
     core.set_attachment_limit(attachment_limit);
+    core.set_public_url(public_url);
     let core = Arc::new(core);
+    // Whether Turtle looks reachable only from its intranet may take a name
+    // lookup; it is found out now, off the async workers, so the Connect AI
+    // page need not wait for it.
+    tokio::task::spawn_blocking({
+        let core = core.clone();
+        move || core.looks_intranet_only()
+    });
 
     let app = Arc::new(App {
         core: core.clone(),
@@ -159,6 +176,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/attachments/{id}", get(download_attachment))
         .with_state(app.clone())
         .merge(http_api::router(core.clone()))
+        .merge(oauth::router(core.clone()))
         .merge(mcp::router(core))
         .merge(web_app::router(web_app::EMBEDDED));
 

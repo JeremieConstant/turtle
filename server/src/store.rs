@@ -239,6 +239,67 @@ const MIGRATIONS: &[&str] = &[
          attached_at INTEGER NOT NULL
      );
      CREATE INDEX attachments_by_page ON attachments (page_id, attached_at);",
+    // OAuth (ADR-0010). Any client may register itself; its redirect
+    // addresses are a JSON array. A connection a Member allows is a Token of
+    // theirs that names its client; the client never sees that Token's own
+    // secret, only short-lived access tokens for it, which go with it. An
+    // authorization code is kept only as a digest, like every secret.
+    "CREATE TABLE oauth_clients (
+         id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         redirect_uris TEXT NOT NULL,
+         created_at INTEGER NOT NULL
+     );
+     ALTER TABLE tokens ADD COLUMN client_id TEXT REFERENCES oauth_clients (id) ON DELETE CASCADE;
+     CREATE TABLE authorization_codes (
+         digest TEXT PRIMARY KEY,
+         client_id TEXT NOT NULL REFERENCES oauth_clients (id) ON DELETE CASCADE,
+         member_id TEXT NOT NULL REFERENCES members (id) ON DELETE CASCADE,
+         redirect_uri TEXT NOT NULL,
+         code_challenge TEXT NOT NULL,
+         expires_at INTEGER NOT NULL
+     );
+     CREATE TABLE access_tokens (
+         digest TEXT PRIMARY KEY,
+         token_id TEXT NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
+         expires_at INTEGER NOT NULL
+     );
+     CREATE INDEX access_tokens_by_token ON access_tokens (token_id);",
+    // A connection's refresh tokens. Each works once and is then kept as
+    // used, so one presented again is recognised as stolen and the whole
+    // connection ends (OAuth 2.1 refresh token rotation). They go with the
+    // connection's Token.
+    "CREATE TABLE refresh_tokens (
+         digest TEXT PRIMARY KEY,
+         token_id TEXT NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
+         used_at INTEGER
+     );
+     CREATE INDEX refresh_tokens_by_token ON refresh_tokens (token_id);",
+    // A Member may limit a connection on the consent page, to reading or to
+    // chosen Areas, as a Token is limited. The code remembers the limits
+    // until it is exchanged for the connection.
+    "ALTER TABLE authorization_codes ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE authorization_codes ADD COLUMN all_areas INTEGER NOT NULL DEFAULT 1;
+     CREATE TABLE authorization_code_areas (
+         code_digest TEXT NOT NULL REFERENCES authorization_codes (digest) ON DELETE CASCADE,
+         area_id TEXT NOT NULL REFERENCES areas (id) ON DELETE CASCADE,
+         PRIMARY KEY (code_digest, area_id)
+     );",
+    // Settings of the whole Workspace, which a Workspace Admin changes. One
+    // installation is one Workspace (ADR-0002), so there is exactly one row.
+    // Connecting AI can be turned off, for example while a policy is being
+    // decided; the connections are kept, so turning it on again restores them.
+    "CREATE TABLE workspace_settings (
+         id INTEGER PRIMARY KEY CHECK (id = 1),
+         connecting_ai INTEGER NOT NULL DEFAULT 1
+     );
+     INSERT INTO workspace_settings (id) VALUES (1);",
+    // A code asked for with a redirect address is exchanged only with the
+    // same one (RFC 6749, 4.1.3). An exchanged code is kept, naming the
+    // connection it made, so that one presented again ends that connection
+    // (4.1.2); it goes with the connection.
+    "ALTER TABLE authorization_codes ADD COLUMN redirect_uri_named INTEGER NOT NULL DEFAULT 1;
+     ALTER TABLE authorization_codes ADD COLUMN token_id TEXT REFERENCES tokens (id) ON DELETE CASCADE;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

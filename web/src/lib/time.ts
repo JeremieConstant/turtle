@@ -1,5 +1,10 @@
 const relative = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
 
+/** The moment it is now, in whole seconds since the Unix epoch, as Turtle reports times. */
+export function nowInSeconds(): number {
+  return Math.floor(Date.now() / 1000)
+}
+
 /**
  * How long ago a moment was, as a person says it: "just now", "4 minutes
  * ago", "yesterday", or the date for anything older than a week. Both are

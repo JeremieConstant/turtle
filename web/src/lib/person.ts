@@ -13,6 +13,15 @@ export type Person = { name: string; colorNumber: number }
  */
 export type Present = Person | { name: string; agent: true; member?: string }
 
+/**
+ * What an Agent on a Page is called beside its mark: an app or script acting
+ * for a Member as its changes are credited, "Ada via Claude"; a standalone
+ * Agent as one.
+ */
+export function presenceLabel(present: { name: string; agent: true; member?: string }): string {
+  return present.member ? `${present.member} via ${present.name}` : `${present.name} (Agent)`
+}
+
 /** How many --color-person-* tokens there are. */
 const PERSON_COLORS = 6
 const KEY = 'turtle-color-number'

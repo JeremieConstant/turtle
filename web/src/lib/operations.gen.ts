@@ -89,6 +89,35 @@ export type Comparison = {
   to: VersionSummary
 }
 
+export type Connecting = {
+  /** Whether Turtle looks reachable only from inside its network, judged
+from its public address alone, so that claude.ai, which reaches an
+AI client's connector from the internet, probably cannot reach it.
+A client on the caller's own machine can still connect with a Token. */
+  intranet_only: boolean
+  /** The address to give an AI client. Missing where Turtle does not know
+its public address, since an AI client could not sign in through
+OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it. */
+  mcp_address?: string | null
+  /** Whether a Workspace Admin has turned connecting AI off. While it is,
+no app can connect and connected apps cannot act. */
+  turned_off: boolean
+}
+
+export type ConnectionRedirect = {
+  redirect_to: string
+}
+
+export type ConnectionRequest = {
+  /** The name the app registered with. Any app can choose any name. */
+  app_name: string
+  /** Whether the app asks to change things too, not only to read them.
+An app that asks only to read can never change anything. */
+  asks_to_change: boolean
+  /** The domain the answer is sent to, which tells who really asks. */
+  redirect_domain: string
+}
+
 export type CreatedToken = {
   token: TokenSummary
   /** The value an Agent sends as `Authorization: Bearer <value>`. Shown
@@ -190,6 +219,16 @@ export type MemberEntry = {
 
 export type MemberList = {
   members: MemberEntry[]
+}
+
+export type MembersToken = {
+  member: TokenOwner
+  token: TokenSummary
+}
+
+export type MembersTokenList = {
+  /** By Member name, then newest first. */
+  tokens: MembersToken[]
 }
 
 export type MovedEntry = {
@@ -350,10 +389,18 @@ export type TokenList = {
   tokens: TokenSummary[]
 }
 
+export type TokenOwner = {
+  id: string
+  name: string
+}
+
 export type TokenSummary = {
   /** The only Areas it reaches; every Area its owner reaches if absent.
 Areas the owner can no longer read are left out. */
   areas?: TokenArea[] | null
+  /** Whether an app made it by connecting through OAuth, rather than its
+owner by hand. Its value was never shown to anyone. */
+  connected: boolean
   created_at: number
   /** When it stops working, in seconds since the Unix epoch. */
   expires_at?: number | null
@@ -911,7 +958,7 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: CreatedToken
   }
-  /** Lists the caller's Tokens, or a standalone Agent's for a Workspace Admin, with when each was last used. */
+  /** Lists the caller's Tokens, those of apps they connected among them, or a standalone Agent's for a Workspace Admin, with when each was last used. */
   list_tokens: {
     input: {
       /** The standalone Agent whose Tokens to list; the caller's own if absent. */
@@ -919,13 +966,71 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: TokenList
   }
-  /** Revokes one of the caller's Tokens, or of a standalone Agent's for a Workspace Admin; it stops working at once. */
+  /** Lists the Tokens of every active Member, those of apps they connected among them, with whose each is and when it was last used, for a Workspace Admin. */
+  list_members_tokens: {
+    input: Record<string, never>
+    output: MembersTokenList
+  }
+  /** Revokes one of the caller's Tokens, or, for a Workspace Admin, one of another Member's or of a standalone Agent's; it stops working at once, and so does everything a connected app was given for it. */
   revoke_token: {
     input: {
       /** The standalone Agent the Token is for; the caller's own if absent. */
       agent_id?: string | null
       id: string
+      /** The Member whose Token it is, for a Workspace Admin revoking another
+Member's; the caller's own if absent. */
+      member_id?: string | null
     }
     output: null
+  }
+  /** Says how the caller connects an AI client to Turtle: the MCP address to give it, or that connecting is not available. */
+  describe_connecting: {
+    input: Record<string, never>
+    output: Connecting
+  }
+  /** Says which app asks to act as the caller, and where Turtle sends the answer, so the caller can decide whether to allow it. */
+  describe_connection_request: {
+    input: {
+      /** The app's client ID, as it sent it. */
+      client_id: string
+      /** Where the app wants the answer, as it sent it. */
+      redirect_uri?: string | null
+      /** The scopes the app asked for, as it sent them. */
+      scope?: string | null
+    }
+    output: ConnectionRequest
+  }
+  /** Turns connecting AI on or off for the whole Workspace. While it is off, apps cannot register or be allowed, and connected apps cannot act; Tokens made by hand keep working. Only a Workspace Admin may. */
+  set_connecting_ai: {
+    input: {
+      /** Whether AI clients may connect and connected apps may act. */
+      on: boolean
+    }
+    output: null
+  }
+  /** Allows an app to act as the caller, or denies it, and returns the address to send the browser back to the app with the answer. */
+  answer_connection_request: {
+    input: {
+      /** Whether the caller allows the app to act as them. */
+      allow: boolean
+      /** The only Areas the app reaches; every Area the caller reaches if absent. */
+      area_ids?: string[] | null
+      /** The app's client ID, as it sent it. */
+      client_id: string
+      /** The PKCE code challenge the app sent. */
+      code_challenge?: string | null
+      /** The PKCE method the app sent; only S256 is accepted. */
+      code_challenge_method?: string | null
+      /** Whether the caller lets the app only read, though it asked to change
+things too. */
+      only_reading?: boolean
+      /** Where the app wants the answer, as it sent it. */
+      redirect_uri?: string | null
+      /** The scopes the app asked for, as it sent them. */
+      scope?: string | null
+      /** What the app sent to recognise the answer, given back unchanged. */
+      state?: string | null
+    }
+    output: ConnectionRedirect
   }
 }

@@ -39,6 +39,7 @@ Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you t
 | `TURTLE_DATA` | `turtle-data` in the directory Turtle is started from | The data directory. It is created on the first start and holds the database, `turtle.db`, and the Attachments, each under the hash of its content in `attachments/`. |
 | `TURTLE_PORT` | `4100` | The port Turtle listens on. |
 | `TURTLE_MAX_ATTACHMENT_MB` | `25` | The largest file, in MB, that can be attached to a Page. |
+| `TURTLE_PUBLIC_URL` | unset | The address people and AI clients reach Turtle at, such as `https://turtle.example.org`, at the root of its host. When set, Claude and other MCP clients can connect with OAuth: a Member pastes `<address>/mcp` into the client and clicks **Allow**. Without it, only Tokens created by hand work at the MCP endpoint. |
 | `TURTLE_LOG_SAVES` | unset | When set, Turtle prints a line for each save of changed Pages and how long it took, to see whether saving keeps up. |
 
 Settings are environment variables:
@@ -51,7 +52,7 @@ When a newer Turtle starts on an existing data directory, it brings the database
 
 ## Connect an Agent
 
-Every Member creates Tokens under **Tokens** in the header. A Token can be limited to reading, to chosen Areas and to an expiry date, and never has more access than its owner. Its value is shown once.
+Every Member sees what can act as them under **Connected apps** in the account menu: the apps they connected and the Tokens they created by hand, each with a **Disconnect** button. Tokens are created by hand there, under **For developers**. A Token can be limited to reading, to chosen Areas and to an expiry date, and never has more access than its owner. Its value is shown once.
 
 An Agent connects to Turtle's built-in MCP endpoint, `/mcp` on the address Turtle is reached at (Streamable HTTP), and sends the Token as `Authorization: Bearer <token>`. It finds one tool for every operation except the few that only make sense in a browser, such as signing in and managing Tokens. The same header works for the HTTP API, `POST /api/<operation>`.
 
