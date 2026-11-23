@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "create_quick_note",
-        "Writes a Quick Note: a Page at the top of the caller's Personal Area. The first line of the text becomes its title and the rest its content, in Markdown. Only a Member can, also through a Token that reaches their Personal Area.",
+        "Writes a Quick Note: a Page at the top of an Area, the caller's Personal Area unless another is chosen. Only a Member can, also through a Token that reaches that Area.",
         create_quick_note,
     );
     catalogue
@@ -22,10 +22,21 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         .changes = false;
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct NewQuickNote {
-    /// What was written: the first line becomes the title, the rest the content.
-    pub text: String,
+    pub title: String,
+    /// What the Quick Note says, in Markdown; empty if absent.
+    #[serde(default)]
+    pub markdown: Option<String>,
+    /// What the Quick Note says as the web app's editor holds it: a Yjs
+    /// document update, in base64. The web app sends it in place of
+    /// `markdown`; everyone else writes `markdown`.
+    #[serde(default)]
+    pub editor_state: Option<String>,
+    /// The Area it lands at the top of, which takes the Write Role; the
+    /// caller's Personal Area if absent.
+    #[serde(default)]
+    pub area_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -48,7 +59,7 @@ pub struct QuickNote {
     pub title: String,
     /// When it was written, in seconds since the Unix epoch.
     pub created_at: i64,
-    /// The Area it sits in now: the Personal Area until it is moved.
+    /// The Area it sits in now.
     pub area: Area,
 }
 
@@ -57,37 +68,41 @@ pub fn create_quick_note(core: &Core, principal: &Principal, input: NewQuickNote
         principal,
         "A standalone Agent has no Personal Area, so it cannot write Quick Notes.",
     )?;
-    let area = super::areas::personal_area_of(&core.db(), principal)?.ok_or_else(|| {
-        OpError::NotPermitted(if principal.token().is_some() {
-            "This Token does not reach your Personal Area, where Quick Notes land.".into()
-        } else {
-            "You have no Personal Area, where Quick Notes land.".into()
-        })
-    })?;
-    let text = input.text.trim();
-    if text.is_empty() {
-        return Err(OpError::InvalidInput("Write something first.".into()));
-    }
-    let (title, rest) = text.split_once('\n').unwrap_or((text, ""));
-    if title.trim().chars().count() > tree::MAX_TITLE_LENGTH {
-        return Err(OpError::InvalidInput(format!(
-            "Keep the first line to at most {} characters: it becomes the title.",
-            tree::MAX_TITLE_LENGTH
-        )));
-    }
-    let markdown = rest.trim();
+    let area = match &input.area_id {
+        Some(area_id) => super::areas::readable_area(&core.db(), principal, area_id)?,
+        None => super::areas::personal_area_of(&core.db(), principal)?.ok_or_else(|| {
+            OpError::NotPermitted(if principal.token().is_some() {
+                "This Token does not reach your Personal Area, where Quick Notes land.".into()
+            } else {
+                "You have no Personal Area, where Quick Notes land.".into()
+            })
+        })?,
+    };
+    let content = match (input.markdown, input.editor_state) {
+        (Some(_), Some(_)) => {
+            return Err(OpError::InvalidInput("Send the content either as Markdown or as editor state, not both.".into()))
+        }
+        (Some(markdown), None) => crate::markdown::from_markdown(&markdown),
+        (None, Some(state)) => read_editor_state(&state)?,
+        (None, None) => Vec::new(),
+    };
     let created_at = core.now();
     let page = tree::create_quick_note_page(
         core,
         principal,
-        tree::NewPage {
-            entry: tree::NewEntry { area_id: area.id.clone(), parent_id: None, title: title.into() },
-            markdown: (!markdown.is_empty()).then(|| markdown.to_string()),
-        },
+        tree::NewEntry { area_id: area.id.clone(), parent_id: None, title: input.title },
+        content,
         member_id,
     )?
     .output;
     Ok(QuickNote { id: page.id, title: page.title, created_at, area }.into())
+}
+
+fn read_editor_state(state: &str) -> Result<Vec<crate::model::Block>, OpError> {
+    use base64::Engine;
+    let unreadable = || OpError::InvalidInput("The editor state could not be read. Reload the page and try again.".into());
+    let bytes = base64::engine::general_purpose::STANDARD.decode(state).map_err(|_| unreadable())?;
+    crate::ydoc::read_state(&bytes).map_err(|_| unreadable())
 }
 
 const DEFAULT_LIMIT: u32 = 5;
@@ -139,21 +154,29 @@ mod tests {
     use crate::ops::testing::{fresh, member, personal_area};
     use crate::ops::tree::{create_page, get_tree, NewEntry, TreeOfArea};
 
-    fn quick_note(text: &str) -> NewQuickNote {
-        NewQuickNote { text: text.into() }
+    fn quick_note(title: &str) -> NewQuickNote {
+        NewQuickNote { title: title.into(), ..Default::default() }
     }
 
     #[test]
-    fn a_quick_note_is_a_page_at_the_top_of_the_personal_area_titled_by_its_first_line() {
+    fn a_quick_note_is_a_page_at_the_top_of_the_personal_area() {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let personal = personal_area(&core, &grace);
         create_page(&core, &grace, NewEntry { area_id: personal.clone(), parent_id: None, title: "Older".into() }.into())
             .unwrap();
 
-        let written = create_quick_note(&core, &grace, quick_note("  Call the printer\nAsk about the *invoice*.\n\nAnd the toner.  "))
-            .unwrap()
-            .output;
+        let written = create_quick_note(
+            &core,
+            &grace,
+            NewQuickNote {
+                title: "  Call the printer ".into(),
+                markdown: Some("Ask about the *invoice*.\n\nAnd the toner.".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .output;
 
         assert_eq!(written.title, "Call the printer");
         assert_eq!(written.area.id, personal);
@@ -195,20 +218,76 @@ mod tests {
     }
 
     #[test]
-    fn a_quick_note_needs_text_and_a_first_line_short_enough_for_a_title() {
+    fn a_quick_note_needs_a_title_and_readable_content() {
         let core = fresh();
         let grace = member(&core, "Grace", false);
-        let long = "x".repeat(201);
+        let both = NewQuickNote {
+            title: "Idea".into(),
+            markdown: Some("Text".into()),
+            editor_state: Some(String::new()),
+            ..Default::default()
+        };
+        let garbled = NewQuickNote { title: "Idea".into(), editor_state: Some("not base64!".into()), ..Default::default() };
         let table = [
-            ("", "Write something first."),
-            ("  \n \n", "Write something first."),
-            (long.as_str(), "Keep the first line to at most 200 characters: it becomes the title."),
+            (quick_note(""), "Enter a title."),
+            (quick_note("  "), "Enter a title."),
+            (quick_note(&"x".repeat(201)), "Choose a title of at most 200 characters."),
+            (both, "Send the content either as Markdown or as editor state, not both."),
+            (garbled, "The editor state could not be read. Reload the page and try again."),
         ];
-        for (text, message) in table {
-            let refused = create_quick_note(&core, &grace, quick_note(text)).unwrap_err();
-            assert_eq!((refused.kind(), refused.message()), ("invalid_input", message), "{text:?}");
+        for (input, message) in table {
+            let refused = create_quick_note(&core, &grace, input).unwrap_err();
+            assert_eq!((refused.kind(), refused.message()), ("invalid_input", message));
         }
         assert!(listed(&core, &grace).is_empty());
+    }
+
+    #[test]
+    fn a_quick_note_holds_what_the_web_editor_wrote() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let doc = yrs::Doc::new();
+        let update = crate::ydoc::write(&doc, &crate::markdown::from_markdown("- Ask about the **invoice**\n- And the toner")).unwrap();
+        let editor_state = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, update);
+
+        let written = create_quick_note(
+            &core,
+            &grace,
+            NewQuickNote { title: "Call the printer".into(), editor_state: Some(editor_state), ..Default::default() },
+        )
+        .unwrap()
+        .output;
+
+        let page = get_page_markdown(&core, &grace, OfPage { page_id: written.id }).unwrap().output;
+        assert_eq!(page.markdown.trim(), "- Ask about the **invoice**\n- And the toner");
+    }
+
+    #[test]
+    fn a_quick_note_lands_at_the_top_of_another_area_where_the_member_may_write() {
+        use crate::ops::areas::{create_area, NewArea};
+        use crate::ops::permissions::Role;
+        use crate::ops::testing::give_role;
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let ken = member(&core, "Ken", false);
+        let engineering = create_area(&core, &grace, NewArea { name: "Engineering".into() }).unwrap().output;
+        create_page(&core, &grace, NewEntry { area_id: engineering.id.clone(), parent_id: None, title: "Older".into() }.into())
+            .unwrap();
+        let into = |area_id: &str| NewQuickNote { title: "Idea".into(), area_id: Some(area_id.into()), ..Default::default() };
+
+        let written = create_quick_note(&core, &grace, into(&engineering.id)).unwrap().output;
+
+        assert_eq!(written.area.name, "Engineering");
+        let tree = get_tree(&core, &grace, TreeOfArea { area_id: engineering.id.clone() }).unwrap().output;
+        let titles: Vec<_> = tree.entries.iter().map(|entry| entry.title.as_str()).collect();
+        assert_eq!(titles, ["Idea", "Older"]);
+        assert_eq!(listed(&core, &grace).len(), 1);
+
+        let hidden = create_quick_note(&core, &ken, into(&engineering.id)).unwrap_err();
+        assert_eq!((hidden.kind(), hidden.message()), ("not_found", "There is no such Area."));
+        give_role(&core, &engineering.id, &ken, Role::Read);
+        let refused = create_quick_note(&core, &ken, into(&engineering.id)).unwrap_err();
+        assert_eq!(refused.kind(), "not_permitted");
     }
 
     #[test]

@@ -14,6 +14,9 @@
     connection,
     person,
     editable = true,
+    autofocus = editable,
+    label = 'Page content',
+    compact = false,
     attach,
     onready,
   }: {
@@ -23,6 +26,12 @@
     person: Person
     /** False for someone who can only read the Page. */
     editable?: boolean
+    /** Whether the cursor goes into the content as soon as it shows. */
+    autofocus?: boolean
+    /** What the content is called for screen readers. */
+    label?: string
+    /** Fits a short text in a box rather than a whole Page. */
+    compact?: boolean
     /** Attaches a pasted or dropped file to the Page. */
     attach: ImageOptions['attach']
     /** Called with the editor once it runs. It lives exactly as long as this component. */
@@ -63,15 +72,15 @@
         AgentChanges,
       ],
       editable,
-      autofocus: editable,
-      editorProps: { attributes: { 'aria-label': 'Page content' } },
+      autofocus,
+      editorProps: { attributes: { 'aria-label': label } },
     })
     onready(editor)
     return () => editor.destroy()
   })
 </script>
 
-<div class="editor" class:readonly={!editable} bind:this={element}></div>
+<div class="editor" class:readonly={!editable} class:compact bind:this={element}></div>
 
 <style>
   .editor {
@@ -87,6 +96,11 @@
     color: var(--color-text);
     font-size: var(--text-base);
     line-height: var(--leading-body);
+  }
+
+  .compact :global(.tiptap) {
+    min-height: var(--height-quick-note);
+    padding-bottom: 0;
   }
 
   .editor :global(.tiptap > *) {

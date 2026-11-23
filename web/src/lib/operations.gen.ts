@@ -240,7 +240,7 @@ export type PathEntry = {
 }
 
 export type QuickNote = {
-  /** The Area it sits in now: the Personal Area until it is moved. */
+  /** The Area it sits in now. */
   area: Area
   /** When it was written, in seconds since the Unix epoch. */
   created_at: number
@@ -712,11 +712,19 @@ export type Operations = {
     }
     output: Area
   }
-  /** Writes a Quick Note: a Page at the top of the caller's Personal Area. The first line of the text becomes its title and the rest its content, in Markdown. Only a Member can, also through a Token that reaches their Personal Area. */
+  /** Writes a Quick Note: a Page at the top of an Area, the caller's Personal Area unless another is chosen. Only a Member can, also through a Token that reaches that Area. */
   create_quick_note: {
     input: {
-      /** What was written: the first line becomes the title, the rest the content. */
-      text: string
+      /** The Area it lands at the top of, which takes the Write Role; the
+caller's Personal Area if absent. */
+      area_id?: string | null
+      /** What the Quick Note says as the web app's editor holds it: a Yjs
+document update, in base64. The web app sends it in place of
+`markdown`; everyone else writes `markdown`. */
+      editor_state?: string | null
+      /** What the Quick Note says, in Markdown; empty if absent. */
+      markdown?: string | null
+      title: string
     }
     output: QuickNote
   }

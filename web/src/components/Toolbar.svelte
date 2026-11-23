@@ -12,7 +12,14 @@
   import { pageIdOf } from '../lib/pageLink'
   import Icon from './Icon.svelte'
 
-  const { editor }: { editor: Editor } = $props()
+  const {
+    editor,
+    inline = false,
+  }: {
+    editor: Editor
+    /** Inside a box of its own, where it neither sticks nor reaches past the text. */
+    inline?: boolean
+  } = $props()
 
   type Current = { style: Format | null; active: Set<string>; undo: boolean; redo: boolean }
   let current = $state.raw<Current>({ style: null, active: new Set(), undo: false, redo: false })
@@ -136,7 +143,7 @@
   </button>
 {/snippet}
 
-<div class="toolbar" role="toolbar" aria-label="Formatting">
+<div class="toolbar" class:inline role="toolbar" aria-label="Formatting">
   <button
     type="button"
     class="tool"
@@ -284,6 +291,14 @@
     border-bottom: var(--line) solid var(--color-line);
     background: var(--color-bar);
     backdrop-filter: blur(var(--blur-bar)) saturate(180%);
+  }
+
+  .toolbar.inline {
+    position: static;
+    margin: 0;
+    padding: var(--space-1) var(--space-3);
+    background: none;
+    backdrop-filter: none;
   }
 
   .tool {

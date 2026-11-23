@@ -23,7 +23,7 @@ A document with content, placed in the tree of an Area; it may have Pages and Fo
 _Avoid_: Site, Seite, document, article
 
 **Quick Note**:
-A Page a Member writes without choosing a place for it; it lands in their Personal Area and can be moved to another Area afterwards, and it stays known as that Member's Quick Note wherever it sits.
+A Page a Member writes straight from the start screen, without first finding a place for it; it lands at the top of their Personal Area unless they pick another Area they may write in, can be moved afterwards, and stays known as that Member's Quick Note wherever it sits.
 _Avoid_: Note, draft, scratch, memo
 
 **Folder**:
