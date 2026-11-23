@@ -316,7 +316,6 @@ enum InlinePlace {
 }
 
 fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Titles) -> String {
-    let in_heading = place == InlinePlace::Heading;
     let mut out = String::new();
     let mut open: Vec<Mark> = Vec::new();
     let mut at_line_start = true;
@@ -334,7 +333,7 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
             // Formatting does not apply to an image, so the marks around it
             // stay open: `**a ![b](c) d**` keeps both texts bold.
             Inline::Image { src, alt } => {
-                let alt = escape_text(alt, false, false, false);
+                let alt = escape_text(alt, false, false, place);
                 out.push_str(&format!("![{alt}](<{}>)", escape_url(src)));
                 at_line_start = false;
             }
@@ -344,7 +343,7 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
                     out.push_str(&close_mark(&mark, html));
                 }
                 let title = titles(page_id).unwrap_or_default().replace(['\n', '\r'], " ");
-                let title = escape_text(&title, false, false, in_heading);
+                let title = escape_text(&title, false, false, place);
                 out.push_str(&format!("[{title}]({PAGE_ADDRESS_SCHEME}{page_id})"));
                 at_line_start = false;
             }
@@ -370,7 +369,7 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
                     out.push_str(&render_code_span(text));
                 } else {
                     let at_line_end = matches!(inlines.get(i + 1), None | Some(Inline::HardBreak));
-                    out.push_str(&escape_text(text, at_line_start, at_line_end, in_heading));
+                    out.push_str(&escape_text(text, at_line_start, at_line_end, place));
                 }
                 at_line_start = false;
             }
@@ -412,7 +411,8 @@ fn escape_url(url: &str) -> String {
 
 /// Escapes text so Markdown reads it back literally. Whitespace at the edge of
 /// a line would be stripped, so it is written as a character reference.
-fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, in_heading: bool) -> String {
+fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, place: InlinePlace) -> String {
+    let in_heading = place == InlinePlace::Heading;
     let chars: Vec<char> = text.chars().collect();
     let is_edge_space = |c: char| c == ' ' || c == '\t';
     let leading = if at_line_start {
@@ -452,6 +452,9 @@ fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, in_heading: b
             '.' | ')' => list_delimiter_at == Some(i),
             // A `!` directly before a link would turn it into an image.
             '!' => i + 1 == chars.len(),
+            // Lines with a `|` could be read as a table. A cell escapes every
+            // `|` of its whole rendering itself.
+            '|' => place != InlinePlace::Cell,
             _ => false,
         };
         if escape {
@@ -1134,6 +1137,29 @@ mod tests {
             assert_round_trip(vec![para(vec![text(s)])]);
             assert_round_trip(vec![para(vec![text("x"), Inline::HardBreak, text(s)])]);
         }
+    }
+
+    #[test]
+    fn paragraph_lines_that_look_like_a_table_round_trip() {
+        for lines in [["|a", "|-"], ["a|b", "-|-"], ["a | b", "--- | ---"]] {
+            assert_round_trip(vec![para(vec![
+                text("x"),
+                Inline::HardBreak,
+                text(lines[0]),
+                Inline::HardBreak,
+                text(lines[1]),
+            ])]);
+            assert_round_trip(vec![para(vec![
+                text(lines[0]),
+                Inline::HardBreak,
+                text(lines[1]),
+            ])]);
+        }
+        assert_round_trip(vec![para(vec![
+            marked("a|b", |m| m.code = true),
+            Inline::HardBreak,
+            text("-|-"),
+        ])]);
     }
 
     #[test]
