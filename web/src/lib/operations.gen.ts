@@ -149,6 +149,14 @@ export type Entry = {
   title: string
 }
 
+export type Export = {
+  /** The ZIP, in base64. */
+  content: string
+  /** A name to save it under, after the Area or the top of the Subtree,
+such as "Engineering.zip". */
+  file_name: string
+}
+
 export type Fragment = {
   /** Whether this piece is a word that matched. */
   highlighted: boolean
@@ -933,6 +941,15 @@ of the Page. Needed only when several Sections have this heading. */
       page_id: string
     }
     output: Written
+  }
+  /** Exports an Area, or the Subtree of one of its Pages or Folders, as a ZIP of Markdown files, returned in base64. Directories mirror the tree: every Page and Folder is a Markdown file named after its title, and a directory of the same name holds what is beneath it, a Page's Attachments in `_attachments`. Each file starts with frontmatter holding the ID, whether it is a page or a folder, the title, the position among its siblings, and a Page's Tags. Links to Pages in the export are relative paths; links to other Pages keep their `turtle:` address. Pages the caller cannot read are left out. Needs the Read Role. */
+  export: {
+    input: {
+      area_id: string
+      /** The Page or Folder whose Subtree to export; the whole Area if absent. */
+      entry_id?: string | null
+    }
+    output: Export
   }
   /** Gets the current titles of the given Pages, as Page links show them. A Page the caller cannot read, or that is in the Trash, is left out, so its link shows no title. */
   get_page_titles: {

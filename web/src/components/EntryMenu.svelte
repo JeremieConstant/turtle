@@ -2,13 +2,14 @@
   /*
    * The menu of an Entry, shared by the sidebar's tree and the Area screen:
    * a new Page or Folder beneath it, renaming it, moving it elsewhere,
-   * copying its link, and moving it to the Trash. What
+   * copying its link, exporting it, and moving it to the Trash. What
    * it offers depends on the Role held on the Area (entryMenuItems). Creating
    * and renaming ask for the name in a dialog, then load the Area's tree
    * again, which both the sidebar and the Area screen show.
    */
   import { tick } from 'svelte'
   import { copyLink, entryMenuItems, type EntryMenuItem } from '../lib/entryMenu'
+  import { exportToFile } from '../lib/exporting'
   import { menuKeys, openMenu } from '../lib/menu'
   import { navigation } from '../lib/navigation.svelte'
   import type { Area, Entry, Kind } from '../lib/operations.gen'
@@ -27,6 +28,7 @@
     rename: 'Rename…',
     move: 'Move…',
     'copy-link': 'Copy link',
+    export: 'Export as ZIP',
     trash: 'Move to Trash',
   }
 
@@ -37,7 +39,7 @@
   let moveDialog: MoveDialog
   /** The Entry the menu is open for, and the Area it is in. */
   let target = $state.raw<{ entry: Entry; area: Area } | null>(null)
-  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'copy-link' | 'trash'>
+  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'copy-link' | 'export' | 'trash'>
   /** What the dialog asks for, what its button says, and what it creates. */
   const DIALOGS: Record<DialogPurpose, { label: (title: string) => string; action: string; kind?: Kind }> = {
     'new-page': { label: title => `Title of the new Page beneath ${title}`, action: 'Create Page', kind: 'page' },
@@ -46,6 +48,9 @@
   }
   let dialogPurpose = $state<DialogPurpose>('new-page')
   const shownDialog = $derived(DIALOGS[dialogPurpose])
+
+  /** Items are shown in groups with a line between them: changing it, passing it on, and the Trash. */
+  const groupOf = (item: EntryMenuItem) => (item === 'trash' ? 2 : item === 'copy-link' || item === 'export' ? 1 : 0)
 
   const items = $derived(target ? entryMenuItems(target.entry.kind, target.area.role) : [])
 
@@ -61,6 +66,11 @@
     if (!target) return
     if (item === 'copy-link') {
       void copyLink(target.entry)
+      return
+    }
+    if (item === 'export') {
+      const { entry, area } = target
+      void exportToFile({ area_id: area.id, entry_id: entry.id }, entry.title)
       return
     }
     if (item === 'move') {
@@ -123,7 +133,7 @@
   ontoggle={event => event.newState === 'closed' && onclose?.()}
 >
   {#each items as item, index (item)}
-    {#if (item === 'copy-link' || item === 'trash') && index > 0}
+    {#if index > 0 && groupOf(item) !== groupOf(items[index - 1])}
       <hr />
     {/if}
     <button type="button" class="menu-item" role="menuitem" onclick={() => choose(item)}>{LABELS[item]}</button>

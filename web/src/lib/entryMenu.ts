@@ -6,18 +6,18 @@ import { toast } from 'svelte-sonner'
 import type { Kind, Role } from './operations.gen'
 import { pageAddress } from './routes'
 
-export type EntryMenuItem = 'new-page' | 'new-folder' | 'rename' | 'move' | 'copy-link' | 'trash'
+export type EntryMenuItem = 'new-page' | 'new-folder' | 'rename' | 'move' | 'copy-link' | 'export' | 'trash'
 
 /**
  * The items of the menu of an Entry, in order, for someone holding `role` on
- * its Area. Changing it, moving it included, needs Write. Only Pages have an address, so only they offer a link; a Folder
- * seen with Read therefore offers nothing. Moving to the Trash comes last,
- * apart from the rest.
+ * its Area. Changing it, moving it included, needs Write. Only Pages have
+ * an address, so only they offer a link. Anyone who sees it may export it.
+ * Moving to the Trash comes last, apart from the rest.
  */
 export function entryMenuItems(kind: Kind, role: Role): EntryMenuItem[] {
   const changing: EntryMenuItem[] = role === 'read' ? [] : ['new-page', 'new-folder', 'rename', 'move']
   const link: EntryMenuItem[] = kind === 'page' ? ['copy-link'] : []
-  return [...changing, ...link, ...(role === 'read' ? [] : (['trash'] as const))]
+  return [...changing, ...link, 'export', ...(role === 'read' ? [] : (['trash'] as const))]
 }
 
 /**

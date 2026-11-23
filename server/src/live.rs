@@ -160,6 +160,25 @@ impl Pages {
         Ok(page)
     }
 
+    /// A Page's content as it is now: from memory when it is open, and as
+    /// stored otherwise, without opening it, so reading many Pages leaves
+    /// none of them in memory. Does not check who may see it.
+    pub fn content(&self, id: &str) -> anyhow::Result<Vec<Block>> {
+        // Held while reading the database, as `open` does, so the Page
+        // cannot be opened and changed in between.
+        let open = self.open.lock().unwrap();
+        if let Some(page) = open.get(id) {
+            return Ok(crate::ydoc::read(&page.doc));
+        }
+        let db = self.db.lock().unwrap();
+        let stored: Option<Vec<u8>> =
+            db.query_row("SELECT state FROM pages WHERE id = ?1", [id], |row| row.get(0)).optional()?;
+        match stored {
+            Some(state) => crate::ydoc::read_state(&state),
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Drops a Page removed for good from memory with any changes not yet
     /// saved or recorded, so it is never written back.
     pub fn forget(&self, id: &str) {

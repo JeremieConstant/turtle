@@ -11,6 +11,7 @@ pub mod attachments;
 pub mod areas;
 pub mod connections;
 pub mod content;
+pub mod export;
 #[cfg(test)]
 mod every_operation;
 pub mod grants;
@@ -471,6 +472,7 @@ pub fn catalogue() -> Catalogue {
     versions::register(&mut catalogue);
     moves::register(&mut catalogue);
     content::register(&mut catalogue);
+    export::register(&mut catalogue);
     links::register(&mut catalogue);
     tokens::register(&mut catalogue);
     connections::register(&mut catalogue);

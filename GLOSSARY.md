@@ -58,6 +58,10 @@ _Avoid_: Grid, spreadsheet, matrix
 An image or file that belongs to a Page.
 _Avoid_: Upload, asset, media
 
+**Export**:
+An Area or Subtree as a ZIP of Markdown files that is readable without Turtle: directories mirror the tree, every Page and Folder is a file named after its title with what an import needs as frontmatter, a Page's Attachments sit in its directory apart from its Pages, and Page links between its files are relative paths.
+_Avoid_: Backup, download, dump
+
 **Version**:
 A recorded state of a Page with its authors, the people whose changes arrived since the previous Version; it can be compared with other Versions and restored.
 _Avoid_: Revision, snapshot, history entry
