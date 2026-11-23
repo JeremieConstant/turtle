@@ -84,8 +84,12 @@ test('a link without a secret, or with more after it, is not found', () => {
   }
 })
 
-test('the Tokens screen has its own address under settings', () => {
-  expect(parseAddress('/settings/tokens')).toEqual({ screen: 'tokens' })
+test('Connected apps has its own address under settings', () => {
+  expect(parseAddress('/settings/connected-apps')).toEqual({ screen: 'connected-apps' })
+})
+
+test('the Tokens screen is gone, and its old address leads nowhere', () => {
+  expect(parseAddress('/settings/tokens')).toEqual({ screen: 'not-found' })
 })
 
 test('the Agents screen has its own address under settings', () => {
@@ -93,7 +97,7 @@ test('the Agents screen has its own address under settings', () => {
 })
 
 test('the screens of a signed-in person sit in the shell', () => {
-  for (const address of ['/', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/tokens', '/settings/agents', '/nowhere']) {
+  for (const address of ['/', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/connected-apps', '/settings/agents', '/nowhere']) {
     expect(inShell(parseAddress(address)), address).toBe(true)
   }
 })

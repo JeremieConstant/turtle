@@ -246,7 +246,7 @@
     <a class="menu-item" role="menuitem" href="/settings/agents" onclick={event => go(event, '/settings/agents')}>Agents</a>
     <a class="menu-item" role="menuitem" href="/settings/deleted-areas" onclick={event => go(event, '/settings/deleted-areas')}>Deleted Areas</a>
   {/if}
-  <a class="menu-item" role="menuitem" href="/settings/tokens" onclick={event => go(event, '/settings/tokens')}>Tokens</a>
+  <a class="menu-item" role="menuitem" href="/settings/connected-apps" onclick={event => go(event, '/settings/connected-apps')}>Connected apps</a>
   <hr />
   <div role="group" aria-labelledby="appearance-label">
     <p class="menu-label" id="appearance-label">Appearance</p>

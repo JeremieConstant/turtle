@@ -6,7 +6,7 @@
    * marked in the text.
    */
   import type { Awareness } from 'y-protocols/awareness'
-  import { personColor, type Present } from '../lib/person'
+  import { personColor, presenceLabel, type Present } from '../lib/person'
   import Icon from './Icon.svelte'
 
   const {
@@ -52,11 +52,11 @@
 <ul class="people" aria-label="On this Page now">
   {#each people as [client, present] (client)}
     {#if 'agent' in present}
-      {@const label = present.member ? `${present.name} · Agent of ${present.member}` : `${present.name} · Agent`}
+      {@const label = presenceLabel(present)}
       <li class="agent" class:working={working.has(present.name)} title={label}>
         <Icon name="agent" />
-        <span class="name">{present.name}</span>
-        <span class="visually-hidden">{present.member ? `, Agent of ${present.member}` : ', Agent'}</span>
+        <span class="name" aria-hidden="true">{present.name}</span>
+        <span class="visually-hidden">{label}</span>
       </li>
     {:else}
       <li class="person" style:--person={personColor(present)} title={present.name}>
