@@ -47,7 +47,48 @@ pub enum Block {
     Blockquote(Vec<Block>),
     BulletList(Vec<Vec<Block>>),
     OrderedList { start: u64, items: Vec<Vec<Block>> },
+    /// A list whose items can each be checked off.
+    TaskList(Vec<TaskItem>),
+    /// A highlighted passage of a given kind; to Markdown a quote whose first
+    /// line names the kind, such as `[!NOTE]`.
+    Callout { kind: CalloutKind, content: Vec<Block> },
     HorizontalRule,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalloutKind {
+    Note,
+    Tip,
+    Warning,
+    Danger,
+}
+
+impl CalloutKind {
+    pub const ALL: [CalloutKind; 4] = [CalloutKind::Note, CalloutKind::Tip, CalloutKind::Warning, CalloutKind::Danger];
+
+    /// The name of the kind as the editor stores it; in capitals it is the
+    /// kind's Markdown marker.
+    pub fn name(self) -> &'static str {
+        match self {
+            CalloutKind::Note => "note",
+            CalloutKind::Tip => "tip",
+            CalloutKind::Warning => "warning",
+            CalloutKind::Danger => "danger",
+        }
+    }
+
+    /// The kind with the given name, in any case.
+    pub fn named(name: &str) -> Option<CalloutKind> {
+        CalloutKind::ALL
+            .into_iter()
+            .find(|kind| kind.name().eq_ignore_ascii_case(name))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskItem {
+    pub checked: bool,
+    pub content: Vec<Block>,
 }
 
 /// Brings content into the one canonical shape that survives a Markdown round
@@ -78,6 +119,7 @@ fn normalize_block(block: Block) -> Option<Block> {
             text: text.replace("\r\n", "\n").replace('\r', "\n"),
         },
         Block::Blockquote(children) => Block::Blockquote(normalize(children)),
+        Block::Callout { kind, content } => Block::Callout { kind, content: normalize(content) },
         Block::BulletList(items) => {
             if items.is_empty() {
                 return None;
@@ -92,6 +134,17 @@ fn normalize_block(block: Block) -> Option<Block> {
                 start: start.min(999_999_999),
                 items: items.into_iter().map(normalize).collect(),
             }
+        }
+        Block::TaskList(items) => {
+            if items.is_empty() {
+                return None;
+            }
+            Block::TaskList(
+                items
+                    .into_iter()
+                    .map(|item| TaskItem { checked: item.checked, content: normalize(item.content) })
+                    .collect(),
+            )
         }
         Block::HorizontalRule => Block::HorizontalRule,
     })
@@ -180,10 +233,11 @@ pub fn linked_pages(blocks: &[Block]) -> Vec<String> {
                         }
                     }
                 }
-                Block::Blockquote(children) => collect(children, out),
+                Block::Blockquote(children) | Block::Callout { content: children, .. } => collect(children, out),
                 Block::BulletList(items) | Block::OrderedList { items, .. } => {
                     items.iter().for_each(|item| collect(item, out))
                 }
+                Block::TaskList(items) => items.iter().for_each(|item| collect(&item.content, out)),
                 Block::CodeBlock { .. } | Block::HorizontalRule => {}
             }
         }
@@ -216,10 +270,15 @@ pub fn plain_text(blocks: &[Block]) -> String {
                     out.push_str(text);
                     out.push('\n');
                 }
-                Block::Blockquote(children) => blocks_into(children, out),
+                Block::Blockquote(children) | Block::Callout { content: children, .. } => blocks_into(children, out),
                 Block::BulletList(items) | Block::OrderedList { items, .. } => {
                     for item in items {
                         blocks_into(item, out);
+                    }
+                }
+                Block::TaskList(items) => {
+                    for item in items {
+                        blocks_into(&item.content, out);
                     }
                 }
                 Block::HorizontalRule => {}

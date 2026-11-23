@@ -2,11 +2,11 @@
 
 `scripts/check.sh` is the definition of done: it runs everything CI runs. The pre-commit hook runs it, so commit to run it. Coding standards for review are in `CODING_STANDARDS.md`.
 
-The server is a binary crate: run some of its unit tests with `cargo test --bin turtle <name>` from `server/`.
+The server is a binary crate: run some of its unit tests with `cargo test --bin turtle <name>` from `server/`. The scripts find cargo themselves; for a direct `cargo` or `npm --prefix web run generate` call where `cargo` is not on PATH, `source scripts/lib/find-cargo.sh` first.
 
 ## Trying it by hand
 
-`scripts/preview.sh` builds and runs Turtle at `http://127.0.0.1:4100`; `scripts/seed.sh` then gives a fresh one an account, Areas and Pages.
+`scripts/preview.sh` builds and runs Turtle at `http://127.0.0.1:4100`; `scripts/seed.sh` then gives a fresh one an account, Areas and Pages, and prints a Page's address. Both take `TURTLE_PORT` and `TURTLE_DATA`, so a second Turtle can run beside another session's. To sign in from a script or the browser console, call the `sign_in` operation (`POST /api/sign_in`) with the email and password from `seed-account.txt` in the data directory.
 
 ## Commits
 

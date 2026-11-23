@@ -5,6 +5,7 @@
  */
 import type { Editor } from '@tiptap/core'
 import type { IconName } from '../components/Icon.svelte'
+import { CALLOUT_KINDS, CALLOUT_LABELS } from './callout'
 
 export type Format = {
   id: string
@@ -98,7 +99,24 @@ export const LISTS: Format[] = [
     active: e => e.isActive('orderedList'),
     run: e => e.chain().focus().toggleOrderedList().run(),
   },
+  {
+    id: 'tasks',
+    label: 'Task list',
+    icon: 'tasks',
+    shortcut: shortcut('Mod+Shift+9'),
+    active: e => e.isActive('taskList'),
+    run: e => e.chain().focus().toggleTaskList().run(),
+  },
 ]
+
+/** The kinds of callout; the one the cursor is in applies, and choosing it again takes the callout away. */
+export const CALLOUTS: Format[] = CALLOUT_KINDS.map(kind => ({
+  id: `callout-${kind}`,
+  label: CALLOUT_LABELS[kind],
+  icon: 'callout',
+  active: (e: Editor) => e.isActive('callout', { kind }),
+  run: (e: Editor) => e.chain().focus().toggleCallout(kind).run(),
+}))
 
 export const BLOCKS: Format[] = [
   {

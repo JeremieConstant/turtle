@@ -29,14 +29,16 @@ class Titles {
   private known = new Map<string, string | null>()
   private unasked = new Set<string>()
   private asking: ReturnType<typeof setTimeout> | undefined
-
-  constructor() {
-    document.addEventListener('visibilitychange', this.refresh)
-    window.addEventListener('focus', this.refresh)
-  }
+  private listening = false
 
   /** Shows the title through `show` now and whenever it changes, until the returned function is called. */
   watch(pageId: string, show: Shown): () => void {
+    // Only once a link is shown, so building the editor's schema alone needs no window.
+    if (!this.listening) {
+      document.addEventListener('visibilitychange', this.refresh)
+      window.addEventListener('focus', this.refresh)
+      this.listening = true
+    }
     const watchers = this.shown.get(pageId) ?? new Set()
     watchers.add(show)
     this.shown.set(pageId, watchers)
@@ -49,8 +51,11 @@ class Titles {
   }
 
   stop() {
-    document.removeEventListener('visibilitychange', this.refresh)
-    window.removeEventListener('focus', this.refresh)
+    if (this.listening) {
+      document.removeEventListener('visibilitychange', this.refresh)
+      window.removeEventListener('focus', this.refresh)
+      this.listening = false
+    }
     clearTimeout(this.asking)
   }
 

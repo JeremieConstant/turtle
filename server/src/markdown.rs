@@ -3,7 +3,7 @@
 //! The contract: for any normalised content `c`,
 //! `from_markdown(&to_markdown(&c)) == c`.
 
-use crate::model::{normalize, page_id_of, Block, Inline, Marks, PAGE_ADDRESS_SCHEME};
+use crate::model::{normalize, page_id_of, Block, CalloutKind, Inline, Marks, TaskItem, PAGE_ADDRESS_SCHEME};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 // ---------------------------------------------------------------------------
@@ -43,33 +43,41 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
         let rendered = match block {
             Block::Paragraph(_) | Block::Heading { .. } => render_inline_block(block, titles),
             Block::CodeBlock { language, text } => render_code_block(language.as_deref(), text),
-            Block::Blockquote(children) => {
-                let inner = render_blocks(children, "\n\n", None, titles);
-                if inner.is_empty() {
-                    ">".to_string()
+            Block::Blockquote(children) => quote(&render_blocks(children, "\n\n", None, titles)),
+            Block::Callout { kind, content } => {
+                let marker = format!("[!{}]", kind.name().to_ascii_uppercase());
+                let inner = render_blocks(content, "\n\n", None, titles);
+                // A paragraph continues on the marker's next line, as people
+                // write callouts; anything else might not end the marker's
+                // paragraph, so it follows an empty line.
+                quote(&if inner.is_empty() {
+                    marker
+                } else if matches!(content.first(), Some(Block::Paragraph(_))) {
+                    format!("{marker}\n{inner}")
                 } else {
-                    inner
-                        .lines()
-                        .map(|line| {
-                            if line.is_empty() {
-                                ">".to_string()
-                            } else {
-                                format!("> {line}")
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                }
+                    format!("{marker}\n\n{inner}")
+                })
             }
-            Block::BulletList(items) => {
+            // A task list is a bullet list to Markdown, so the two take turns
+            // in choosing their marker.
+            Block::BulletList(_) | Block::TaskList(_) => {
                 let marker = if previous_bullet == Some('-') { '+' } else { '-' };
                 bullet = Some(marker);
-                render_list(items, Some(marker), |_| marker.to_string(), titles)
+                let items: Vec<_> = match block {
+                    Block::TaskList(items) => items
+                        .iter()
+                        .map(|item| (Some(item.checked), item.content.as_slice()))
+                        .collect(),
+                    Block::BulletList(items) => items.iter().map(|item| (None, item.as_slice())).collect(),
+                    _ => unreachable!(),
+                };
+                render_list(&items, Some(marker), |_| marker.to_string(), titles)
             }
             Block::OrderedList { start, items } => {
                 let delim = if previous_delimiter == Some('.') { ')' } else { '.' };
                 delimiter = Some(delim);
-                render_list(items, None, |i| format!("{}{}", start + i as u64, delim), titles)
+                let items: Vec<_> = items.iter().map(|item| (None, item.as_slice())).collect();
+                render_list(&items, None, |i| format!("{}{}", start + i as u64, delim), titles)
             }
             Block::HorizontalRule => "***".to_string(),
         };
@@ -80,21 +88,53 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
     parts.join(separator)
 }
 
+/// Puts each line of some Markdown in a quote.
+fn quote(inner: &str) -> String {
+    if inner.is_empty() {
+        return ">".to_string();
+    }
+    inner
+        .lines()
+        .map(|line| if line.is_empty() { ">".to_string() } else { format!("> {line}") })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The kind of callout a line of Markdown marks, when it is nothing but a marker such as `[!NOTE]`.
+fn callout_marker(line: &str) -> Option<CalloutKind> {
+    let name = line.trim_end().strip_prefix("[!")?.strip_suffix(']')?;
+    CalloutKind::named(name)
+}
+
 const EMPTY_ITEM: &str = "<!-- -->";
 
+/// Renders list items, each with whether it is checked when it is a task.
 fn render_list(
-    items: &[Vec<Block>],
+    items: &[(Option<bool>, &[Block])],
     bullet: Option<char>,
     marker: impl Fn(usize) -> String,
     titles: Titles,
 ) -> String {
-    let tight = items.iter().all(|item| is_tight_item(item));
+    let tight = items.iter().all(|(_, item)| is_tight_item(item));
+    let separator = if tight { "\n" } else { "\n\n" };
     let rendered: Vec<String> = items
         .iter()
         .enumerate()
-        .map(|(i, item)| {
+        .map(|(i, (task, item))| {
             let marker = marker(i);
-            let body = render_blocks(item, if tight { "\n" } else { "\n\n" }, bullet, titles);
+            let mut body = render_blocks(item, separator, bullet, titles);
+            if let Some(checked) = task {
+                let checkbox = if *checked { "[x]" } else { "[ ]" };
+                // The checkbox only counts in front of a paragraph, so an item
+                // without one starts with a comment that adds no content.
+                body = if matches!(item.first(), Some(Block::Paragraph(_))) {
+                    format!("{checkbox} {body}")
+                } else if body.is_empty() {
+                    format!("{checkbox} {EMPTY_ITEM}")
+                } else {
+                    format!("{checkbox} {EMPTY_ITEM}\n\n{body}")
+                };
+            }
             if body.is_empty() {
                 // pulldown-cmark loses track of the enclosing list item when a
                 // loose list inside a quote ends with an empty item. A comment
@@ -117,7 +157,7 @@ fn render_list(
             out
         })
         .collect();
-    rendered.join(if tight { "\n" } else { "\n\n" })
+    rendered.join(separator)
 }
 
 /// An item can be written without blank lines when it is a single paragraph,
@@ -130,6 +170,8 @@ fn is_tight_item(item: &[Block]) -> bool {
         [Block::Paragraph(_)] => true,
         [Block::Paragraph(_), Block::BulletList(items)] => first_item_has_content(items),
         [Block::Paragraph(_), Block::OrderedList { start: 1, items }] => first_item_has_content(items),
+        // A task item always has content: its checkbox.
+        [Block::Paragraph(_), Block::TaskList(_)] => true,
         _ => false,
     }
 }
@@ -382,12 +424,13 @@ fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, in_heading: b
 
 enum Frame {
     Root(Vec<Block>),
-    Blockquote(Vec<Block>),
+    /// A quote, and the kind of callout it is if its first line says so.
+    Blockquote(Vec<Block>, Option<CalloutKind>),
     List {
         start: Option<u64>,
-        items: Vec<Vec<Block>>,
+        items: Vec<(Vec<Block>, Option<Checkbox>)>,
     },
-    Item(Vec<Block>),
+    Item(Vec<Block>, Option<Checkbox>),
     /// `implicit` marks text that sits directly in a list item without a
     /// paragraph around it, which is how Markdown writes tight lists.
     Paragraph {
@@ -402,6 +445,48 @@ enum Frame {
         language: Option<String>,
         text: String,
     },
+}
+
+/// The checkbox in front of a list item, and how it was written.
+struct Checkbox {
+    checked: bool,
+    written: String,
+}
+
+/// A list is a task list when every item has a checkbox. Otherwise the
+/// checkboxes it has are kept as the text they were written as.
+fn list_block(start: Option<u64>, items: Vec<(Vec<Block>, Option<Checkbox>)>) -> Block {
+    if start.is_none() && items.iter().all(|(_, checkbox)| checkbox.is_some()) {
+        return Block::TaskList(
+            items
+                .into_iter()
+                .map(|(content, checkbox)| TaskItem {
+                    checked: checkbox.is_some_and(|c| c.checked),
+                    content,
+                })
+                .collect(),
+        );
+    }
+    let items = items
+        .into_iter()
+        .map(|(mut blocks, checkbox)| {
+            if let Some(Checkbox { written, .. }) = checkbox {
+                let text = Inline::Text {
+                    text: format!("{written} "),
+                    marks: Marks::default(),
+                };
+                match blocks.first_mut() {
+                    Some(Block::Paragraph(content)) => content.insert(0, text),
+                    _ => blocks.insert(0, Block::Paragraph(vec![text])),
+                }
+            }
+            blocks
+        })
+        .collect();
+    match start {
+        Some(start) => Block::OrderedList { start, items },
+        None => Block::BulletList(items),
+    }
 }
 
 #[derive(Default)]
@@ -432,12 +517,14 @@ struct Builder {
     /// The Page whose link is being read. What the link says is left out,
     /// because a Page link shows the Page's current title instead.
     page_link: Option<String>,
+    /// Where the line that made a quote a callout ends. Its marker is not text.
+    callout_marker_end: Option<usize>,
 }
 
 impl Builder {
     fn add_block(&mut self, block: Block) {
         match self.stack.last_mut() {
-            Some(Frame::Root(blocks)) | Some(Frame::Blockquote(blocks)) | Some(Frame::Item(blocks)) => {
+            Some(Frame::Root(blocks)) | Some(Frame::Blockquote(blocks, _)) | Some(Frame::Item(blocks, _)) => {
                 blocks.push(block)
             }
             // Markdown never nests a block directly in these; if it happens
@@ -529,13 +616,33 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
         marks: ActiveMarks::default(),
         image: None,
         page_link: None,
+        callout_marker_end: None,
     };
 
-    for event in Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH) {
+    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
+        if let Some(end) = b.callout_marker_end {
+            if range.start > end {
+                b.callout_marker_end = None;
+            } else if matches!(event, Event::Text(_) | Event::SoftBreak | Event::HardBreak) {
+                continue;
+            }
+        }
         match event {
             Event::Start(tag) => match tag {
                 Tag::Paragraph => {
                     b.close_implicit_paragraph();
+                    // The marker is read from what was written, so a quote that
+                    // only shows a marker once escapes are read stays a quote.
+                    if let Some(Frame::Blockquote(children, kind @ None)) = b.stack.last_mut() {
+                        let line = markdown[range.start..].split('\n').next().unwrap_or_default();
+                        if children.is_empty() {
+                            if let Some(marked) = callout_marker(line) {
+                                *kind = Some(marked);
+                                b.callout_marker_end = Some(range.start + line.len());
+                            }
+                        }
+                    }
                     b.stack.push(Frame::Paragraph {
                         content: Vec::new(),
                         implicit: false,
@@ -550,7 +657,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 }
                 Tag::BlockQuote(_) => {
                     b.close_implicit_paragraph();
-                    b.stack.push(Frame::Blockquote(Vec::new()));
+                    b.stack.push(Frame::Blockquote(Vec::new(), None));
                 }
                 Tag::CodeBlock(kind) => {
                     b.close_implicit_paragraph();
@@ -570,7 +677,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                         items: Vec::new(),
                     });
                 }
-                Tag::Item => b.stack.push(Frame::Item(Vec::new())),
+                Tag::Item => b.stack.push(Frame::Item(Vec::new(), None)),
                 Tag::HtmlBlock => b.close_implicit_paragraph(),
                 Tag::Emphasis => b.marks.italic += 1,
                 Tag::Strong => b.marks.bold += 1,
@@ -595,8 +702,10 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 }
                 TagEnd::BlockQuote(_) => {
                     b.close_implicit_paragraph();
-                    if let Some(Frame::Blockquote(children)) = b.stack.pop() {
-                        b.add_block(Block::Blockquote(children));
+                    match b.stack.pop() {
+                        Some(Frame::Blockquote(content, Some(kind))) => b.add_block(Block::Callout { kind, content }),
+                        Some(Frame::Blockquote(children, None)) => b.add_block(Block::Blockquote(children)),
+                        _ => {}
                     }
                 }
                 TagEnd::CodeBlock => {
@@ -609,18 +718,15 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 }
                 TagEnd::Item => {
                     b.close_implicit_paragraph();
-                    if let Some(Frame::Item(blocks)) = b.stack.pop() {
+                    if let Some(Frame::Item(blocks, checkbox)) = b.stack.pop() {
                         if let Some(Frame::List { items, .. }) = b.stack.last_mut() {
-                            items.push(blocks);
+                            items.push((blocks, checkbox));
                         }
                     }
                 }
                 TagEnd::List(_) => {
                     if let Some(Frame::List { start, items }) = b.stack.pop() {
-                        b.add_block(match start {
-                            Some(start) => Block::OrderedList { start, items },
-                            None => Block::BulletList(items),
-                        });
+                        b.add_block(list_block(start, items));
                     }
                 }
                 TagEnd::HtmlBlock => b.close_implicit_paragraph(),
@@ -650,6 +756,15 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
             Event::HardBreak if b.image.is_some() => b.text(" ", false),
             Event::HardBreak => b.hard_break(),
             Event::Html(html) | Event::InlineHtml(html) => b.html(&html),
+            Event::TaskListMarker(checked) => {
+                let item = b.stack.iter_mut().rev().find(|frame| matches!(frame, Frame::Item(..)));
+                if let Some(Frame::Item(_, checkbox)) = item {
+                    *checkbox = Some(Checkbox {
+                        checked,
+                        written: markdown[range].to_string(),
+                    });
+                }
+            }
             Event::Rule => {
                 b.close_implicit_paragraph();
                 b.add_block(Block::HorizontalRule);
@@ -667,7 +782,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
 
 #[cfg(test)]
 pub(crate) mod testing {
-    use crate::model::{Block, Inline, Marks};
+    use crate::model::{Block, CalloutKind, Inline, Marks, TaskItem};
 
     // A small deterministic generator, so the property tests need no extra
     // dependency and failures are reproducible from the seed.
@@ -731,7 +846,7 @@ pub(crate) mod testing {
         }
 
         pub fn block(&mut self, depth: usize) -> Block {
-            let kinds = if depth >= 3 { 4 } else { 7 };
+            let kinds = if depth >= 3 { 4 } else { 9 };
             match self.next(kinds) {
                 0 => Block::Paragraph(self.inlines()),
                 1 => Block::Heading {
@@ -747,7 +862,19 @@ pub(crate) mod testing {
                 },
                 3 => Block::HorizontalRule,
                 4 => Block::Blockquote(self.blocks(depth + 1)),
+                7 => Block::Callout {
+                    kind: CalloutKind::ALL[self.next(CalloutKind::ALL.len())],
+                    content: self.blocks(depth + 1),
+                },
                 5 => Block::BulletList((0..1 + self.next(3)).map(|_| self.blocks(depth + 1)).collect()),
+                6 => Block::TaskList(
+                    (0..1 + self.next(3))
+                        .map(|_| TaskItem {
+                            checked: self.next(2) == 0,
+                            content: self.blocks(depth + 1),
+                        })
+                        .collect(),
+                ),
                 _ => Block::OrderedList {
                     start: self.next(12) as u64,
                     items: (0..1 + self.next(3)).map(|_| self.blocks(depth + 1)).collect(),
@@ -1022,6 +1149,110 @@ mod tests {
             para(vec![marked("bold", |m| m.bold = true), page_link("a"), marked("bold!", |m| m.bold = true)]),
             Block::Heading { level: 2, content: vec![page_link("a"), page_link("a"), text(" #")] },
             para(vec![text("wow!"), page_link("b"), Inline::HardBreak, page_link("c")]),
+        ]);
+    }
+
+    fn task(checked: bool, blocks: Vec<Block>) -> TaskItem {
+        TaskItem { checked, content: blocks }
+    }
+
+    #[test]
+    fn a_task_list_is_a_list_with_checkboxes() {
+        let blocks = vec![Block::TaskList(vec![
+            task(false, vec![para(vec![text("Write the notes")])]),
+            task(true, vec![para(vec![text("Ship it")])]),
+        ])];
+
+        let markdown = to_markdown(&blocks);
+
+        assert_eq!(markdown, "- [ ] Write the notes\n- [x] Ship it\n");
+        assert_eq!(from_markdown(&markdown), blocks);
+        assert_eq!(from_markdown("* [X] done\n* [ ] open"), vec![Block::TaskList(vec![
+            task(true, vec![para(vec![text("done")])]),
+            task(false, vec![para(vec![text("open")])]),
+        ])]);
+    }
+
+    #[test]
+    fn a_list_where_only_some_items_have_checkboxes_keeps_them_as_text() {
+        assert_eq!(
+            from_markdown("- [x] done\n- plain"),
+            vec![Block::BulletList(vec![
+                vec![para(vec![text("[x] done")])],
+                vec![para(vec![text("plain")])],
+            ])]
+        );
+        assert_eq!(
+            from_markdown("1. [ ] first"),
+            vec![Block::OrderedList { start: 1, items: vec![vec![para(vec![text("[ ] first")])]] }]
+        );
+    }
+
+    #[test]
+    fn awkward_task_items_round_trip() {
+        assert_round_trip(vec![
+            Block::TaskList(vec![
+                task(true, vec![]),
+                task(false, vec![
+                    para(vec![text("parent")]),
+                    Block::TaskList(vec![task(true, vec![para(vec![text("child")])])]),
+                ]),
+            ]),
+            Block::TaskList(vec![task(false, vec![para(vec![text("[x] a second list")])])]),
+            Block::BulletList(vec![vec![para(vec![text("[ ] not a task")])]]),
+            Block::TaskList(vec![
+                task(false, vec![Block::CodeBlock { language: None, text: "code first".into() }]),
+                task(true, vec![para(vec![text("one")]), para(vec![text("two")])]),
+            ]),
+        ]);
+    }
+
+    #[test]
+    fn a_callout_is_a_quote_whose_first_line_names_its_kind() {
+        let blocks = vec![
+            Block::Callout { kind: CalloutKind::Note, content: vec![para(vec![text("Read this first.")])] },
+            Block::Callout { kind: CalloutKind::Tip, content: vec![] },
+            Block::Callout {
+                kind: CalloutKind::Warning,
+                content: vec![Block::BulletList(vec![vec![para(vec![text("one")])]])],
+            },
+            Block::Callout { kind: CalloutKind::Danger, content: vec![para(vec![text("Hot.")])] },
+        ];
+
+        let markdown = to_markdown(&blocks);
+
+        assert_eq!(
+            markdown,
+            "> [!NOTE]\n> Read this first.\n\n\
+             > [!TIP]\n\n\
+             > [!WARNING]\n>\n> - one\n\n\
+             > [!DANGER]\n> Hot.\n"
+        );
+        assert_eq!(from_markdown(&markdown), blocks);
+        assert_eq!(
+            from_markdown("> [!note]  \n> quiet"),
+            vec![Block::Callout { kind: CalloutKind::Note, content: vec![para(vec![text("quiet")])] }]
+        );
+    }
+
+    #[test]
+    fn a_quote_that_merely_starts_like_a_callout_stays_a_quote() {
+        for markdown in ["> [!NOTE] same line", "> [!CAUTION]\n> unknown kind", "> \\[!NOTE\\]\n> escaped", "> *[!NOTE]*\n> x"] {
+            let blocks = from_markdown(markdown);
+            assert!(matches!(blocks.as_slice(), [Block::Blockquote(_)]), "{markdown:?} gave {blocks:?}");
+        }
+        assert_eq!(
+            from_markdown("> [!NOTE] same line"),
+            vec![Block::Blockquote(vec![para(vec![text("[!NOTE] same line")])])]
+        );
+        assert_round_trip(vec![
+            Block::Blockquote(vec![para(vec![text("[!NOTE]")])]),
+            Block::Blockquote(vec![para(vec![text("[!TIP]"), Inline::HardBreak, text("x")])]),
+            Block::Blockquote(vec![Block::Callout { kind: CalloutKind::Tip, content: vec![] }]),
+            Block::Callout {
+                kind: CalloutKind::Note,
+                content: vec![para(vec![text("[!WARNING]")]), Block::HorizontalRule],
+            },
         ]);
     }
 

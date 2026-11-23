@@ -56,6 +56,7 @@ entry() {
 runbooks=$(entry folder "Runbooks")
 deploying=$(entry page "Deploying to production" "$runbooks")
 entry page "Rollback" "$deploying" >/dev/null
-entry page "Glossary" >/dev/null
+glossary=$(entry page "Glossary")
 
 echo "Seeded $base. The email and password to sign in with are in $account."
+echo "A Page to open once signed in: $base/p/$glossary"
