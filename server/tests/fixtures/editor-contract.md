@@ -30,6 +30,10 @@ With ![Logo](<logo.png>) inline.
 > [!DANGER]
 > Danger.
 
+| Name | **Role** |
+| --- | --- |
+| a \| b |  |
+
 ```rust
 fn main() {}
 ```

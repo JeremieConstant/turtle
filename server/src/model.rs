@@ -52,8 +52,16 @@ pub enum Block {
     /// A highlighted passage of a given kind; to Markdown a quote whose first
     /// line names the kind, such as `[!NOTE]`.
     Callout { kind: CalloutKind, content: Vec<Block> },
+    /// Rows of cells, the first row being the header. Every row has the same
+    /// number of cells, and a cell holds inline content only.
+    Table(Vec<Row>),
     HorizontalRule,
 }
+
+/// The cells of a table row, left to right.
+pub type Row = Vec<Cell>;
+/// What a table cell holds: inline content only.
+pub type Cell = Vec<Inline>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalloutKind {
@@ -146,6 +154,24 @@ fn normalize_block(block: Block) -> Option<Block> {
                     .collect(),
             )
         }
+        Block::Table(rows) => {
+            // As wide as its widest row, so a short row gains empty cells
+            // instead of a long one losing what it holds.
+            let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+            if width == 0 {
+                return None;
+            }
+            Block::Table(
+                rows.into_iter()
+                    .map(|row| {
+                        let mut row: Row =
+                            row.into_iter().map(|cell| normalize_inlines(cell, false)).collect();
+                        row.resize(width, Vec::new());
+                        row
+                    })
+                    .collect(),
+            )
+        }
         Block::HorizontalRule => Block::HorizontalRule,
     })
 }
@@ -221,23 +247,25 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
 
 /// The IDs of the Pages the content links to, each once, in order.
 pub fn linked_pages(blocks: &[Block]) -> Vec<String> {
+    fn inlines(content: &[Inline], out: &mut Vec<String>) {
+        for inline in content {
+            if let Inline::PageLink { page_id } = inline {
+                if !out.contains(page_id) {
+                    out.push(page_id.clone());
+                }
+            }
+        }
+    }
     fn collect(blocks: &[Block], out: &mut Vec<String>) {
         for block in blocks {
             match block {
-                Block::Paragraph(content) | Block::Heading { content, .. } => {
-                    for inline in content {
-                        if let Inline::PageLink { page_id } = inline {
-                            if !out.contains(page_id) {
-                                out.push(page_id.clone());
-                            }
-                        }
-                    }
-                }
+                Block::Paragraph(content) | Block::Heading { content, .. } => inlines(content, out),
                 Block::Blockquote(children) | Block::Callout { content: children, .. } => collect(children, out),
                 Block::BulletList(items) | Block::OrderedList { items, .. } => {
                     items.iter().for_each(|item| collect(item, out))
                 }
                 Block::TaskList(items) => items.iter().for_each(|item| collect(&item.content, out)),
+                Block::Table(rows) => rows.iter().flatten().for_each(|cell| inlines(cell, out)),
                 Block::CodeBlock { .. } | Block::HorizontalRule => {}
             }
         }
@@ -281,6 +309,7 @@ pub fn plain_text(blocks: &[Block]) -> String {
                         blocks_into(&item.content, out);
                     }
                 }
+                Block::Table(rows) => rows.iter().flatten().for_each(|cell| inlines(cell, out)),
                 Block::HorizontalRule => {}
             }
         }

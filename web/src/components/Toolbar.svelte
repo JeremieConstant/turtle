@@ -10,6 +10,7 @@
   import { liveSearch } from '../lib/liveSearch.svelte'
   import { menuKeys, openMenu } from '../lib/menu'
   import { pageIdOf } from '../lib/pageLink'
+  import { allowedTableEdits, clampSize, insertTable, TABLE_EDITS, TABLE_SIZE } from '../lib/table'
   import Icon from './Icon.svelte'
 
   const {
@@ -21,8 +22,8 @@
     inline?: boolean
   } = $props()
 
-  type Current = { style: Format | null; active: Set<string>; undo: boolean; redo: boolean }
-  let current = $state.raw<Current>({ style: null, active: new Set(), undo: false, redo: false })
+  type Current = { style: Format | null; active: Set<string>; tableEdits: Set<string>; undo: boolean; redo: boolean }
+  let current = $state.raw<Current>({ style: null, active: new Set(), tableEdits: new Set(), undo: false, redo: false })
 
   $effect(() => {
     const watched = editor
@@ -36,6 +37,7 @@
           active: new Set(
             [...MARKS, ...LISTS, ...BLOCKS, ...CALLOUTS, LINK].filter(f => f.active?.(watched)).map(f => f.id),
           ),
+          tableEdits: allowedTableEdits(watched.state),
           undo: watched.can().undo(),
           redo: watched.can().redo(),
         }
@@ -67,6 +69,44 @@
   function chooseCallout(f: Format) {
     calloutMenu?.hidePopover()
     f.run(editor)
+  }
+
+  /* Outside a table the table button asks for a size and inserts one; inside
+     one it offers to add and remove rows and columns. Cells hold no tables. */
+  let tableButton = $state<HTMLButtonElement>()
+  let tableMenu = $state<HTMLDivElement>()
+  let tableDialog = $state<HTMLDialogElement>()
+  let rows = $state(TABLE_SIZE.rows.initial)
+  let columns = $state(TABLE_SIZE.columns.initial)
+  const inTable = $derived(current.tableEdits.size > 0)
+
+  function openTable() {
+    if (inTable) return tableMenu && tableButton && openMenu(tableMenu, tableButton)
+    rows = TABLE_SIZE.rows.initial
+    columns = TABLE_SIZE.columns.initial
+    tableDialog?.showModal()
+  }
+
+  function chooseTableEdit(run: (editor: Editor) => void) {
+    tableMenu?.hidePopover()
+    run(editor)
+  }
+
+  /* The table goes in once the dialog has handed the focus back to the
+     text, or giving it back would put the cursor where it was before. */
+  let tableAsked = false
+
+  function addTable(event: SubmitEvent) {
+    event.preventDefault()
+    tableAsked = true
+    tableDialog?.close()
+  }
+
+  function closeTableDialog() {
+    editor.commands.focus()
+    if (!tableAsked) return
+    tableAsked = false
+    insertTable(editor, clampSize(rows, TABLE_SIZE.rows), clampSize(columns, TABLE_SIZE.columns))
   }
 
   /* A link needs an address. Inside a link the same button takes it off. */
@@ -234,7 +274,56 @@
       </button>
     {/each}
   </div>
+  <!-- A menu inside a table, so it takes the focus like the callout button. -->
+  <button
+    type="button"
+    class="tool"
+    class:on={inTable}
+    bind:this={tableButton}
+    aria-haspopup={inTable ? 'menu' : 'dialog'}
+    aria-label="Table"
+    title="Table"
+    onclick={openTable}
+  >
+    <Icon name="table" />
+  </button>
+  <div class="menu" popover role="menu" tabindex="-1" aria-label="Table" bind:this={tableMenu} onkeydown={menuKeys}>
+    {#each TABLE_EDITS as edit (edit.id)}
+      <button
+        type="button"
+        class="menu-item style-item"
+        class:danger={edit.danger}
+        role="menuitem"
+        disabled={!current.tableEdits.has(edit.id)}
+        onclick={() => chooseTableEdit(edit.run)}
+      >
+        <span class="label">{edit.label}</span>
+      </button>
+    {/each}
+  </div>
 </div>
+
+<dialog bind:this={tableDialog} closedby="any" onclose={closeTableDialog}>
+  <form onsubmit={addTable}>
+    <p class="heading">Insert table</p>
+    <div class="size">
+      <label>
+        Rows
+        <!-- svelte-ignore a11y_autofocus -->
+        <input type="number" bind:value={rows} min={TABLE_SIZE.rows.min} max={TABLE_SIZE.rows.max} required autofocus />
+      </label>
+      <label>
+        Columns
+        <input type="number" bind:value={columns} min={TABLE_SIZE.columns.min} max={TABLE_SIZE.columns.max} required />
+      </label>
+    </div>
+    <p class="note">The first row is the header.</p>
+    <div class="actions">
+      <button type="button" class="btn" onclick={() => tableDialog?.close()}>Cancel</button>
+      <button type="submit" class="btn primary">Insert table</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog bind:this={linkDialog} closedby="any" onclose={() => editor.commands.focus()}>
   <form onsubmit={setLink}>
@@ -409,6 +498,31 @@
 
   .label {
     flex: 1;
+  }
+
+  .style-item:disabled {
+    background: none;
+    color: var(--color-faint);
+  }
+
+  .style-item.danger:not(:disabled) {
+    color: var(--color-danger);
+  }
+
+  .heading {
+    margin: 0;
+    font-weight: var(--weight-medium);
+  }
+
+  .size {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+
+  .size label {
+    display: grid;
+    gap: var(--space-1);
   }
 
   kbd {
