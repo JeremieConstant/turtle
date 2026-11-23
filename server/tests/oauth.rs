@@ -42,6 +42,7 @@ async fn with_a_public_url_turtle_describes_itself_as_protected_resource_and_aut
         let resource = json_of(&resource);
         assert_eq!(resource["resource"], "https://turtle.example.org/mcp");
         assert_eq!(resource["authorization_servers"], json!(["https://turtle.example.org"]));
+        assert_eq!(resource["scopes_supported"], json!(["turtle:read", "turtle:write"]));
     }
 
     let server_metadata = get(&server, "/.well-known/oauth-authorization-server").await;
@@ -55,6 +56,7 @@ async fn with_a_public_url_turtle_describes_itself_as_protected_resource_and_aut
     assert_eq!(metadata["grant_types_supported"], json!(["authorization_code"]));
     assert_eq!(metadata["code_challenge_methods_supported"], json!(["S256"]));
     assert_eq!(metadata["token_endpoint_auth_methods_supported"], json!(["none"]));
+    assert_eq!(metadata["scopes_supported"], json!(["turtle:read", "turtle:write"]));
 
     // A client that has no credentials learns where to find them.
     let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
@@ -178,7 +180,7 @@ fn decode(value: &str) -> String {
 /// The consent page's answer, from the page's address as the web app reads it.
 fn answer_from(consent_address: &str, allow: bool) -> Value {
     let mut answer = json!({ "allow": allow });
-    for name in ["client_id", "redirect_uri", "code_challenge", "code_challenge_method", "state"] {
+    for name in ["client_id", "redirect_uri", "code_challenge", "code_challenge_method", "state", "scope"] {
         if let Some(value) = parameter(consent_address, name) {
             answer[name] = json!(decode(&value));
         }
@@ -228,7 +230,7 @@ async fn a_client_registers_a_member_allows_it_and_it_acts_as_the_member() {
     assert_eq!(signed_out.status, 403, "{}", signed_out.body);
 
     let request = ada.call("describe_connection_request", json!({ "client_id": client_id, "redirect_uri": CALLBACK })).await;
-    assert_eq!(request, json!({ "app_name": "Claude", "redirect_domain": "claude.ai" }));
+    assert_eq!(request, json!({ "app_name": "Claude", "redirect_domain": "claude.ai", "asks_to_change": true }));
     let allowed = ada.call("answer_connection_request", answer_from(&consent, true)).await;
     let redirect = allowed["redirect_to"].as_str().unwrap();
     assert!(redirect.starts_with(CALLBACK), "{redirect}");
@@ -241,6 +243,8 @@ async fn a_client_registers_a_member_allows_it_and_it_acts_as_the_member() {
     let issued = json_of(&issued);
     assert_eq!(issued["token_type"], "Bearer");
     assert_eq!(issued["expires_in"], 3600);
+    // A client that names no scope gets what Ada may do.
+    assert_eq!(issued["scope"], "turtle:read turtle:write");
     let access_token = issued["access_token"].as_str().unwrap();
 
     // The client acts as Ada, and her change is credited to her through Claude.
@@ -309,4 +313,38 @@ async fn a_bad_authorization_request_is_refused_without_reaching_the_consent_pag
     assert!(location.starts_with(CALLBACK), "{location}");
     assert_eq!(parameter(location, "error").as_deref(), Some("invalid_request"));
     assert_eq!(parameter(location, "state").as_deref(), Some("xyz"));
+}
+
+/// Calls a tool at the MCP endpoint and says whether it failed.
+async fn tool_fails(server: &TestServer, token: &str, name: &str, arguments: Value) -> bool {
+    let call = json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": { "name": name, "arguments": arguments } });
+    let answered = json_of(&mcp(server, Some(token), call).await);
+    answered["result"]["isError"].as_bool().unwrap_or_else(|| panic!("{answered}"))
+}
+
+#[tokio::test]
+async fn a_member_lowers_a_client_asking_to_read_and_write_to_reading() {
+    let server = TestServer::start_with_public_url(PUBLIC_URL).await;
+    let ada = server.sign_up().await;
+    let page = ada.create_page("Roadmap").await;
+    let client_id = register(&server, "Claude").await;
+    let query = authorization_query(&client_id).replace("scope=", "scope=turtle%3Aread%20turtle%3Awrite");
+    let authorize = get(&server, &format!("/oauth/authorize?{query}")).await;
+    let consent = authorize.header("location").unwrap().to_string();
+
+    // The consent page is told what the client asks for.
+    let mut answer = answer_from(&consent, true);
+    assert_eq!(answer["scope"], "turtle:read turtle:write");
+    let request = ada.call("describe_connection_request", json!({ "client_id": client_id, "scope": answer["scope"] })).await;
+    assert_eq!(request["asks_to_change"], true);
+
+    answer["only_reading"] = json!(true);
+    let allowed = ada.call("answer_connection_request", answer).await;
+    let code = parameter(allowed["redirect_to"].as_str().unwrap(), "code").unwrap();
+    let issued = json_of(&exchange(&server, &client_id, &code, Some(VERIFIER)).await);
+    assert_eq!(issued["scope"], "turtle:read");
+    let access_token = issued["access_token"].as_str().unwrap();
+
+    assert!(!tool_fails(&server, access_token, "get_page", json!({ "id": page })).await);
+    assert!(tool_fails(&server, access_token, "replace_page", json!({ "page_id": page, "markdown": "Written by Claude." })).await);
 }

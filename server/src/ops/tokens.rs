@@ -161,14 +161,7 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
                 "Choose at least one Area, or let the Token reach every Area.".into(),
             ));
         }
-        let mut found: Vec<TokenArea> = Vec::new();
-        for area_id in area_ids {
-            let area = areas::readable_area(&transaction, principal, area_id)?;
-            if found.iter().all(|known| known.id != area.id) {
-                found.push(TokenArea { id: area.id, name: area.name });
-            }
-        }
-        chosen = Some(found);
+        chosen = Some(readable_areas(&transaction, principal, area_ids)?);
     }
     let (owner_column, owner_id) = owner.column();
     transaction.execute(
@@ -198,6 +191,19 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
         created_at: now,
     };
     Ok(CreatedToken { token, value }.into())
+}
+
+/// The Areas a Token or connection is limited to, each once, if the caller
+/// can read them all; an Area they cannot read is not found.
+pub(super) fn readable_areas(db: &Connection, principal: &Principal, area_ids: &[String]) -> Result<Vec<TokenArea>, OpError> {
+    let mut found: Vec<TokenArea> = Vec::new();
+    for area_id in area_ids {
+        let area = areas::readable_area(db, principal, area_id)?;
+        if found.iter().all(|known| known.id != area.id) {
+            found.push(TokenArea { id: area.id, name: area.name });
+        }
+    }
+    Ok(found)
 }
 
 pub fn list_tokens(core: &Core, principal: &Principal, input: TokensOf) -> OpResult<TokenList> {
