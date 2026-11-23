@@ -5,6 +5,7 @@
    * underneath; disconnecting revokes it, and an app's access ends with it.
    */
   import TokenForm from '../components/TokenForm.svelte'
+  import { router } from '../lib/router.svelte'
   import { access } from '../lib/connectedApps'
   import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
@@ -22,6 +23,13 @@
 
   $effect(() => {
     document.title = 'Connected apps · Turtle'
+  })
+
+  let forDevelopers = $state<HTMLElement | null>(null)
+
+  // The Connect AI page links straight to creating a Token by hand.
+  $effect(() => {
+    if (forDevelopers && location.hash === '#for-developers') forDevelopers.scrollIntoView({ block: 'start' })
   })
 
   const mcpAddress = `${location.origin}/mcp`
@@ -51,7 +59,8 @@
 <main class="screen">
   <h1>Connected apps</h1>
   <p class="lede">
-    These can act as you. None of them ever has more access than you, and each stops working the moment you disconnect it.
+    These can act as you. None of them ever has more access than you, and each stops working the moment you disconnect it. To
+    connect Claude or another AI client, see <a href="/connect-ai" onclick={event => router.follow(event, '/connect-ai')}>Connect AI</a>.
   </p>
 
   {#if loadFailed}
@@ -86,7 +95,7 @@
       </ul>
     {/if}
 
-    <section class="section">
+    <section class="section" id="for-developers" bind:this={forDevelopers}>
       <h2 class="section-title">For developers</h2>
       <p class="muted">
         For a script, or a client that cannot connect through OAuth: create a Token and send it to MCP at <code>{mcpAddress}</code> or

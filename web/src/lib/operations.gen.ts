@@ -89,6 +89,13 @@ export type Comparison = {
   to: VersionSummary
 }
 
+export type Connecting = {
+  /** The address to give an AI client. Missing where Turtle does not know
+its public address, since an AI client could not sign in through
+OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it. */
+  mcp_address?: string | null
+}
+
 export type ConnectionRedirect = {
   redirect_to: string
 }
@@ -941,6 +948,11 @@ of the Page. Needed only when several Sections have this heading. */
       id: string
     }
     output: null
+  }
+  /** Says how the caller connects an AI client to Turtle: the MCP address to give it, or that connecting is not available. */
+  describe_connecting: {
+    input: Record<string, never>
+    output: Connecting
   }
   /** Says which app asks to act as the caller, and where Turtle sends the answer, so the caller can decide whether to allow it. */
   describe_connection_request: {

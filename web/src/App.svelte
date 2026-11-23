@@ -14,6 +14,7 @@
   import ConnectedAppsScreen from './screens/ConnectedAppsScreen.svelte'
   import AreaScreen from './screens/AreaScreen.svelte'
   import AuthorizeScreen from './screens/AuthorizeScreen.svelte'
+  import ConnectAiScreen from './screens/ConnectAiScreen.svelte'
   import DeletedAreasScreen from './screens/DeletedAreasScreen.svelte'
   import InvitationScreen from './screens/InvitationScreen.svelte'
   import MembersScreen from './screens/MembersScreen.svelte'
@@ -170,6 +171,8 @@
         {/key}
       {:else if route.screen === 'search'}
         <SearchScreen query={route.query} />
+      {:else if route.screen === 'connect-ai'}
+        <ConnectAiScreen />
       {:else if route.screen === 'members'}
         <MembersScreen />
       {:else if route.screen === 'connected-apps'}
