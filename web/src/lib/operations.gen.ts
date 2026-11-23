@@ -89,6 +89,17 @@ export type Comparison = {
   to: VersionSummary
 }
 
+export type ConnectionRedirect = {
+  redirect_to: string
+}
+
+export type ConnectionRequest = {
+  /** The name the app registered with. Any app can choose any name. */
+  app_name: string
+  /** The domain the answer is sent to, which tells who really asks. */
+  redirect_domain: string
+}
+
 export type CreatedToken = {
   token: TokenSummary
   /** The value an Agent sends as `Authorization: Bearer <value>`. Shown
@@ -927,5 +938,33 @@ of the Page. Needed only when several Sections have this heading. */
       id: string
     }
     output: null
+  }
+  /** Says which app asks to act as the caller, and where Turtle sends the answer, so the caller can decide whether to allow it. */
+  describe_connection_request: {
+    input: {
+      /** The app's client ID, as it sent it. */
+      client_id: string
+      /** Where the app wants the answer, as it sent it. */
+      redirect_uri?: string | null
+    }
+    output: ConnectionRequest
+  }
+  /** Allows an app to act as the caller, or denies it, and returns the address to send the browser back to the app with the answer. */
+  answer_connection_request: {
+    input: {
+      /** Whether the caller allows the app to act as them. */
+      allow: boolean
+      /** The app's client ID, as it sent it. */
+      client_id: string
+      /** The PKCE code challenge the app sent. */
+      code_challenge?: string | null
+      /** The PKCE method the app sent; only S256 is accepted. */
+      code_challenge_method?: string | null
+      /** Where the app wants the answer, as it sent it. */
+      redirect_uri?: string | null
+      /** What the app sent to recognise the answer, given back unchanged. */
+      state?: string | null
+    }
+    output: ConnectionRedirect
   }
 }

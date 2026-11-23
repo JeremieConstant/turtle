@@ -2,7 +2,7 @@ import type { Author, VersionSummary } from './operations.gen'
 
 /**
  * The authors of a Version as a sentence lists them, every Agent recognisable
- * as one: "Ada, Claude (Agent of Linus) and Reviewer (Agent)".
+ * as one: "Ada, Linus via Claude and Reviewer (Agent)".
  */
 export function authorNames(authors: Author[]): string {
   const names = authors.map(authorName)
@@ -23,13 +23,13 @@ export function previousNumber(versions: Pick<VersionSummary, 'number'>[], numbe
   return index < 0 ? null : (versions[index + 1]?.number ?? null)
 }
 
-/** One author as a sentence names them, an Agent recognisable as one: "Claude (Agent of Ada)". */
+/** One author as a sentence names them, an Agent recognisable as one: "Ada via Claude". */
 export function authorName(author: Author): string {
   switch (author.kind) {
     case 'member':
       return author.name
     case 'agent_for_member':
-      return `${author.name} (Agent of ${author.member_name})`
+      return `${author.member_name} via ${author.name}`
     case 'agent':
       return `${author.name} (Agent)`
   }

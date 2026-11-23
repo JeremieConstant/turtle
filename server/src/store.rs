@@ -239,6 +239,32 @@ const MIGRATIONS: &[&str] = &[
          attached_at INTEGER NOT NULL
      );
      CREATE INDEX attachments_by_page ON attachments (page_id, attached_at);",
+    // OAuth (ADR-0010). Any client may register itself; its redirect
+    // addresses are a JSON array. A connection a Member allows is a Token of
+    // theirs that names its client; the client never sees that Token's own
+    // secret, only short-lived access tokens for it, which go with it. An
+    // authorization code is kept only as a digest, like every secret.
+    "CREATE TABLE oauth_clients (
+         id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         redirect_uris TEXT NOT NULL,
+         created_at INTEGER NOT NULL
+     );
+     ALTER TABLE tokens ADD COLUMN client_id TEXT REFERENCES oauth_clients (id) ON DELETE CASCADE;
+     CREATE TABLE authorization_codes (
+         digest TEXT PRIMARY KEY,
+         client_id TEXT NOT NULL REFERENCES oauth_clients (id) ON DELETE CASCADE,
+         member_id TEXT NOT NULL REFERENCES members (id) ON DELETE CASCADE,
+         redirect_uri TEXT NOT NULL,
+         code_challenge TEXT NOT NULL,
+         expires_at INTEGER NOT NULL
+     );
+     CREATE TABLE access_tokens (
+         digest TEXT PRIMARY KEY,
+         token_id TEXT NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
+         expires_at INTEGER NOT NULL
+     );
+     CREATE INDEX access_tokens_by_token ON access_tokens (token_id);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

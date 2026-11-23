@@ -141,3 +141,9 @@ test('the Trash of an Area has an address of its own, after the Area’s', () =>
 test('the deleted Areas are among the settings', () => {
   expect(parseAddress('/settings/deleted-areas')).toEqual({ screen: 'deleted-areas' })
 })
+
+test('the consent page keeps the request of the app that asks to connect', () => {
+  const query = '?client_id=c1&redirect_uri=https%3A%2F%2Fclaude.ai%2Fcb&state=xyz'
+  expect(parseAddress('/authorize', query)).toEqual({ screen: 'authorize', query })
+  expect(inShell({ screen: 'authorize', query })).toBe(false)
+})

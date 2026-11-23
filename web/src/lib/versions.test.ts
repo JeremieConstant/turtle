@@ -11,10 +11,10 @@ test('authors are named the way a sentence would list them', () => {
   expect(authorNames([])).toBe('Unknown')
 })
 
-test('an Agent acting for a Member is named as their Agent', () => {
+test('an Agent acting for a Member is named as the Member via the app', () => {
   const claude = { kind: 'agent_for_member' as const, name: 'Claude', member_id: 'ada', member_name: 'Ada' }
-  expect(authorNames([claude])).toBe('Claude (Agent of Ada)')
-  expect(authorNames([person('Ada'), claude])).toBe('Ada and Claude (Agent of Ada)')
+  expect(authorNames([claude])).toBe('Ada via Claude')
+  expect(authorNames([person('Grace'), claude])).toBe('Grace and Ada via Claude')
 })
 
 test('a standalone Agent is named as an Agent of its own', () => {

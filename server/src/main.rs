@@ -6,6 +6,7 @@ mod live;
 mod markdown;
 mod mcp;
 mod model;
+mod oauth;
 mod ops;
 mod search;
 mod store;
@@ -84,10 +85,18 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => ops::attachments::DEFAULT_ATTACHMENT_LIMIT,
     };
 
+    // Where people and AI clients reach this Turtle from outside, if it is
+    // known; only then is OAuth offered (ADR-0010).
+    let public_url = match std::env::var("TURTLE_PUBLIC_URL") {
+        Ok(url) if !url.trim().is_empty() => Some(oauth::public_url(&url)?),
+        _ => None,
+    };
+
     // Opening the core brings the schema up to date.
     let db_path = store::database_in(&data_dir)?;
     let mut core = ops::Core::open(&db_path)?;
     core.set_attachment_limit(attachment_limit);
+    core.set_public_url(public_url);
     let core = Arc::new(core);
 
     let app = Arc::new(App {
@@ -159,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/attachments/{id}", get(download_attachment))
         .with_state(app.clone())
         .merge(http_api::router(core.clone()))
+        .merge(oauth::router(core.clone()))
         .merge(mcp::router(core))
         .merge(web_app::router(web_app::EMBEDDED));
 

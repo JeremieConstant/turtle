@@ -9,6 +9,7 @@ pub mod accounts;
 pub mod agents;
 pub mod attachments;
 pub mod areas;
+pub mod connections;
 pub mod content;
 #[cfg(test)]
 mod every_operation;
@@ -50,6 +51,9 @@ pub struct Core {
     attachments: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
+    /// The address Turtle is reached at from outside, without a trailing
+    /// slash. OAuth is offered only when it is known (ADR-0010).
+    public_url: Option<String>,
 }
 
 impl Core {
@@ -74,6 +78,7 @@ impl Core {
             live: crate::live::Pages::new(crate::store::open(db_path)?, clock.clone()),
             attachments: db_path.with_file_name("attachments"),
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
+            public_url: None,
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -86,6 +91,17 @@ impl Core {
 
     pub fn attachment_limit(&self) -> u64 {
         self.attachment_limit
+    }
+
+    /// Sets the address Turtle is reached at from outside, which offers OAuth.
+    pub fn set_public_url(&mut self, url: Option<String>) {
+        self.public_url = url;
+    }
+
+    /// The address Turtle is reached at from outside, without a trailing
+    /// slash, if it is known.
+    pub fn public_url(&self) -> Option<&str> {
+        self.public_url.as_deref()
     }
 
     /// Where Attachment files are kept.
@@ -431,6 +447,7 @@ pub fn catalogue() -> Catalogue {
     content::register(&mut catalogue);
     links::register(&mut catalogue);
     tokens::register(&mut catalogue);
+    connections::register(&mut catalogue);
     catalogue
 }
 

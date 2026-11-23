@@ -276,8 +276,10 @@ pub(crate) fn author_of(core: &Core, principal: &Principal) -> Result<crate::liv
 }
 
 /// Finds out who acts through a Token value, and with which limits: the
-/// Member who owns it, or the standalone Agent it is for. An unknown, expired
-/// or revoked Token, or one whose owner was deactivated, is nobody. A use is
+/// Member who owns it, or the standalone Agent it is for. The value is the
+/// Token's own, or an access token of a connection an app was allowed
+/// (`connections`), which works for an hour. An unknown, expired or revoked
+/// Token, or one whose owner was deactivated, is nobody. A use is
 /// remembered as the Token's last, to the minute.
 pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>, OpError> {
     if !value.starts_with(VALUE_PREFIX) {
@@ -291,7 +293,11 @@ pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>
              FROM tokens
              LEFT JOIN members ON members.id = tokens.member_id AND members.deactivated_at IS NULL
              LEFT JOIN agents ON agents.id = tokens.agent_id AND agents.deactivated_at IS NULL
-             WHERE tokens.secret_digest = ?1
+             WHERE tokens.id IN (
+                     SELECT id FROM tokens WHERE secret_digest = ?1
+                     UNION ALL
+                     SELECT token_id FROM access_tokens WHERE digest = ?1 AND expires_at > ?2
+                 )
                AND (tokens.expires_at IS NULL OR tokens.expires_at > ?2)
                AND (members.id IS NOT NULL OR agents.id IS NOT NULL)",
             rusqlite::params![digest(value), now],

@@ -12,6 +12,7 @@
   import { ui } from './lib/ui.svelte'
   import AgentsScreen from './screens/AgentsScreen.svelte'
   import AreaScreen from './screens/AreaScreen.svelte'
+  import AuthorizeScreen from './screens/AuthorizeScreen.svelte'
   import DeletedAreasScreen from './screens/DeletedAreasScreen.svelte'
   import InvitationScreen from './screens/InvitationScreen.svelte'
   import MembersScreen from './screens/MembersScreen.svelte'
@@ -129,6 +130,10 @@
   {:else if route.screen === 'password-reset'}
     {#key route.secret}
       <PasswordResetScreen secret={route.secret} />
+    {/key}
+  {:else if route.screen === 'authorize'}
+    {#key route.query}
+      <AuthorizeScreen query={route.query} />
     {/key}
   {/if}
 {:else}
