@@ -294,6 +294,12 @@ const MIGRATIONS: &[&str] = &[
          connecting_ai INTEGER NOT NULL DEFAULT 1
      );
      INSERT INTO workspace_settings (id) VALUES (1);",
+    // A code asked for with a redirect address is exchanged only with the
+    // same one (RFC 6749, 4.1.3). An exchanged code is kept, naming the
+    // connection it made, so that one presented again ends that connection
+    // (4.1.2); it goes with the connection.
+    "ALTER TABLE authorization_codes ADD COLUMN redirect_uri_named INTEGER NOT NULL DEFAULT 1;
+     ALTER TABLE authorization_codes ADD COLUMN token_id TEXT REFERENCES tokens (id) ON DELETE CASCADE;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

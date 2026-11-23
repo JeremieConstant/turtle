@@ -5,16 +5,14 @@
    * disconnect any of them, say when a laptop is lost or someone leaves.
    */
   import { router } from '../lib/router.svelte'
-  import { access, byMember } from '../lib/connectedApps'
-  import { ask } from '../lib/confirm.svelte'
+  import { access, byMember, revokeOnceSure, type Revoking } from '../lib/connectedApps'
   import { call, OperationError } from '../lib/ops'
   import type { MembersToken } from '../lib/operations.gen'
-  import { exactTime, relativeTime } from '../lib/time'
+  import { exactTime, nowInSeconds as now, relativeTime } from '../lib/time'
 
   let entries = $state.raw<MembersToken[] | null>(null)
   let loadError = $state<string | null>(null)
-  let busy = $state(false)
-  let error = $state<string | null>(null)
+  const revoking = $state<Revoking>({ busy: false, error: null })
 
   call('list_members_tokens', {})
     .then(list => (entries = list.tokens))
@@ -29,26 +27,17 @@
     document.title = 'All connected apps · Turtle'
   })
 
-  const now = () => Math.floor(Date.now() / 1000)
   const members = $derived(entries ? byMember(entries) : [])
 
   async function disconnect({ member, token }: MembersToken) {
-    const sure = await ask({
+    const question = {
       title: `Disconnect ${token.name} of ${member.name}?`,
       message: `It stops working at once. ${member.name} can connect it again.`,
       action: 'Disconnect',
       destructive: true,
-    })
-    if (!sure) return
-    busy = true
-    error = null
-    try {
-      await call('revoke_token', { id: token.id, member_id: member.id })
+    }
+    if (await revokeOnceSure(revoking, question, () => call('revoke_token', { id: token.id, member_id: member.id }))) {
       entries = entries?.filter(known => known.token.id !== token.id) ?? null
-    } catch (caught) {
-      error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'
-    } finally {
-      busy = false
     }
   }
 </script>
@@ -64,8 +53,8 @@
   {#if loadError}
     <p class="muted section">{loadError}</p>
   {:else if entries !== null}
-    {#if error}
-      <p class="error section" role="alert">{error}</p>
+    {#if revoking.error}
+      <p class="error section" role="alert">{revoking.error}</p>
     {/if}
 
     {#if members.length === 0}
@@ -94,7 +83,7 @@
               <button
                 type="button"
                 class="btn"
-                disabled={busy}
+                disabled={revoking.busy}
                 aria-label={`Disconnect ${app.name} of ${member.name}`}
                 onclick={() => disconnect({ member, token: app })}>Disconnect</button
               >

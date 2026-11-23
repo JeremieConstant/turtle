@@ -1,21 +1,22 @@
 //! Connections: a Member allows an AI client, registered through OAuth, to
-//! act as them (ADR-0010). A connection is a Token of the Member, named
-//! after the client, so it never has more access than the Member and its
-//! changes are credited like any Token's. The client holds only access
-//! tokens for it, which last an hour, and a refresh token for the next,
-//! which works once. A connection unused for 90 days ends.
+//! act as them (ADR-0010). A connection is a Token made through OAuth: a
+//! Token of the Member, named after the client, so it never has more access
+//! than the Member and its changes are credited like any Token's. The client
+//! holds only access tokens for it, which last an hour, and a refresh token
+//! for the next, which works once. A connection unused for 90 days ends.
 //!
 //! OAuth itself (metadata, registration, the authorization and token
 //! endpoints) is spoken by `crate::oauth`; what is decided is decided here.
 
 use super::accounts::{digest, random_hex, Nothing};
-use super::tokens::readable_areas;
+use super::tokens::{readable_areas, VALUE_PREFIX};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use base64::Engine;
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::MutexGuard;
 
 pub(super) fn register(catalogue: &mut Catalogue) {
     {
@@ -74,10 +75,6 @@ const MAX_REDIRECT_URIS: usize = 10;
 /// Long enough for any app's name, short enough to fit a list.
 const MAX_NAME_LENGTH: usize = 200;
 
-/// Access token values start like a Token's, so a leaked one is as easy to
-/// recognise.
-const ACCESS_TOKEN_PREFIX: &str = "turtle_";
-
 /// What a client says about itself when it registers (RFC 7591).
 #[derive(Debug, Default, Deserialize)]
 pub struct NewClient {
@@ -115,7 +112,7 @@ pub fn register_client(core: &Core, input: NewClient) -> Result<Client, OpError>
         Some(name) if !name.is_empty() => name.chars().take(MAX_NAME_LENGTH).collect(),
         // Without a name of its own, the client is known by where it sends
         // the answer, which is what the Member is shown anyway.
-        _ => redirect_domain(&input.redirect_uris[0]).to_string(),
+        _ => host_of(&input.redirect_uris[0]).to_string(),
     };
     let client = Client {
         id: random_hex(16)?,
@@ -149,7 +146,9 @@ fn check_redirect_uri(uri: &str) -> Result<(), OpError> {
     }
 }
 
-/// The host of an address, without port or user, as it is shown to a Member.
+/// The host of an address, without port or user. Of a redirect address,
+/// it is shown to a Member as where the answer goes, so a client that only
+/// calls itself Claude is recognisable.
 fn host_of(uri: &str) -> &str {
     let rest = uri.split_once("://").map_or("", |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
@@ -159,12 +158,6 @@ fn host_of(uri: &str) -> &str {
         return host.split_inclusive(']').next().unwrap_or(host);
     }
     host.split(':').next().unwrap_or_default()
-}
-
-/// The domain the answer goes to, which the Member is shown so a client that
-/// only calls itself Claude is recognisable.
-fn redirect_domain(uri: &str) -> &str {
-    host_of(uri)
 }
 
 /// The client asking, if it is registered and the redirect address is one
@@ -182,17 +175,14 @@ pub fn requesting_client(core: &Core, client_id: &str, redirect_uri: Option<&str
     Ok((client, redirect_uri))
 }
 
-fn client(db: &Connection, id: &str) -> Result<Option<Client>, OpError> {
-    let found = db
-        .query_row(
-            "SELECT id, name, redirect_uris, created_at FROM oauth_clients WHERE id = ?1",
-            [id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?)),
-        )
-        .optional()?;
-    let Some((id, name, uris, created_at)) = found else { return Ok(None) };
-    let redirect_uris = serde_json::from_str(&uris).map_err(anyhow::Error::from)?;
-    Ok(Some(Client { id, name, redirect_uris, created_at }))
+fn client(db: &Connection, id: &str) -> rusqlite::Result<Option<Client>> {
+    db.query_row("SELECT id, name, redirect_uris, created_at FROM oauth_clients WHERE id = ?1", [id], |row| {
+        let uris: String = row.get(2)?;
+        let redirect_uris = serde_json::from_str(&uris)
+            .map_err(|error| rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(error)))?;
+        Ok(Client { id: row.get(0)?, name: row.get(1)?, redirect_uris, created_at: row.get(3)? })
+    })
+    .optional()
 }
 
 /// OAuth is offered only where Turtle knows its own address (ADR-0010).
@@ -259,10 +249,10 @@ pub fn set_connecting_ai(core: &Core, principal: &Principal, input: ConnectingAi
 /// What a client or Member is told while connecting AI is off.
 pub const TURNED_OFF: &str = "A Workspace Admin has turned off connecting AI to this Turtle.";
 
-/// Whether connecting AI is on for the Workspace. While it is off, the
-/// connections are kept but `tokens::principal_for_token` does not let them
-/// act.
-fn connecting_ai_on(db: &Connection) -> rusqlite::Result<bool> {
+/// Whether connecting AI is on for the Workspace: the one place that
+/// decides it. While it is off, the connections are kept but
+/// `tokens::principal_for_token` does not let them act.
+pub(super) fn connecting_ai_on(db: &Connection) -> rusqlite::Result<bool> {
     db.query_row("SELECT connecting_ai FROM workspace_settings", [], |row| row.get(0))
 }
 
@@ -303,7 +293,7 @@ pub fn describe_connection_request(core: &Core, principal: &Principal, input: Re
     let (client, redirect_uri) = requesting_client(core, &input.client_id, input.redirect_uri.as_deref())?;
     Ok(ConnectionRequest {
         app_name: client.name,
-        redirect_domain: redirect_domain(&redirect_uri).to_string(),
+        redirect_domain: host_of(&redirect_uri).to_string(),
         asks_to_change: asks_to_change(input.scope.as_deref()),
     }
     .into())
@@ -372,13 +362,25 @@ pub fn answer_connection_request(core: &Core, principal: &Principal, input: Conn
         Some(area_ids) => Some(readable_areas(&transaction, principal, area_ids)?),
         None => None,
     };
-    // Codes nobody exchanged are of no further use.
-    transaction.execute("DELETE FROM authorization_codes WHERE expires_at <= ?1", [now])?;
+    // Codes nobody exchanged are of no further use; exchanged ones go with
+    // their connection.
+    transaction.execute("DELETE FROM authorization_codes WHERE expires_at <= ?1 AND token_id IS NULL", [now])?;
     let read_only = input.only_reading || !asks_to_change(input.scope.as_deref());
     transaction.execute(
-        "INSERT INTO authorization_codes (digest, client_id, member_id, redirect_uri, code_challenge, expires_at, read_only, all_areas)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![digest(&code), client.id, member_id, redirect_uri, challenge, now + CODE_LIFETIME, read_only, areas.is_none()],
+        "INSERT INTO authorization_codes
+             (digest, client_id, member_id, redirect_uri, redirect_uri_named, code_challenge, expires_at, read_only, all_areas)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![
+            digest(&code),
+            client.id,
+            member_id,
+            redirect_uri,
+            input.redirect_uri.is_some(),
+            challenge,
+            now + CODE_LIFETIME,
+            read_only,
+            areas.is_none()
+        ],
     )?;
     for area in areas.iter().flatten() {
         transaction.execute(
@@ -409,13 +411,13 @@ fn granted_scope(read_only: bool) -> String {
 /// only, since the plain method protects nothing (OAuth 2.1).
 pub fn pkce_challenge<'a>(challenge: Option<&'a str>, method: Option<&str>) -> Result<&'a str, &'static str> {
     let Some(challenge) = challenge.filter(|challenge| !challenge.is_empty()) else {
-        return Err("A code_challenge is required (PKCE).");
+        return Err("Send a PKCE code_challenge made with S256, then connect again.");
     };
     if method != Some("S256") {
-        return Err("Only the S256 code_challenge_method is supported.");
+        return Err("Send code_challenge_method S256, the only PKCE method Turtle accepts, then connect again.");
     }
     if !is_pkce_value(challenge) {
-        return Err("The code_challenge is not valid.");
+        return Err("Send a code_challenge of 43 to 128 letters, digits, '-', '.', '_' or '~', then connect again.");
     }
     Ok(challenge)
 }
@@ -495,10 +497,50 @@ impl From<rusqlite::Error> for GrantRefusal {
     }
 }
 
+/// An authorization code as it is kept until exchanged.
+struct StoredCode {
+    client_id: String,
+    member_id: String,
+    redirect_uri: String,
+    /// Whether the client named `redirect_uri` when it asked for the code,
+    /// rather than it being the client's only one.
+    redirect_uri_named: bool,
+    challenge: String,
+    expires_at: i64,
+    read_only: bool,
+    all_areas: bool,
+    /// The connection the code was exchanged for, once it was.
+    token_id: Option<String>,
+}
+
+fn stored_code(db: &Connection, code_digest: &str) -> rusqlite::Result<Option<StoredCode>> {
+    db.query_row(
+        "SELECT client_id, member_id, redirect_uri, redirect_uri_named, code_challenge, expires_at, read_only, all_areas, token_id
+         FROM authorization_codes WHERE digest = ?1",
+        [code_digest],
+        |row| {
+            Ok(StoredCode {
+                client_id: row.get(0)?,
+                member_id: row.get(1)?,
+                redirect_uri: row.get(2)?,
+                redirect_uri_named: row.get(3)?,
+                challenge: row.get(4)?,
+                expires_at: row.get(5)?,
+                read_only: row.get(6)?,
+                all_areas: row.get(7)?,
+                token_id: row.get(8)?,
+            })
+        },
+    )
+    .optional()
+}
+
 /// Exchanges an authorization code for the connection it allows: a new
 /// Token of the Member, named after the client, and its first access and
-/// refresh tokens.
-/// A code works once, whether the exchange succeeds or not.
+/// refresh tokens. A code works once, whether the exchange succeeds or not.
+/// Presented again after it succeeded, it was stolen (whoever presents it
+/// second, the client or a thief, the other already holds the connection),
+/// so the connection it made ends.
 pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, GrantRefusal> {
     require_oauth(core)?;
     let now = core.now();
@@ -506,68 +548,52 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
     if !connecting_ai_on(&db)? {
         return Err(GrantRefusal::TurnedOff);
     }
-    let transaction = db.transaction()?;
-    // Its Areas go with the code, so they are read first.
-    let area_ids: Vec<String> = transaction
-        .prepare("SELECT area_id FROM authorization_code_areas WHERE code_digest = ?1")?
-        .query_map([digest(&input.code)], |row| row.get(0))?
-        .collect::<Result<_, _>>()?;
-    let found = transaction
-        .query_row(
-            "DELETE FROM authorization_codes WHERE digest = ?1
-             RETURNING client_id, member_id, redirect_uri, code_challenge, expires_at, read_only, all_areas",
-            [digest(&input.code)],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, bool>(5)?,
-                    row.get::<_, bool>(6)?,
-                ))
-            },
-        )
-        .optional()
-        ?;
-    // The code is gone even if what follows refuses it.
-    transaction.commit()?;
-    let Some((client_id, member_id, redirect_uri, challenge, expires_at, read_only, all_areas)) = found else {
+    let code_digest = digest(&input.code);
+    let Some(code) = stored_code(&db, &code_digest)? else { return Err(GrantRefusal::InvalidGrant) };
+    if let Some(token_id) = &code.token_id {
+        db.execute("DELETE FROM tokens WHERE id = ?1", [token_id])?;
+        drop(db);
+        core.access_changed();
+        return Err(GrantRefusal::InvalidGrant);
+    }
+    let redirect_matches = match &input.redirect_uri {
+        Some(uri) => *uri == code.redirect_uri,
+        None => !code.redirect_uri_named,
+    };
+    let active: bool = db
+        .query_row("SELECT deactivated_at IS NULL FROM members WHERE id = ?1", [&code.member_id], |row| row.get(0))
+        .optional()?
+        .unwrap_or(false);
+    let client = client(&db, &code.client_id)?;
+    let good = code.expires_at > now
+        && code.client_id == input.client_id
+        && redirect_matches
+        && verifier_matches(&input.code_verifier, &code.challenge)
+        && active;
+    let (true, Some(client)) = (good, client) else {
+        db.execute("DELETE FROM authorization_codes WHERE digest = ?1", [&code_digest])?;
         return Err(GrantRefusal::InvalidGrant);
     };
-    let redirect_matches = input.redirect_uri.as_ref().is_none_or(|uri| *uri == redirect_uri);
-    if expires_at <= now || client_id != input.client_id || !redirect_matches || !verifier_matches(&input.code_verifier, &challenge) {
-        return Err(GrantRefusal::InvalidGrant);
-    }
-    let Some(client) = client(&db, &client_id)? else { return Err(GrantRefusal::InvalidGrant) };
-    let active: bool = db
-        .query_row("SELECT deactivated_at IS NULL FROM members WHERE id = ?1", [&member_id], |row| row.get(0))
-        .optional()
-        ?
-        .unwrap_or(false);
-    if !active {
-        return Err(GrantRefusal::InvalidGrant);
-    }
 
     let token_id = random_hex(16)?;
     // The connection's own secret is never handed out; the client holds
     // only access and refresh tokens for it.
     let unused_secret = random_hex(32)?;
     let transaction = db.transaction()?;
-    transaction
-        .execute(
-            "INSERT INTO tokens (id, member_id, name, secret_digest, read_only, all_areas, client_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![token_id, member_id, client.name, digest(&unused_secret), read_only, all_areas, client.id, now],
-        )
-        ?;
-    for area_id in &area_ids {
-        transaction.execute(
-            "INSERT INTO token_areas (token_id, area_id) VALUES (?1, ?2)",
-            rusqlite::params![token_id, area_id],
-        )?;
-    }
+    transaction.execute(
+        "INSERT INTO tokens (id, member_id, name, secret_digest, read_only, all_areas, client_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![token_id, code.member_id, client.name, digest(&unused_secret), code.read_only, code.all_areas, client.id, now],
+    )?;
+    transaction.execute(
+        "INSERT INTO token_areas (token_id, area_id)
+         SELECT ?1, area_id FROM authorization_code_areas WHERE code_digest = ?2",
+        rusqlite::params![token_id, code_digest],
+    )?;
+    transaction.execute(
+        "UPDATE authorization_codes SET token_id = ?1 WHERE digest = ?2",
+        rusqlite::params![token_id, code_digest],
+    )?;
     let issued = issue(&transaction, &token_id, now)?;
     transaction.commit()?;
     Ok(issued)
@@ -588,12 +614,11 @@ pub struct RefreshExchange {
 pub fn refresh_connection(core: &Core, input: RefreshExchange) -> Result<IssuedAccess, GrantRefusal> {
     require_oauth(core)?;
     let now = core.now();
-    let mut db = core.db();
+    let mut db = db_without_idle_connections(core)?;
     if !connecting_ai_on(&db)? {
         return Err(GrantRefusal::TurnedOff);
     }
     let transaction = db.transaction()?;
-    end_idle_connections(&transaction, now)?;
     let found = transaction
         .query_row(
             "SELECT tokens.id, tokens.client_id, refresh_tokens.used_at IS NOT NULL, members.deactivated_at IS NULL
@@ -631,21 +656,26 @@ pub fn refresh_connection(core: &Core, input: RefreshExchange) -> Result<IssuedA
 /// seconds. A client that is still in use refreshes far more often.
 pub const IDLE_LIMIT: i64 = 90 * 24 * 60 * 60;
 
-/// Ends the connections unused for `IDLE_LIMIT`. An access token lasts far
-/// less, so only a refresh could revive one, and refreshing ends them first.
-pub fn end_idle_connections(db: &Connection, now: i64) -> rusqlite::Result<()> {
+/// The database, once the connections unused for `IDLE_LIMIT` have ended.
+/// Whatever lists or refreshes connections reads through here, so an idle
+/// one is never shown or revived. Using an access token needs no check: it
+/// lasts far less than `IDLE_LIMIT`, and only a refresh makes a new one.
+pub(super) fn db_without_idle_connections(core: &Core) -> Result<MutexGuard<'_, Connection>, OpError> {
+    let db = core.db();
     db.execute(
         "DELETE FROM tokens WHERE client_id IS NOT NULL AND COALESCE(last_used_at, created_at) <= ?1",
-        [now - IDLE_LIMIT],
+        [core.now() - IDLE_LIMIT],
     )?;
-    Ok(())
+    Ok(db)
 }
 
 /// Hands a connection a new access token and refresh token. Being given
 /// them is a use of the connection.
 fn issue(db: &Connection, token_id: &str, now: i64) -> Result<IssuedAccess, GrantRefusal> {
-    let access_token = format!("{ACCESS_TOKEN_PREFIX}{}", random_hex(32)?);
-    let refresh_token = format!("{ACCESS_TOKEN_PREFIX}{}", random_hex(32)?);
+    // They look like a Token's value, so a leaked one is as easy to
+    // recognise, and an access token is found where a Token is.
+    let access_token = format!("{VALUE_PREFIX}{}", random_hex(32)?);
+    let refresh_token = format!("{VALUE_PREFIX}{}", random_hex(32)?);
     db.execute(
         "INSERT INTO access_tokens (digest, token_id, expires_at) VALUES (?1, ?2, ?3)",
         rusqlite::params![digest(&access_token), token_id, now + ACCESS_TOKEN_LIFETIME],
@@ -684,7 +714,7 @@ mod tests {
 
     fn offering_oauth() -> TestCore {
         let mut core = fresh();
-        core.core.set_public_url(Some("https://turtle.example.org".into()));
+        core.core.set_public_url(Some(crate::public_url::PublicUrl::parse("https://turtle.example.org").unwrap()));
         core
     }
 
@@ -770,9 +800,6 @@ mod tests {
             author_of(&core, &acting).unwrap(),
             crate::live::Author::AgentForMember { member_id: "member-ada".into(), agent: "Claude".into() }
         );
-
-        // A code works once.
-        assert!(matches!(exchange_code(&core, exchange(&client, &code, VERIFIER)), Err(GrantRefusal::InvalidGrant)));
 
         core.advance(3599);
         assert!(principal_for_token(&core, &issued.access_token).unwrap().is_some());
@@ -936,6 +963,44 @@ mod tests {
             // Refused once, the code is gone, even with the right verifier.
             assert!(matches!(exchange_code(&core, exchange(&client, &code, VERIFIER)), Err(GrantRefusal::InvalidGrant)));
         }
+    }
+
+    #[test]
+    fn a_code_asked_for_with_a_redirect_address_is_exchanged_only_with_the_same_one() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        for redirect_uri in [None, Some("https://claude.ai/other")] {
+            let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
+            let code = parameter(&redirect, "code").unwrap();
+            let without = CodeExchange { redirect_uri: redirect_uri.map(Into::into), ..exchange(&client, &code, VERIFIER) };
+            assert!(matches!(exchange_code(&core, without), Err(GrantRefusal::InvalidGrant)), "{redirect_uri:?}");
+        }
+
+        // Asked for without one, the client's only redirect address is meant
+        // and need not be repeated.
+        let unnamed = ConnectionAnswer { redirect_uri: None, ..answer(&client, true) };
+        let redirect = answer_connection_request(&core, &ada, unnamed).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+        assert!(exchange_code(&core, CodeExchange { redirect_uri: None, ..exchange(&client, &code, VERIFIER) }).is_ok());
+    }
+
+    #[test]
+    fn a_code_presented_again_ends_the_connection_it_made() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+        let issued = exchange_code(&core, exchange(&client, &code, VERIFIER)).unwrap();
+        let other = connected(&core, &ada, &client);
+
+        // Whoever presents it second, the client or a thief, the other has it.
+        assert!(matches!(exchange_code(&core, exchange(&client, &code, VERIFIER)), Err(GrantRefusal::InvalidGrant)));
+        assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+        // Ada's other connection goes on.
+        assert!(principal_for_token(&core, &other.access_token).unwrap().is_some());
     }
 
     #[test]

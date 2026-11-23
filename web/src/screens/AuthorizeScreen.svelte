@@ -13,7 +13,7 @@
 
   let asking = $state<ConnectionRequest | null>(null)
   let areas = $state.raw<Area[]>([])
-  let error = $state<string | null>(request ? null : 'This connection request is not valid. Start connecting again from the app.')
+  let error = $state<string | null>(null)
   let busy = $state(false)
 
   // Without opening "Limit access", the app gets what it asked for.
@@ -35,21 +35,18 @@
     document.title = 'Connect an app · Turtle'
   })
 
-  if (request) {
-    Promise.all([
-      call('describe_connection_request', { client_id: request.client_id, redirect_uri: request.redirect_uri, scope: request.scope }),
-      call('list_areas', {}),
-    ])
-      .then(([found, areaList]) => {
-        asking = found
-        areas = areaList.areas
-      })
-      .catch(caught => (error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'))
-  }
+  Promise.all([
+    call('describe_connection_request', { client_id: request.client_id, redirect_uri: request.redirect_uri, scope: request.scope }),
+    call('list_areas', {}),
+  ])
+    .then(([found, areaList]) => {
+      asking = found
+      areas = areaList.areas
+    })
+    .catch(caught => (error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'))
 
   /** Sends the browser back to the app with the answer, which ends this page. */
   async function answer(allow: boolean) {
-    if (!request) return
     busy = true
     try {
       const { redirect_to } = await call('answer_connection_request', {

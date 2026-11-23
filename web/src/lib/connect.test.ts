@@ -25,7 +25,7 @@ test('what the app left out stays out', () => {
   })
 })
 
-test('without a client ID there is no request', () => {
-  expect(connectionRequest('')).toBeNull()
-  expect(connectionRequest('?state=x')).toBeNull()
+test('without a client ID the request names no client', () => {
+  expect(connectionRequest('').client_id).toBe('')
+  expect(connectionRequest('?state=x').client_id).toBe('')
 })

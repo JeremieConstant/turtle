@@ -33,7 +33,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
+use crate::public_url::PublicUrl;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Tells the time in seconds since the Unix epoch.
@@ -52,12 +53,16 @@ pub struct Core {
     attachments: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
-    /// The address Turtle is reached at from outside, without a trailing
-    /// slash. OAuth is offered only when it is known (ADR-0010).
-    public_url: Option<String>,
+    /// The address Turtle is reached at from outside. OAuth is offered only
+    /// when it is known (ADR-0010).
+    public_url: Option<PublicUrl>,
     /// Looks up host names, to tell whether Turtle's public address is
     /// reachable only from inside its network.
     resolve: intranet::Resolver,
+    /// Whether Turtle looks reachable only from inside its network, once it
+    /// was found out. The public URL does not change while Turtle runs, so
+    /// its host is looked up once.
+    intranet_only: OnceLock<bool>,
 }
 
 impl Core {
@@ -84,6 +89,7 @@ impl Core {
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             public_url: None,
             resolve: intranet::system_resolver(),
+            intranet_only: OnceLock::new(),
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -99,26 +105,29 @@ impl Core {
     }
 
     /// Sets the address Turtle is reached at from outside, which offers OAuth.
-    pub fn set_public_url(&mut self, url: Option<String>) {
+    pub fn set_public_url(&mut self, url: Option<PublicUrl>) {
         self.public_url = url;
+        self.intranet_only = OnceLock::new();
     }
 
-    /// The address Turtle is reached at from outside, without a trailing
-    /// slash, if it is known.
-    pub fn public_url(&self) -> Option<&str> {
-        self.public_url.as_deref()
+    /// The address Turtle is reached at from outside, if it is known.
+    pub fn public_url(&self) -> Option<&PublicUrl> {
+        self.public_url.as_ref()
     }
 
     /// Sets how host names are looked up, so tests need no network.
     #[cfg(test)]
     pub fn set_resolver(&mut self, resolve: intranet::Resolver) {
         self.resolve = resolve;
+        self.intranet_only = OnceLock::new();
     }
 
     /// Whether Turtle looks reachable only from inside its network, so that
-    /// claude.ai could not reach it.
+    /// claude.ai could not reach it. The first call may wait for the system
+    /// resolver, so it is made where waiting is allowed: in an operation,
+    /// which the adapters run off the async workers, or at start-up.
     pub fn looks_intranet_only(&self) -> bool {
-        intranet::looks_intranet_only(self.public_url(), &self.resolve)
+        *self.intranet_only.get_or_init(|| intranet::looks_intranet_only(self.public_url(), &self.resolve))
     }
 
     /// Where Attachment files are kept.

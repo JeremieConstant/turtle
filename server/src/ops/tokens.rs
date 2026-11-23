@@ -163,7 +163,7 @@ fn owner(db: &Connection, principal: &Principal, agent_id: Option<&str>) -> Resu
 }
 
 /// Every Token value starts with this, so a leaked one is easy to recognise.
-const VALUE_PREFIX: &str = "turtle_";
+pub(super) const VALUE_PREFIX: &str = "turtle_";
 
 /// How exactly the last use of a Token is remembered, in seconds.
 const LAST_USE_PRECISION: i64 = 60;
@@ -244,10 +244,8 @@ pub(super) fn readable_areas(db: &Connection, principal: &Principal, area_ids: &
 }
 
 pub fn list_tokens(core: &Core, principal: &Principal, input: TokensOf) -> OpResult<TokenList> {
-    let db = core.db();
+    let db = super::connections::db_without_idle_connections(core)?;
     let owner = owner(&db, principal, input.agent_id.as_deref())?;
-    // A connection unused for long has ended, even if nothing tried it since.
-    super::connections::end_idle_connections(&db, core.now())?;
     let (owner_column, owner_id) = owner.column();
     let mut statement = db.prepare(&format!(
         "SELECT {SUMMARY_COLUMNS} FROM tokens WHERE {owner_column} = ?1 ORDER BY created_at DESC, id"
@@ -262,20 +260,23 @@ pub fn list_tokens(core: &Core, principal: &Principal, input: TokensOf) -> OpRes
 
 pub fn list_members_tokens(core: &Core, principal: &Principal, _: Nothing) -> OpResult<MembersTokenList> {
     require_workspace_admin_for_members(principal)?;
-    let db = core.db();
-    super::connections::end_idle_connections(&db, core.now())?;
+    let db = super::connections::db_without_idle_connections(core)?;
     // A deactivated Member's Tokens no longer work, so there is nothing to revoke.
     let mut statement = db.prepare(&format!(
-        "SELECT {SUMMARY_COLUMNS}, members.id, members.name
+        "SELECT {SUMMARY_COLUMNS}, members.id, members.name, members.workspace_admin
          FROM tokens JOIN members ON members.id = tokens.member_id AND members.deactivated_at IS NULL
          ORDER BY members.name COLLATE NOCASE, members.id, tokens.created_at DESC, tokens.id"
     ))?;
     let rows = statement
-        .query_map([], |row| Ok((read_summary(row)?, TokenOwner { id: row.get(8)?, name: row.get(9)? })))?
+        .query_map([], |row| Ok((read_summary(row)?, TokenOwner { id: row.get(8)?, name: row.get(9)? }, row.get::<_, bool>(10)?)))?
         .collect::<Result<Vec<_>, _>>()?;
     let mut tokens = Vec::new();
-    for (row, member) in rows {
-        tokens.push(MembersToken { member, token: with_areas(&db, principal, row)? });
+    for (row, member, workspace_admin) in rows {
+        // The Areas are named as the Member sees them, since those are what
+        // the Token reaches, even ones the Workspace Admin cannot read, such
+        // as the Member's Personal Area.
+        let owner = Principal::Member { id: member.id.clone(), workspace_admin, session: None, token: None };
+        tokens.push(MembersToken { member, token: with_areas(&db, &owner, row)? });
     }
     Ok(MembersTokenList { tokens }.into())
 }
@@ -300,15 +301,15 @@ fn read_summary(row: &rusqlite::Row) -> rusqlite::Result<(TokenSummary, bool)> {
     ))
 }
 
-/// The Token with the names of the Areas it is limited to, as far as the
-/// caller can read them.
+/// The Token with the names of the Areas it is limited to, as far as its
+/// owner, `principal`, can read them.
 fn with_areas(
     db: &Connection,
     principal: &Principal,
     (mut token, all_areas): (TokenSummary, bool),
 ) -> Result<TokenSummary, OpError> {
     if !all_areas {
-        // The names of Areas the caller can no longer read stay hidden.
+        // The names of Areas the owner can no longer read stay hidden.
         let mut shown = Vec::new();
         for area_id in token_area_ids(db, &token.id)? {
             if let Ok(area) = areas::readable_area(db, principal, &area_id) {
@@ -383,7 +384,8 @@ pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>
     let db = core.db();
     let found = db
         .query_row(
-            "SELECT tokens.id, tokens.read_only, tokens.all_areas, members.id, members.workspace_admin, agents.id
+            "SELECT tokens.id, tokens.read_only, tokens.all_areas, members.id, members.workspace_admin, agents.id,
+                    tokens.client_id IS NOT NULL
              FROM tokens
              LEFT JOIN members ON members.id = tokens.member_id AND members.deactivated_at IS NULL
              LEFT JOIN agents ON agents.id = tokens.agent_id AND agents.deactivated_at IS NULL
@@ -393,8 +395,7 @@ pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>
                      SELECT token_id FROM access_tokens WHERE digest = ?1 AND expires_at > ?2
                  )
                AND (tokens.expires_at IS NULL OR tokens.expires_at > ?2)
-               AND (members.id IS NOT NULL OR agents.id IS NOT NULL)
-               AND (tokens.client_id IS NULL OR (SELECT connecting_ai FROM workspace_settings))",
+               AND (members.id IS NOT NULL OR agents.id IS NOT NULL)",
             rusqlite::params![digest(value), now],
             |row| {
                 Ok((
@@ -404,13 +405,17 @@ pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<bool>>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, bool>(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((token_id, read_only, all_areas, member_id, workspace_admin, agent_id)) = found else {
+    let Some((token_id, read_only, all_areas, member_id, workspace_admin, agent_id, connected)) = found else {
         return Ok(None);
     };
+    if connected && !super::connections::connecting_ai_on(&db)? {
+        return Ok(None);
+    }
     let areas = if all_areas { None } else { Some(token_area_ids(&db, &token_id)?) };
     // An open editor checks its Token on every change, so a use is written
     // at most once a minute rather than each time.
@@ -573,6 +578,21 @@ mod tests {
             ]
         );
         assert_eq!(listed[0].member.id, "member-grace");
+    }
+
+    #[test]
+    fn a_workspace_admin_sees_the_areas_a_members_token_reaches_even_ones_they_cannot_read() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let own = crate::ops::testing::personal_area(&core, &grace);
+        let handbook = create_area(&core, &grace, NewArea { name: "Handbook".into() }).unwrap().output.id;
+        let limited = NewToken { area_ids: Some(vec![own, handbook]), ..named("Laptop") };
+        create_token(&core, &grace, limited).unwrap();
+
+        let listed = list_members_tokens(&core, &ada, Nothing {}).unwrap().output.tokens;
+        let areas: Vec<_> = listed[0].token.areas.iter().flatten().map(|area| area.name.as_str()).collect();
+        assert_eq!(areas, ["Handbook", "Personal"]);
     }
 
     #[test]

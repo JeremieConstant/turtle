@@ -5,6 +5,7 @@
 //! to test whether it is reachable: at most it asks the system resolver what
 //! its host name stands for, as any program on the machine would.
 
+use crate::public_url::PublicUrl;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::sync::Arc;
 
@@ -29,28 +30,16 @@ const INSIDE_ENDINGS: [&str; 4] = [".local", ".internal", ".lan", ".localhost"];
 /// name that resolves only to private addresses. A name that resolves to
 /// nothing is given the benefit of the doubt, since this machine may simply
 /// have no resolver.
-pub fn looks_intranet_only(public_url: Option<&str>, resolve: &Resolver) -> bool {
-    let Some(host) = public_url.and_then(host_of) else { return true };
+pub fn looks_intranet_only(public_url: Option<&PublicUrl>, resolve: &Resolver) -> bool {
+    let Some(host) = public_url.map(PublicUrl::host) else { return true };
     if let Ok(address) = host.parse::<IpAddr>() {
         return is_private(address);
     }
     if host == "localhost" || INSIDE_ENDINGS.iter().any(|ending| host.ends_with(ending)) {
         return true;
     }
-    let addresses = resolve(&host);
+    let addresses = resolve(host);
     !addresses.is_empty() && addresses.into_iter().all(is_private)
-}
-
-/// The host of a public URL, lowercased, without port, brackets or the dot
-/// that may end a fully qualified name.
-fn host_of(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
-    let host = match rest.strip_prefix('[') {
-        Some(bracketed) => bracketed.split_once(']')?.0,
-        None => rest.split(':').next()?,
-    };
-    let host = host.trim_end_matches('.').to_ascii_lowercase();
-    (!host.is_empty()).then_some(host)
 }
 
 /// Whether an address can be reached only from inside a network.
@@ -82,6 +71,10 @@ fn is_private_v6(address: Ipv6Addr) -> bool {
 mod tests {
     use super::*;
 
+    fn at(url: &str) -> Option<PublicUrl> {
+        Some(PublicUrl::parse(url).unwrap())
+    }
+
     fn resolving_to(addresses: &'static [&'static str]) -> Resolver {
         Arc::new(move |_| addresses.iter().map(|address| address.parse().unwrap()).collect())
     }
@@ -98,9 +91,9 @@ mod tests {
 
     #[test]
     fn localhost_looks_intranet_only() {
-        assert!(looks_intranet_only(Some("http://localhost:4100"), &never_asked()));
-        assert!(looks_intranet_only(Some("http://LocalHost"), &never_asked()));
-        assert!(looks_intranet_only(Some("http://turtle.localhost"), &never_asked()));
+        assert!(looks_intranet_only(at("http://localhost:4100").as_ref(), &never_asked()));
+        assert!(looks_intranet_only(at("http://LocalHost").as_ref(), &never_asked()));
+        assert!(looks_intranet_only(at("http://turtle.localhost").as_ref(), &never_asked()));
     }
 
     #[test]
@@ -117,40 +110,40 @@ mod tests {
             "http://[fe80::1]",
             "http://[::ffff:192.168.0.1]",
         ] {
-            assert!(looks_intranet_only(Some(url), &never_asked()), "{url}");
+            assert!(looks_intranet_only(at(url).as_ref(), &never_asked()), "{url}");
         }
     }
 
     #[test]
     fn a_public_address_does_not() {
-        assert!(!looks_intranet_only(Some("http://93.184.215.14"), &never_asked()));
-        assert!(!looks_intranet_only(Some("https://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]"), &never_asked()));
+        assert!(!looks_intranet_only(at("http://93.184.215.14").as_ref(), &never_asked()));
+        assert!(!looks_intranet_only(at("https://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]").as_ref(), &never_asked()));
     }
 
     #[test]
     fn a_host_ending_in_an_inside_name_looks_intranet_only() {
         for url in ["http://turtle.local", "https://wiki.corp.internal", "http://turtle.lan:4100", "http://turtle.LAN."] {
-            assert!(looks_intranet_only(Some(url), &never_asked()), "{url}");
+            assert!(looks_intranet_only(at(url).as_ref(), &never_asked()), "{url}");
         }
     }
 
     #[test]
     fn a_host_resolving_only_to_private_addresses_looks_intranet_only() {
         let private = resolving_to(&["10.0.0.5", "fd00::5"]);
-        assert!(looks_intranet_only(Some("https://turtle.example.org"), &private));
+        assert!(looks_intranet_only(at("https://turtle.example.org").as_ref(), &private));
     }
 
     #[test]
     fn a_host_resolving_to_a_public_address_does_not() {
         let public = resolving_to(&["93.184.215.14"]);
-        assert!(!looks_intranet_only(Some("https://turtle.example.org"), &public));
+        assert!(!looks_intranet_only(at("https://turtle.example.org").as_ref(), &public));
         let mixed = resolving_to(&["10.0.0.5", "2606:2800:21f:cb07:6820:80da:af6b:8b2c"]);
-        assert!(!looks_intranet_only(Some("https://turtle.example.org"), &mixed));
+        assert!(!looks_intranet_only(at("https://turtle.example.org").as_ref(), &mixed));
     }
 
     #[test]
     fn a_host_resolving_to_nothing_is_given_the_benefit_of_the_doubt() {
-        assert!(!looks_intranet_only(Some("https://turtle.example.org"), &resolving_to(&[])));
+        assert!(!looks_intranet_only(at("https://turtle.example.org").as_ref(), &resolving_to(&[])));
     }
 
     #[test]
@@ -161,7 +154,7 @@ mod tests {
             recorder.lock().unwrap().push(host.to_string());
             vec!["93.184.215.14".parse().unwrap()]
         });
-        looks_intranet_only(Some("https://Turtle.Example.org:8443"), &resolve);
+        looks_intranet_only(at("https://Turtle.Example.org:8443").as_ref(), &resolve);
         assert_eq!(*asked.lock().unwrap(), ["turtle.example.org"]);
     }
 }

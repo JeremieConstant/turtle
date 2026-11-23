@@ -34,7 +34,7 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/setup') return { screen: 'setup' }
   if (pathname === '/sign-in') return { screen: 'sign-in' }
   if (pathname === '/authorize') return { screen: 'authorize', query }
-  if (pathname === '/connect-ai') return { screen: 'connect-ai' }
+  if (pathname === '/settings/connect-ai') return { screen: 'connect-ai' }
   if (pathname === '/settings/members') return { screen: 'members' }
   if (pathname === '/settings/connected-apps') return { screen: 'connected-apps' }
   if (pathname === '/settings/all-connected-apps') return { screen: 'all-connected-apps' }

@@ -62,9 +62,8 @@ async fn receive(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: String) 
         }
     }
     let Some(token) = bearer_token(&headers).map(str::to_string) else {
-        let mut refused = unauthorized("Send a Token as Authorization: Bearer <token>. A Member creates one in Turtle.");
-        refused.headers_mut().insert(header::WWW_AUTHENTICATE, crate::oauth::challenge(&mcp.core, false));
-        return refused;
+        let refused = unauthorized("Send a Token as Authorization: Bearer <token>. A Member creates one in Turtle.");
+        return with_challenge(refused, &mcp.core, false);
     };
     let message: Value = match serde_json::from_str(&body) {
         Ok(message) => message,
@@ -87,14 +86,17 @@ async fn receive(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: String) 
         Ok(Ok(Some(answer))) => Json(answer).into_response(),
         // A notification or a response arrived, which gets no answer.
         Ok(Ok(None)) => StatusCode::ACCEPTED.into_response(),
-        Ok(Err(Refusal::InvalidToken)) => {
-            let mut refused = Refusal::InvalidToken.into_response();
-            refused.headers_mut().insert(header::WWW_AUTHENTICATE, crate::oauth::challenge(&core, true));
-            refused
-        }
+        Ok(Err(Refusal::InvalidToken)) => with_challenge(Refusal::InvalidToken.into_response(), &core, true),
         Ok(Err(refused)) => refused.into_response(),
         Err(error) => error_response(OpError::Internal(error.into())),
     }
+}
+
+/// A refusal for want of a working Token, which tells a client that may
+/// sign in with OAuth where to start.
+fn with_challenge(mut refused: Response, core: &Core, invalid_token: bool) -> Response {
+    refused.headers_mut().insert(header::WWW_AUTHENTICATE, crate::oauth::challenge(core, invalid_token));
+    refused
 }
 
 /// Whether a request either comes from no browser page at all or from a page

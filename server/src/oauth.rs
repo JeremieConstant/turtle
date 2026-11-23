@@ -12,13 +12,13 @@
 
 use crate::ops::connections::{self, with_query, CodeExchange, GrantRefusal, NewClient, RefreshExchange, TURNED_OFF};
 use crate::ops::{Core, OpError};
+use crate::public_url::PublicUrl;
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, Query, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,23 +29,6 @@ pub const RESOURCE_METADATA_PATH: &str = "/.well-known/oauth-protected-resource/
 
 /// Where the web app shows the consent page.
 const CONSENT_SCREEN: &str = "/authorize";
-
-/// Reads `TURTLE_PUBLIC_URL`: the http or https address of Turtle's root.
-/// Turtle is served at the root of its host, so the address has no path; a
-/// trailing slash is dropped, so every OAuth address is the public URL
-/// followed by its path.
-pub fn public_url(value: &str) -> anyhow::Result<String> {
-    let url = value.trim().trim_end_matches('/');
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
-    let valid = rest.is_some_and(|host| {
-        !host.is_empty() && !host.contains(['/', '?', '#', '@']) && !host.chars().any(char::is_whitespace)
-    });
-    anyhow::ensure!(
-        valid,
-        "TURTLE_PUBLIC_URL must be the http or https address Turtle is reached at, such as https://turtle.example.org, not {value:?}"
-    );
-    Ok(url.to_string())
-}
 
 /// The OAuth routes, or none when Turtle does not know its public address.
 pub fn router(core: Arc<Core>) -> Router {
@@ -72,7 +55,7 @@ pub fn challenge(core: &Core, invalid_token: bool) -> HeaderValue {
 }
 
 fn base(core: &Core) -> &str {
-    core.public_url().unwrap_or_default()
+    core.public_url().map(PublicUrl::as_str).unwrap_or_default()
 }
 
 async fn resource_metadata(State(core): State<Arc<Core>>) -> Response {
@@ -136,21 +119,12 @@ fn server_error(error: OpError) -> Response {
     oauth_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "Turtle could not answer. Try again.")
 }
 
-#[derive(Deserialize)]
-struct Registration {
-    #[serde(default)]
-    redirect_uris: Vec<String>,
-    #[serde(default)]
-    client_name: Option<String>,
-}
-
 /// Dynamic Client Registration (RFC 7591). Every client is public: it
 /// proves itself with PKCE, never with a secret.
 async fn register(State(core): State<Arc<Core>>, body: String) -> Response {
-    let Ok(registration) = serde_json::from_str::<Registration>(&body) else {
+    let Ok(input) = serde_json::from_str::<NewClient>(&body) else {
         return oauth_error(StatusCode::BAD_REQUEST, "invalid_client_metadata", "Send the client metadata as JSON.");
     };
-    let input = NewClient { redirect_uris: registration.redirect_uris, client_name: registration.client_name };
     let registered = tokio::task::spawn_blocking(move || connections::register_client(&core, input)).await;
     match registered {
         Ok(Ok(client)) => open_to_any_site((
@@ -267,26 +241,5 @@ async fn token(State(core): State<Arc<Core>>, form: Result<Form<HashMap<String, 
         Ok(Err(GrantRefusal::TurnedOff)) => oauth_error(StatusCode::BAD_REQUEST, "unauthorized_client", TURNED_OFF),
         Ok(Err(GrantRefusal::Failed(error))) => server_error(error),
         Err(error) => server_error(OpError::Internal(error.into())),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_public_url_is_an_http_address_without_a_trailing_slash() {
-        assert_eq!(public_url("https://turtle.example.org/").unwrap(), "https://turtle.example.org");
-        assert_eq!(public_url(" http://localhost:4100 ").unwrap(), "http://localhost:4100");
-        for invalid in [
-            "turtle.example.org",
-            "ftp://example.org",
-            "https://",
-            "https://example.org/turtle",
-            "https://example.org/?a=1",
-            "https://example.org/#x",
-        ] {
-            assert!(public_url(invalid).is_err(), "{invalid}");
-        }
     }
 }

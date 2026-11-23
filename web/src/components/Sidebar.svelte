@@ -249,7 +249,7 @@
     <a class="menu-item" role="menuitem" href="/settings/agents" onclick={event => go(event, '/settings/agents')}>Agents</a>
     <a class="menu-item" role="menuitem" href="/settings/deleted-areas" onclick={event => go(event, '/settings/deleted-areas')}>Deleted Areas</a>
   {/if}
-  <a class="menu-item" role="menuitem" href="/connect-ai" onclick={event => go(event, '/connect-ai')}>Connect AI</a>
+  <a class="menu-item" role="menuitem" href="/settings/connect-ai" onclick={event => go(event, '/settings/connect-ai')}>Connect AI</a>
   <a class="menu-item" role="menuitem" href="/settings/connected-apps" onclick={event => go(event, '/settings/connected-apps')}>Connected apps</a>
   <hr />
   <div role="group" aria-labelledby="appearance-label">

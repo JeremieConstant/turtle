@@ -8,6 +8,7 @@ mod mcp;
 mod model;
 mod oauth;
 mod ops;
+mod public_url;
 mod search;
 mod store;
 mod web_app;
@@ -88,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     // Where people and AI clients reach this Turtle from outside, if it is
     // known; only then is OAuth offered (ADR-0010).
     let public_url = match std::env::var("TURTLE_PUBLIC_URL") {
-        Ok(url) if !url.trim().is_empty() => Some(oauth::public_url(&url)?),
+        Ok(url) if !url.trim().is_empty() => Some(public_url::PublicUrl::parse(&url)?),
         _ => None,
     };
 
@@ -98,6 +99,13 @@ async fn main() -> anyhow::Result<()> {
     core.set_attachment_limit(attachment_limit);
     core.set_public_url(public_url);
     let core = Arc::new(core);
+    // Whether Turtle looks reachable only from its intranet may take a name
+    // lookup; it is found out now, off the async workers, so the Connect AI
+    // page need not wait for it.
+    tokio::task::spawn_blocking({
+        let core = core.clone();
+        move || core.looks_intranet_only()
+    });
 
     let app = Arc::new(App {
         core: core.clone(),

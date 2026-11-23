@@ -5,15 +5,14 @@ export type ConnectionRequest = Omit<Operations['answer_connection_request']['in
 
 /**
  * Reads the request an app sent to Turtle's authorization endpoint, which
- * passes it on in the consent page's address. Without a client ID there is
- * no request.
+ * passes it on in the consent page's address. Without a client ID it names
+ * no client, and Turtle says the request is not valid, as it does for any
+ * client it does not know.
  */
-export function connectionRequest(query: string): ConnectionRequest | null {
+export function connectionRequest(query: string): ConnectionRequest {
   const parameters = new URLSearchParams(query)
-  const client_id = parameters.get('client_id')
-  if (!client_id) return null
   return {
-    client_id,
+    client_id: parameters.get('client_id') ?? '',
     redirect_uri: parameters.get('redirect_uri'),
     code_challenge: parameters.get('code_challenge'),
     code_challenge_method: parameters.get('code_challenge_method'),

@@ -6,16 +6,14 @@
    */
   import TokenForm from '../components/TokenForm.svelte'
   import { router } from '../lib/router.svelte'
-  import { access } from '../lib/connectedApps'
-  import { ask } from '../lib/confirm.svelte'
-  import { call, OperationError } from '../lib/ops'
+  import { access, revokeOnceSure, type Revoking } from '../lib/connectedApps'
+  import { call } from '../lib/ops'
   import type { TokenSummary } from '../lib/operations.gen'
-  import { exactTime, relativeTime } from '../lib/time'
+  import { exactTime, nowInSeconds as now, relativeTime } from '../lib/time'
 
   let apps = $state.raw<TokenSummary[] | null>(null)
   let loadFailed = $state(false)
-  let busy = $state(false)
-  let error = $state<string | null>(null)
+  const revoking = $state<Revoking>({ busy: false, error: null })
 
   call('list_tokens', {})
     .then(list => (apps = list.tokens))
@@ -33,25 +31,16 @@
   })
 
   const mcpAddress = `${location.origin}/mcp`
-  const now = () => Math.floor(Date.now() / 1000)
 
   async function disconnect(app: TokenSummary) {
-    const sure = await ask({
+    const question = {
       title: `Disconnect ${app.name}?`,
       message: 'It stops working at once. To use it again, connect it again.',
       action: 'Disconnect',
       destructive: true,
-    })
-    if (!sure) return
-    busy = true
-    error = null
-    try {
-      await call('revoke_token', { id: app.id })
+    }
+    if (await revokeOnceSure(revoking, question, () => call('revoke_token', { id: app.id }))) {
       apps = apps?.filter(known => known.id !== app.id) ?? null
-    } catch (caught) {
-      error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'
-    } finally {
-      busy = false
     }
   }
 </script>
@@ -60,14 +49,15 @@
   <h1>Connected apps</h1>
   <p class="lede">
     These can act as you. None of them ever has more access than you, and each stops working the moment you disconnect it. To
-    connect Claude or another AI client, see <a href="/connect-ai" onclick={event => router.follow(event, '/connect-ai')}>Connect AI</a>.
+    connect Claude or another AI client, see
+    <a href="/settings/connect-ai" onclick={event => router.follow(event, '/settings/connect-ai')}>Connect AI</a>.
   </p>
 
   {#if loadFailed}
     <p class="muted section">The connected apps could not be loaded. Reload the page to try again.</p>
   {:else if apps !== null}
-    {#if error}
-      <p class="error section" role="alert">{error}</p>
+    {#if revoking.error}
+      <p class="error section" role="alert">{revoking.error}</p>
     {/if}
 
     {#if apps.length === 0}
@@ -89,7 +79,7 @@
                 <time title={exactTime(app.created_at)}>{relativeTime(app.created_at, now())}</time>
               </small>
             </div>
-            <button type="button" class="btn" disabled={busy} onclick={() => disconnect(app)}>Disconnect</button>
+            <button type="button" class="btn" disabled={revoking.busy} onclick={() => disconnect(app)}>Disconnect</button>
           </li>
         {/each}
       </ul>
