@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { Callout } from './callout'
 import { Image, type ImageOptions } from './image'
 import { PageLink } from './pageLink'
+import { TABLE_EXTENSIONS } from './table'
 
 /**
  * What a Page's content can hold in the editor: only what Markdown can
@@ -22,6 +23,7 @@ export function contentExtensions(image: Partial<ImageOptions> = {}): Extensions
     // A task may hold more than a line, as it can in Markdown.
     TaskItem.configure({ nested: true }),
     Callout,
+    ...TABLE_EXTENSIONS,
     Image.configure(image),
   ]
 }

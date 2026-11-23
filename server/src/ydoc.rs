@@ -7,7 +7,7 @@
 //! fixtures in `tests/fixtures`.
 
 use crate::diff::{align, common_edges, text_hunks, Fit, Step};
-use crate::model::{normalize, Block, CalloutKind, Inline, Marks, TaskItem};
+use crate::model::{normalize, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem};
 use std::collections::HashMap;
 use std::sync::Arc;
 use yrs::types::text::YChange;
@@ -29,6 +29,12 @@ const CHECKED: &str = "checked";
 /// The element a callout is stored as, and its attribute naming the kind.
 const CALLOUT: &str = "callout";
 const KIND: &str = "kind";
+/// The elements a table is stored as: rows of cells, the first row's being
+/// header cells. Each cell holds one paragraph.
+const TABLE: &str = "table";
+const TABLE_ROW: &str = "tableRow";
+const TABLE_HEADER: &str = "tableHeader";
+const TABLE_CELL: &str = "tableCell";
 
 /// The content of a Page from its stored state.
 pub fn read_state(state: &[u8]) -> anyhow::Result<Vec<Block>> {
@@ -111,6 +117,7 @@ fn read_blocks<T: ReadTxn>(txn: &T, nodes: impl Iterator<Item = XmlOut>) -> Vec<
                     .map(|(checked, content)| TaskItem { checked, content })
                     .collect(),
             )),
+            TABLE => blocks.push(Block::Table(read_rows(txn, &element))),
             "horizontalRule" => blocks.push(Block::HorizontalRule),
             // An element this version does not know keeps its content.
             _ => blocks.extend(read_blocks(txn, element.children(txn))),
@@ -129,6 +136,35 @@ fn read_item<T: ReadTxn>(txn: &T, item: &XmlOut) -> (bool, Vec<Block>) {
         XmlOut::Element(item) => (is_checked(txn, item), read_blocks(txn, item.children(txn))),
         other => (false, read_blocks(txn, std::iter::once(other.clone()))),
     }
+}
+
+fn read_rows<T: ReadTxn>(txn: &T, table: &XmlElementRef) -> Vec<Row> {
+    table
+        .children(txn)
+        .filter_map(|row| match row {
+            XmlOut::Element(row) => Some(row.children(txn).map(|cell| read_cell(txn, &cell)).collect()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a cell holds. A cell holds one paragraph; should it hold more blocks,
+/// their lines are kept, one after the other.
+fn read_cell<T: ReadTxn>(txn: &T, cell: &XmlOut) -> Cell {
+    let blocks = match cell {
+        XmlOut::Element(cell) => read_blocks(txn, cell.children(txn)),
+        other => read_blocks(txn, std::iter::once(other.clone())),
+    };
+    let mut inlines = Vec::new();
+    for block in normalize(blocks) {
+        if let Block::Paragraph(content) | Block::Heading { content, .. } = block {
+            if !inlines.is_empty() {
+                inlines.push(Inline::HardBreak);
+            }
+            inlines.extend(content);
+        }
+    }
+    inlines
 }
 
 /// The kind of a callout; one of a kind this version does not know is a note.
@@ -301,6 +337,7 @@ fn tag_for(block: &Block) -> &'static str {
         Block::BulletList(_) => "bulletList",
         Block::OrderedList { .. } => "orderedList",
         Block::TaskList(_) => TASK_LIST,
+        Block::Table(_) => TABLE,
         Block::HorizontalRule => "horizontalRule",
     }
 }
@@ -314,17 +351,24 @@ fn tag_of(node: &XmlOut) -> Option<&str> {
 
 /// All text of some blocks in reading order, to judge how alike two are.
 fn plain_text(blocks: &[Block]) -> Vec<char> {
+    fn inlines(content: &[Inline], out: &mut Vec<char>) {
+        for inline in content {
+            match inline {
+                Inline::Text { text, .. } => out.extend(text.chars()),
+                Inline::HardBreak => out.push('\n'),
+                Inline::Image { alt, .. } => out.extend(alt.chars()),
+                Inline::PageLink { page_id } => out.extend(page_id.chars()),
+            }
+        }
+    }
     fn collect(blocks: &[Block], out: &mut Vec<char>) {
         for block in blocks {
             match block {
-                Block::Paragraph(content) | Block::Heading { content, .. } => {
-                    for inline in content {
-                        match inline {
-                            Inline::Text { text, .. } => out.extend(text.chars()),
-                            Inline::HardBreak => out.push('\n'),
-                            Inline::Image { alt, .. } => out.extend(alt.chars()),
-                            Inline::PageLink { page_id } => out.extend(page_id.chars()),
-                        }
+                Block::Paragraph(content) | Block::Heading { content, .. } => inlines(content, out),
+                Block::Table(rows) => {
+                    for cell in rows.iter().flatten() {
+                        inlines(cell, out);
+                        out.push('\n');
                     }
                 }
                 Block::CodeBlock { text, .. } => out.extend(text.chars()),
@@ -396,8 +440,131 @@ fn update_block(txn: &mut TransactionMut, element: &XmlElementRef, block: &Block
             diff_items(txn, element, &list_items(items));
         }
         Block::TaskList(items) => diff_items(txn, element, &task_items(items)),
+        Block::Table(rows) => diff_rows(txn, element, rows),
         Block::HorizontalRule => {}
     }
+}
+
+/// The element a cell is stored as: a header cell in the first row.
+fn cell_tag(row: usize) -> &'static str {
+    if row == 0 {
+        TABLE_HEADER
+    } else {
+        TABLE_CELL
+    }
+}
+
+/// A cell as it is now: whether it is stored as the element its row wants,
+/// and what it holds.
+fn current_cells<T: ReadTxn>(txn: &T, row: &XmlOut, wanted: &str) -> Vec<(bool, Cell)> {
+    let XmlOut::Element(row) = row else { return Vec::new() };
+    row.children(txn)
+        .map(|cell| (tag_of(&cell) == Some(wanted), read_cell(txn, &cell)))
+        .collect()
+}
+
+fn cells_text(cells: &[Cell]) -> Vec<char> {
+    plain_text(&[Block::Table(vec![cells.to_vec()])])
+}
+
+/// Turns the rows of a table into `target`, the way `diff_blocks` does for blocks.
+fn diff_rows(txn: &mut TransactionMut, table: &XmlElementRef, target: &[Row]) {
+    let nodes: Vec<XmlOut> = table.children(txn).collect();
+    let old_text: Vec<Vec<char>> = nodes
+        .iter()
+        .map(|node| {
+            let cells: Vec<_> = current_cells(txn, node, TABLE_CELL).into_iter().map(|(_, cell)| cell).collect();
+            cells_text(&cells)
+        })
+        .collect();
+    let new_text: Vec<Vec<char>> = target.iter().map(|row| cells_text(row)).collect();
+    // A row is the same when it holds the same cells, stored as its place wants them.
+    let same = |txn: &TransactionMut, i: usize, j: usize| {
+        let cells = current_cells(txn, &nodes[i], cell_tag(j));
+        cells.len() == target[j].len() && cells.iter().zip(&target[j]).all(|((right, has), wanted)| *right && has == wanted)
+    };
+    let fits: Vec<Vec<Fit>> = (0..nodes.len())
+        .map(|i| {
+            (0..target.len())
+                .map(|j| {
+                    if same(txn, i, j) {
+                        Fit::Same(2 + new_text[j].len() as u32)
+                    } else if tag_of(&nodes[i]) == Some(TABLE_ROW) {
+                        Fit::Similar(1 + common_edges(&old_text[i], &new_text[j]) as u32)
+                    } else {
+                        Fit::No
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let steps = align(nodes.len(), target.len(), |i, j| fits[i][j], |_| false);
+
+    let mut at = 0;
+    for step in steps {
+        match step {
+            Step::Keep(i, j) => {
+                if let (false, XmlOut::Element(row)) = (matches!(fits[i][j], Fit::Same(_)), &nodes[i]) {
+                    diff_cells(txn, row, &target[j], cell_tag(j));
+                }
+                at += 1;
+            }
+            Step::Remove(_) => table.remove_range(txn, at, 1),
+            Step::Add(j) => {
+                insert_row(txn, table, at, &target[j], cell_tag(j));
+                at += 1;
+            }
+        }
+    }
+}
+
+/// Turns the cells of a row into `target`, each stored as `tag`.
+fn diff_cells(txn: &mut TransactionMut, row: &XmlElementRef, target: &[Cell], tag: &str) {
+    let nodes: Vec<XmlOut> = row.children(txn).collect();
+    let current = current_cells(txn, &XmlOut::Element(row.clone()), tag);
+    let old_text: Vec<Vec<char>> = current.iter().map(|(_, cell)| cells_text(std::slice::from_ref(cell))).collect();
+    let new_text: Vec<Vec<char>> = target.iter().map(|cell| cells_text(std::slice::from_ref(cell))).collect();
+
+    let steps = align(
+        nodes.len(),
+        target.len(),
+        |i, j| match &current[i] {
+            (true, has) if *has == target[j] => Fit::Same(2 + new_text[j].len() as u32),
+            (true, _) => Fit::Similar(1 + common_edges(&old_text[i], &new_text[j]) as u32),
+            (false, _) => Fit::No,
+        },
+        |_| false,
+    );
+
+    let mut at = 0;
+    for step in steps {
+        match step {
+            Step::Keep(i, j) => {
+                if let (false, XmlOut::Element(cell)) = (current[i].1 == target[j], &nodes[i]) {
+                    update_cell(txn, cell, &target[j]);
+                }
+                at += 1;
+            }
+            Step::Remove(_) => row.remove_range(txn, at, 1),
+            Step::Add(j) => {
+                insert_cell(txn, row, at, &target[j], tag);
+                at += 1;
+            }
+        }
+    }
+}
+
+/// Makes a cell hold exactly one paragraph with the given content.
+fn update_cell(txn: &mut TransactionMut, cell: &XmlElementRef, content: &[Inline]) {
+    let paragraph = match cell.get(txn, 0) {
+        Some(XmlOut::Element(first)) if first.tag().as_ref() == "paragraph" => first,
+        _ => cell.insert(txn, 0, XmlElementPrelim::empty("paragraph")),
+    };
+    let extra = cell.len(txn) - 1;
+    if extra > 0 {
+        cell.remove_range(txn, 1, extra);
+    }
+    diff_inlines(txn, &paragraph, content);
 }
 
 /// An item of a list as it is to be written: whether it is a task and
@@ -770,8 +937,26 @@ fn insert_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, index: u32
             insert_items(txn, &element, &list_items(items));
         }
         Block::TaskList(items) => insert_items(txn, &element, &task_items(items)),
+        Block::Table(rows) => {
+            for (at, row) in rows.iter().enumerate() {
+                insert_row(txn, &element, at as u32, row, cell_tag(at));
+            }
+        }
         Block::HorizontalRule => {}
     }
+}
+
+fn insert_row(txn: &mut TransactionMut, table: &XmlElementRef, index: u32, cells: &[Cell], tag: &str) {
+    let row = table.insert(txn, index, XmlElementPrelim::empty(TABLE_ROW));
+    for (at, cell) in cells.iter().enumerate() {
+        insert_cell(txn, &row, at as u32, cell, tag);
+    }
+}
+
+fn insert_cell(txn: &mut TransactionMut, row: &XmlElementRef, index: u32, content: &[Inline], tag: &str) {
+    let cell = row.insert(txn, index, XmlElementPrelim::empty(tag));
+    let paragraph = cell.push_back(txn, XmlElementPrelim::empty("paragraph"));
+    diff_inlines(txn, &paragraph, content);
 }
 
 /// Fills a quote or callout, which the editor requires to hold at least one block.
@@ -967,6 +1152,73 @@ mod tests {
 
         assert_eq!(text(&doc), before);
         assert_eq!(read(&elsewhere), from_markdown("- [ ] open\n- [x] also open\n"));
+    }
+
+    /// Each row of the table at the top of the document, as the elements its cells are stored as.
+    fn table_layout(doc: &Doc) -> Vec<Vec<String>> {
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = doc.transact();
+        let Some(XmlOut::Element(table)) = fragment.get(&txn, 0) else { panic!("no table") };
+        assert_eq!(table.tag().as_ref(), "table");
+        table
+            .children(&txn)
+            .map(|row| {
+                let XmlOut::Element(row) = row else { panic!("a row is not an element") };
+                assert_eq!(row.tag().as_ref(), "tableRow");
+                row.children(&txn)
+                    .map(|cell| {
+                        let XmlOut::Element(cell) = cell else { panic!("a cell is not an element") };
+                        let Some(XmlOut::Element(paragraph)) = cell.get(&txn, 0) else { panic!("no paragraph") };
+                        assert_eq!((paragraph.tag().as_ref(), cell.len(&txn)), ("paragraph", 1));
+                        cell.tag().to_string()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_table_is_stored_as_the_editors_rows_of_header_and_body_cells() {
+        let markdown = "| Name | Role |\n| --- | --- |\n| Ada | *Writer* |\n";
+        let doc = Doc::new();
+        write(&doc, &from_markdown(markdown));
+
+        let header = vec!["tableHeader".to_string(); 2];
+        let body = vec!["tableCell".to_string(); 2];
+        assert_eq!(table_layout(&doc), vec![header.clone(), body.clone()]);
+        assert_eq!(to_markdown(&read(&doc)), markdown);
+
+        // Taking away the header row makes the next row the header.
+        write(&doc, &from_markdown("| Ada | *Writer* |\n| --- | --- |\n"));
+        assert_eq!(table_layout(&doc), vec![header]);
+        assert_eq!(to_markdown(&read(&doc)), "| Ada | *Writer* |\n| --- | --- |\n");
+    }
+
+    #[test]
+    fn changing_a_cell_changes_only_that_cell() {
+        let doc = Doc::new();
+        write(&doc, &from_markdown("| a | b |\n| --- | --- |\n| c | d |\n"));
+        let elsewhere = replica(&doc);
+        let cell_ids = |doc: &Doc| {
+            let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+            let txn = doc.transact();
+            let Some(XmlOut::Element(table)) = fragment.get(&txn, 0) else { panic!("no table") };
+            let ids: Vec<_> = table
+                .children(&txn)
+                .flat_map(|row| match row {
+                    XmlOut::Element(row) => row.children(&txn).map(|cell| cell.id()).collect::<Vec<_>>(),
+                    _ => panic!("a row is not an element"),
+                })
+                .collect();
+            ids
+        };
+        let before = cell_ids(&doc);
+
+        let update = write(&doc, &from_markdown("| a | b |\n| --- | --- |\n| c | **d!** |\n")).unwrap();
+        apply(&elsewhere, &update);
+
+        assert_eq!(cell_ids(&doc), before);
+        assert_eq!(read(&elsewhere), from_markdown("| a | b |\n| --- | --- |\n| c | **d!** |\n"));
     }
 
     // The editor contract: see web/scripts/editor-contract.test.ts, which shares
@@ -1289,6 +1541,31 @@ mod tests {
                     })
                     .collect(),
             ),
+            Block::Table(rows) => {
+                let mut rows: Vec<Row> = rows
+                    .iter()
+                    .map(|row| row.iter().map(|cell| mutate_inlines(rng, cell)).collect())
+                    .collect();
+                let width = rows[0].len();
+                match rng.next(6) {
+                    0 => rows.insert(rng.next(rows.len() + 1), vec![Vec::new(); width]),
+                    1 if rows.len() > 1 => {
+                        rows.remove(rng.next(rows.len()));
+                    }
+                    2 => {
+                        let at = rng.next(width + 1);
+                        rows.iter_mut().for_each(|row| row.insert(at, rng.inlines()));
+                    }
+                    3 if width > 1 => {
+                        let at = rng.next(width);
+                        rows.iter_mut().for_each(|row| {
+                            row.remove(at);
+                        });
+                    }
+                    _ => {}
+                }
+                Block::Table(rows)
+            }
             Block::HorizontalRule => Block::HorizontalRule,
         }
     }

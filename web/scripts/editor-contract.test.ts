@@ -33,6 +33,7 @@ const paragraph = (...content: object[]) => ({ type: 'paragraph', content })
 const item = (...content: object[]) => ({ type: 'listItem', content })
 const task = (checked: boolean, ...content: object[]) => ({ type: 'taskItem', attrs: { checked }, content })
 const callout = (kind: string, words: string) => ({ type: 'callout', attrs: { kind }, content: [paragraph(text(words))] })
+const row = (cell: string, ...cells: object[][]) => ({ type: 'tableRow', content: cells.map(content => ({ type: cell, content: [paragraph(...content)] })) })
 
 /** One of everything a Page can hold; editor-contract.md is the same content in Markdown. */
 const CONTENT = {
@@ -77,6 +78,13 @@ const CONTENT = {
     callout('tip', 'A tip.'),
     callout('warning', 'A warning.'),
     callout('danger', 'Danger.'),
+    {
+      type: 'table',
+      content: [
+        row('tableHeader', [text('Name')], [text('Role', { type: 'bold' })]),
+        row('tableCell', [text('a | b')], []),
+      ],
+    },
     { type: 'codeBlock', attrs: { language: 'rust' }, content: [text('fn main() {}')] },
     { type: 'horizontalRule' },
   ],

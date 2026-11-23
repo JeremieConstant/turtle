@@ -298,6 +298,39 @@
     margin-bottom: 0;
   }
 
+  /* A table keeps to the width of the text and scrolls sideways when it is wider. */
+  .editor :global(.tiptap .tableWrapper) {
+    overflow-x: auto;
+  }
+
+  .editor :global(.tiptap table) {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .editor :global(.tiptap :is(td, th)) {
+    position: relative;
+    padding: var(--space-1) var(--space-2);
+    border: var(--line) solid var(--color-line);
+    vertical-align: top;
+    text-align: left;
+  }
+
+  .editor :global(.tiptap th) {
+    background: var(--color-side);
+    font-weight: var(--weight-strong);
+  }
+
+  .editor :global(.tiptap :is(td, th) p) {
+    margin: 0;
+  }
+
+  /* Cells chosen together, to delete their rows or columns. */
+  .editor :global(.tiptap .selectedCell) {
+    background: var(--color-selected);
+  }
+
   /* An image keeps to the width of the text and never stretches beyond its own. */
   .editor :global(.tiptap img) {
     max-width: 100%;

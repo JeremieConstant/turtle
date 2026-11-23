@@ -50,6 +50,10 @@ _Avoid_: Checklist, to-do list, todo
 A highlighted passage in a Page's content of one of four kinds: note, tip, warning or danger. In Markdown it is a quote whose first line is the kind's marker alone, such as `[!NOTE]`.
 _Avoid_: Admonition, alert, info box, panel
 
+**Table**:
+Rows of cells in a Page's content, the first row being the header; a cell holds text with formatting and links but no other blocks, and cells are never merged. In Markdown it is a table as GitHub writes them, with a `|` inside a cell written `\|`.
+_Avoid_: Grid, spreadsheet, matrix
+
 **Attachment**:
 An image or file that belongs to a Page.
 _Avoid_: Upload, asset, media

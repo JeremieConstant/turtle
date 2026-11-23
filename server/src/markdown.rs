@@ -3,7 +3,7 @@
 //! The contract: for any normalised content `c`,
 //! `from_markdown(&to_markdown(&c)) == c`.
 
-use crate::model::{normalize, page_id_of, Block, CalloutKind, Inline, Marks, TaskItem, PAGE_ADDRESS_SCHEME};
+use crate::model::{normalize, page_id_of, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem, PAGE_ADDRESS_SCHEME};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 // ---------------------------------------------------------------------------
@@ -79,6 +79,7 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
                 let items: Vec<_> = items.iter().map(|item| (None, item.as_slice())).collect();
                 render_list(&items, None, |i| format!("{}{}", start + i as u64, delim), titles)
             }
+            Block::Table(rows) => render_table(rows, titles),
             Block::HorizontalRule => "***".to_string(),
         };
         previous_bullet = bullet;
@@ -160,6 +161,35 @@ fn render_list(
     rendered.join(separator)
 }
 
+/// Renders a table as GitHub writes them: a header row, a row of dashes, and
+/// the other rows.
+fn render_table(rows: &[Row], titles: Titles) -> String {
+    let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
+    let mut lines: Vec<String> = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        lines.push(line(row.iter().map(|cell| render_cell(cell, titles)).collect()));
+        if i == 0 {
+            lines.push(line(vec!["---".to_string(); row.len()]));
+        }
+    }
+    lines.join("\n")
+}
+
+/// Renders the content of a cell, which has to stay on one line: a line
+/// break is `<br>`, and every `|` is escaped so it does not end the cell,
+/// even inside code or a link address. Like a paragraph, it falls back to
+/// HTML tags for formatting the markers cannot express.
+fn render_cell(cell: &[Inline], titles: Titles) -> String {
+    let render = |html| render_inlines(cell, InlinePlace::Cell, html, titles).replace('|', "\\|");
+    let markdown = render(false);
+    let read = from_markdown(&format!("| {markdown} |\n| --- |"));
+    if read == [Block::Table(vec![vec![cell.to_vec()]])] {
+        markdown
+    } else {
+        render(true)
+    }
+}
+
 /// An item can be written without blank lines when it is a single paragraph,
 /// optionally followed by a nested list that is allowed to interrupt it: one
 /// whose first item has content and, if ordered, starts at 1.
@@ -213,10 +243,10 @@ fn render_inline_block(block: &Block, titles: Titles) -> String {
 
 fn render_inline_block_with(block: &Block, html: bool, titles: Titles) -> String {
     match block {
-        Block::Paragraph(content) => render_inlines(content, false, html, titles),
+        Block::Paragraph(content) => render_inlines(content, InlinePlace::Paragraph, html, titles),
         Block::Heading { level, content } => {
             let hashes = "#".repeat(*level as usize);
-            let inner = render_inlines(content, true, html, titles);
+            let inner = render_inlines(content, InlinePlace::Heading, html, titles);
             if inner.is_empty() {
                 hashes
             } else {
@@ -276,13 +306,27 @@ fn close_mark(mark: &Mark, html: bool) -> String {
     }
 }
 
-fn render_inlines(inlines: &[Inline], in_heading: bool, html: bool, titles: Titles) -> String {
+/// Where inline content is written, which decides how a line break is
+/// written and what has to be escaped.
+#[derive(Clone, Copy, PartialEq)]
+enum InlinePlace {
+    Paragraph,
+    Heading,
+    Cell,
+}
+
+fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Titles) -> String {
+    let in_heading = place == InlinePlace::Heading;
     let mut out = String::new();
     let mut open: Vec<Mark> = Vec::new();
     let mut at_line_start = true;
 
     for (i, inline) in inlines.iter().enumerate() {
         match inline {
+            Inline::HardBreak if place == InlinePlace::Cell => {
+                out.push_str("<br>");
+                at_line_start = true;
+            }
             Inline::HardBreak => {
                 out.push_str("\\\n");
                 at_line_start = true;
@@ -445,6 +489,9 @@ enum Frame {
         language: Option<String>,
         text: String,
     },
+    /// A table and its rows so far.
+    Table(Vec<Row>),
+    Cell(Cell),
 }
 
 /// The checkbox in front of a list item, and how it was written.
@@ -548,7 +595,7 @@ impl Builder {
     fn inline_target(&mut self) -> &mut Vec<Inline> {
         let has_target = matches!(
             self.stack.last(),
-            Some(Frame::Paragraph { .. }) | Some(Frame::Heading { .. })
+            Some(Frame::Paragraph { .. }) | Some(Frame::Heading { .. }) | Some(Frame::Cell(_))
         );
         if !has_target {
             self.stack.push(Frame::Paragraph {
@@ -557,7 +604,9 @@ impl Builder {
             });
         }
         match self.stack.last_mut() {
-            Some(Frame::Paragraph { content, .. }) | Some(Frame::Heading { content, .. }) => content,
+            Some(Frame::Paragraph { content, .. }) | Some(Frame::Heading { content, .. }) | Some(Frame::Cell(content)) => {
+                content
+            }
             _ => unreachable!(),
         }
     }
@@ -619,7 +668,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
         callout_marker_end: None,
     };
 
-    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
     for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
         if let Some(end) = b.callout_marker_end {
             if range.start > end {
@@ -679,6 +728,16 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 }
                 Tag::Item => b.stack.push(Frame::Item(Vec::new(), None)),
                 Tag::HtmlBlock => b.close_implicit_paragraph(),
+                Tag::Table(_) => {
+                    b.close_implicit_paragraph();
+                    b.stack.push(Frame::Table(Vec::new()));
+                }
+                Tag::TableHead | Tag::TableRow => {
+                    if let Some(Frame::Table(rows)) = b.stack.last_mut() {
+                        rows.push(Vec::new());
+                    }
+                }
+                Tag::TableCell => b.stack.push(Frame::Cell(Vec::new())),
                 Tag::Emphasis => b.marks.italic += 1,
                 Tag::Strong => b.marks.bold += 1,
                 Tag::Strikethrough => b.marks.strike += 1,
@@ -730,6 +789,18 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                     }
                 }
                 TagEnd::HtmlBlock => b.close_implicit_paragraph(),
+                TagEnd::TableCell => {
+                    if let Some(Frame::Cell(content)) = b.stack.pop() {
+                        if let Some(Frame::Table(rows)) = b.stack.last_mut() {
+                            rows.last_mut().expect("a cell is in a row").push(content);
+                        }
+                    }
+                }
+                TagEnd::Table => {
+                    if let Some(Frame::Table(rows)) = b.stack.pop() {
+                        b.add_block(Block::Table(rows));
+                    }
+                }
                 TagEnd::Emphasis => b.marks.italic = b.marks.italic.saturating_sub(1),
                 TagEnd::Strong => b.marks.bold = b.marks.bold.saturating_sub(1),
                 TagEnd::Strikethrough => b.marks.strike = b.marks.strike.saturating_sub(1),
@@ -846,7 +917,8 @@ pub(crate) mod testing {
         }
 
         pub fn block(&mut self, depth: usize) -> Block {
-            let kinds = if depth >= 3 { 4 } else { 9 };
+            // The first five kinds hold no other blocks, so they end the nesting.
+            let kinds = if depth >= 3 { 5 } else { 10 };
             match self.next(kinds) {
                 0 => Block::Paragraph(self.inlines()),
                 1 => Block::Heading {
@@ -861,7 +933,11 @@ pub(crate) mod testing {
                         .join("\n"),
                 },
                 3 => Block::HorizontalRule,
-                4 => Block::Blockquote(self.blocks(depth + 1)),
+                4 => {
+                    let width = 1 + self.next(3);
+                    Block::Table((0..1 + self.next(3)).map(|_| (0..width).map(|_| self.inlines()).collect()).collect())
+                }
+                8 => Block::Blockquote(self.blocks(depth + 1)),
                 7 => Block::Callout {
                     kind: CalloutKind::ALL[self.next(CalloutKind::ALL.len())],
                     content: self.blocks(depth + 1),
@@ -1254,6 +1330,72 @@ mod tests {
                 content: vec![para(vec![text("[!WARNING]")]), Block::HorizontalRule],
             },
         ]);
+    }
+
+    fn cell(s: &str) -> Vec<Inline> {
+        if s.is_empty() { vec![] } else { vec![text(s)] }
+    }
+
+    fn table(rows: &[&[&str]]) -> Block {
+        Block::Table(rows.iter().map(|row| row.iter().map(|s| cell(s)).collect()).collect())
+    }
+
+    #[test]
+    fn a_table_is_written_with_its_first_row_as_the_header() {
+        let blocks = vec![table(&[&["Name", "Role"], &["Ada", "Writer"], &["Grace", ""]])];
+
+        let markdown = to_markdown(&blocks);
+
+        assert_eq!(markdown, "| Name | Role |\n| --- | --- |\n| Ada | Writer |\n| Grace |  |\n");
+        assert_eq!(from_markdown(&markdown), blocks);
+    }
+
+    #[test]
+    fn a_pipe_in_a_cell_is_escaped_so_it_stays_in_the_cell() {
+        let blocks = vec![table(&[&["a | b", "x"], &["|", "\\|"]])];
+
+        let markdown = to_markdown(&blocks);
+
+        assert_eq!(markdown, "| a \\| b | x |\n| --- | --- |\n| \\| | \\\\\\| |\n");
+        assert_eq!(from_markdown(&markdown), blocks);
+        assert_round_trip(vec![Block::Table(vec![vec![
+            vec![marked("a|b", |m| m.code = true)],
+            vec![marked("a\\|b`|", |m| m.code = true)],
+            vec![marked("or | link", |m| m.link = Some("https://x.org/?q=a|b".into()))],
+            vec![Inline::Image { src: "/a|b.png".into(), alt: "c|d".into() }],
+        ]])]);
+    }
+
+    #[test]
+    fn a_cell_holds_formatting_links_and_line_breaks() {
+        let row = vec![
+            vec![marked("bold", |m| m.bold = true), text(" and "), page_link("a1b2")],
+            vec![text("one"), Inline::HardBreak, text("two")],
+        ];
+        let blocks = vec![Block::Table(vec![row.clone(), row])];
+
+        let markdown = to_markdown(&blocks);
+
+        assert_eq!(
+            markdown,
+            "| **bold** and [](turtle:a1b2) | one<br>two |\n| --- | --- |\n| **bold** and [](turtle:a1b2) | one<br>two |\n"
+        );
+        assert_eq!(from_markdown(&markdown), blocks);
+    }
+
+    #[test]
+    fn a_table_inside_a_list_or_a_callout_round_trips() {
+        assert_round_trip(vec![
+            Block::BulletList(vec![vec![para(vec![text("item")]), table(&[&["a"], &["b"]])]]),
+            Block::Callout { kind: CalloutKind::Tip, content: vec![table(&[&["", ""]])] },
+            table(&[&["only a header"]]),
+            para(vec![text("a | b")]),
+        ]);
+    }
+
+    #[test]
+    fn rows_of_a_table_read_from_markdown_have_as_many_cells_as_its_header() {
+        assert_eq!(from_markdown("| a | b |\n|:-|-:|\n| 1 |\n| 1 | 2 | 3 |"), vec![table(&[&["a", "b"], &["1", ""], &["1", "2"]])]);
     }
 
     const SEEDS: u64 = 20_000;
