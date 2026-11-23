@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use typst::diag::{FileError, FileResult};
 use typst::foundations::{Bytes, Datetime, Duration};
 use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
-use typst::text::{Font, FontBook};
+use typst::text::{Font, FontBook, FontFlags, FontInfo, FontStyle};
 use typst::utils::LazyHash;
 use typst::visualize::{ExchangeFormat, RasterImage};
 use typst::{Library, LibraryExt, World};
@@ -41,6 +41,37 @@ const FONTS: &[&[u8]] = &[
 pub const FONT_FAMILIES: &[&str] = &["Inter", "Source Serif 4", "JetBrains Mono"];
 
 const LAYOUT: &str = include_str!("layout.typ");
+
+/// One font in a font file: its family and style, as Typst reads them to
+/// choose it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontFace {
+    pub family: String,
+    /// From 100 to 900; 400 is regular, 700 bold.
+    pub weight: u16,
+    /// Whether it is italic or oblique.
+    pub italic: bool,
+    /// Whether it is a variable font, with axes such as its weight.
+    pub variable: bool,
+}
+
+/// The fonts a file holds: none if it is no TTF or OTF file, several if it
+/// is a collection.
+pub fn font_faces(bytes: &[u8]) -> Vec<FontFace> {
+    FontInfo::iter(bytes)
+        .map(|info| FontFace {
+            family: info.family,
+            weight: info.variant.weight.to_number(),
+            italic: info.variant.style != FontStyle::Normal,
+            variable: info.flags.contains(FontFlags::VARIABLE),
+        })
+        .collect()
+}
+
+/// The fonts built into Turtle.
+pub fn bundled_faces() -> Vec<FontFace> {
+    FONTS.iter().flat_map(|data| font_faces(data)).collect()
+}
 
 /// How a PDF looks: the values the fixed layout reads.
 #[derive(Debug, Clone, Serialize)]
@@ -172,6 +203,8 @@ pub struct Document {
     pub parts: Vec<Part>,
     /// The images the content shows, by the path an `Inline::Image` names.
     pub images: HashMap<String, Vec<u8>>,
+    /// Uploaded font files, besides the fonts built in.
+    pub fonts: Vec<Vec<u8>>,
 }
 
 /// A Folder, shown as a group heading, or a Page, shown as a chapter.
@@ -273,7 +306,7 @@ pub fn typeset(document: Document, look: &Look) -> anyhow::Result<Vec<u8>> {
     let mut files: HashMap<FileId, Bytes> =
         document.images.into_iter().map(|(path, bytes)| (file_id(&path), Bytes::new(bytes))).collect();
     files.insert(file_id("/data.json"), Bytes::new(serde_json::to_vec(&data)?));
-    let world = PdfWorld::new(files);
+    let world = PdfWorld::new(files, document.fonts);
     let result = typeset_world(&world);
     // Typst keeps what it worked out for reuse; a server would only gather it.
     typst::comemo::evict(0);
@@ -304,8 +337,13 @@ struct PdfWorld {
 }
 
 impl PdfWorld {
-    fn new(files: HashMap<FileId, Bytes>) -> PdfWorld {
-        let fonts: Vec<Font> = FONTS.iter().flat_map(|data| Font::iter(Bytes::new(*data))).collect();
+    fn new(files: HashMap<FileId, Bytes>, uploaded: Vec<Vec<u8>>) -> PdfWorld {
+        let fonts: Vec<Font> = FONTS
+            .iter()
+            .map(|data| Bytes::new(*data))
+            .chain(uploaded.into_iter().map(Bytes::new))
+            .flat_map(Font::iter)
+            .collect();
         PdfWorld {
             library: LazyHash::new(Library::builder().build()),
             book: LazyHash::new(FontBook::from_fonts(&fonts)),

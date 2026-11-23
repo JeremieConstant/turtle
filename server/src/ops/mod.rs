@@ -12,6 +12,7 @@ pub mod areas;
 pub mod connections;
 pub mod content;
 pub mod export;
+pub mod fonts;
 #[cfg(test)]
 mod every_operation;
 pub mod grants;
@@ -54,6 +55,9 @@ pub struct Core {
     live: crate::live::Pages,
     /// Where Attachment files are kept, each under the hash of its content.
     attachments: std::path::PathBuf,
+    /// Where uploaded font files are kept, each under the hash of its
+    /// content. Apart from the Attachments, whose clean-up would remove them.
+    fonts: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
     /// The address Turtle is reached at from outside. OAuth is offered only
@@ -89,6 +93,7 @@ impl Core {
             search: crate::search::Index::open(&db_path.with_file_name("search"))?,
             live: crate::live::Pages::new(crate::store::open(db_path)?, clock.clone()),
             attachments: db_path.with_file_name("attachments"),
+            fonts: db_path.with_file_name("fonts"),
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             public_url: None,
             resolve: intranet::system_resolver(),
@@ -136,6 +141,11 @@ impl Core {
     /// Where Attachment files are kept.
     pub fn attachments_dir(&self) -> &Path {
         &self.attachments
+    }
+
+    /// Where uploaded font files are kept.
+    pub fn fonts_dir(&self) -> &Path {
+        &self.fonts
     }
 
     pub fn db(&self) -> MutexGuard<'_, Connection> {
@@ -477,6 +487,7 @@ pub fn catalogue() -> Catalogue {
     export::register(&mut catalogue);
     pdf_export::register(&mut catalogue);
     pdf_styles::register(&mut catalogue);
+    fonts::register(&mut catalogue);
     links::register(&mut catalogue);
     tokens::register(&mut catalogue);
     connections::register(&mut catalogue);
@@ -558,6 +569,104 @@ pub(crate) mod testing {
         let db = core.db();
         let root = tree::root_of(&db, area_id).unwrap();
         permissions::revoke(&db, &root, &permissions::Holder::Member(id.clone())).unwrap();
+    }
+
+    /// The styles a test font comes in, each made from Inter's file of that style.
+    #[derive(Debug, Clone, Copy)]
+    pub enum TestStyle {
+        Regular,
+        Bold,
+        Italic,
+        BoldItalic,
+    }
+
+    /// A font file of the family `family` in `style`: one of Inter's files
+    /// under another name, so a test can upload a family Turtle lacks.
+    pub fn font_file(family: &str, style: TestStyle) -> Vec<u8> {
+        let (source, subfamily): (&[u8], &str) = match style {
+            TestStyle::Regular => (include_bytes!("../../fonts/inter/Inter-Regular.ttf"), "Regular"),
+            TestStyle::Bold => (include_bytes!("../../fonts/inter/Inter-Bold.ttf"), "Bold"),
+            TestStyle::Italic => (include_bytes!("../../fonts/inter/Inter-Italic.ttf"), "Italic"),
+            TestStyle::BoldItalic => (include_bytes!("../../fonts/inter/Inter-BoldItalic.ttf"), "Bold Italic"),
+        };
+        let postscript = format!("{}-{}", family.replace(' ', ""), subfamily.replace(' ', ""));
+        let names = [
+            (1, family.to_string()),
+            (2, subfamily.to_string()),
+            (4, format!("{family} {subfamily}")),
+            (6, postscript),
+        ];
+        let mut name = Vec::new();
+        let mut strings = Vec::new();
+        name.extend(0u16.to_be_bytes());
+        name.extend((names.len() as u16).to_be_bytes());
+        name.extend((6 + 12 * names.len() as u16).to_be_bytes());
+        for (id, text) in names {
+            let utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+            // Windows, Unicode BMP, US English.
+            for field in [3u16, 1, 0x409, id, utf16.len() as u16, strings.len() as u16] {
+                name.extend(field.to_be_bytes());
+            }
+            strings.extend(utf16);
+        }
+        name.extend(strings);
+        with_tables(source, &[(*b"name", name)])
+    }
+
+    /// The font with a variation axis for weight, as a variable font has.
+    pub fn variable(font: &[u8]) -> Vec<u8> {
+        let mut fvar = Vec::new();
+        // Version 1.0, axes at 16, 2 reserved, 1 axis of 20 bytes, no instances of 8 bytes.
+        for field in [1u16, 0, 16, 2, 1, 20, 0, 8] {
+            fvar.extend(field.to_be_bytes());
+        }
+        fvar.extend(b"wght");
+        for value in [100u32 << 16, 400 << 16, 900 << 16] {
+            fvar.extend(value.to_be_bytes());
+        }
+        fvar.extend([0u8, 0, 1, 0]);
+        with_tables(font, &[(*b"fvar", fvar)])
+    }
+
+    /// The font file with these tables put in or replaced.
+    fn with_tables(font: &[u8], replaced: &[([u8; 4], Vec<u8>)]) -> Vec<u8> {
+        let read_u16 = |at: usize| u16::from_be_bytes([font[at], font[at + 1]]);
+        let read_u32 = |at: usize| u32::from_be_bytes(font[at..at + 4].try_into().unwrap());
+        let mut tables: std::collections::BTreeMap<[u8; 4], Vec<u8>> = (0..usize::from(read_u16(4)))
+            .map(|index| {
+                let record = 12 + 16 * index;
+                let tag: [u8; 4] = font[record..record + 4].try_into().unwrap();
+                let (offset, length) = (read_u32(record + 8) as usize, read_u32(record + 12) as usize);
+                (tag, font[offset..offset + length].to_vec())
+            })
+            .collect();
+        for (tag, table) in replaced {
+            tables.insert(*tag, table.clone());
+        }
+        let count = tables.len() as u16;
+        let entry_selector = 15 - count.leading_zeros() as u16;
+        let search_range = 16u16 << entry_selector;
+        let mut out = font[0..4].to_vec();
+        for field in [count, search_range, entry_selector, count * 16 - search_range] {
+            out.extend(field.to_be_bytes());
+        }
+        let mut offset = 12 + 16 * tables.len();
+        let mut data = Vec::new();
+        for (tag, table) in &tables {
+            let mut padded = table.clone();
+            padded.resize(table.len().div_ceil(4) * 4, 0);
+            let checksum = padded
+                .chunks(4)
+                .fold(0u32, |sum, word| sum.wrapping_add(u32::from_be_bytes(word.try_into().unwrap())));
+            out.extend(tag);
+            out.extend(checksum.to_be_bytes());
+            out.extend((offset as u32).to_be_bytes());
+            out.extend((table.len() as u32).to_be_bytes());
+            offset += padded.len();
+            data.extend(padded);
+        }
+        out.extend(data);
+        out
     }
 
     pub fn fresh() -> TestCore {

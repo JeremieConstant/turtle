@@ -157,6 +157,32 @@ such as "Engineering.zip". */
   file_name: string
 }
 
+export type FontFamily = {
+  /** Whether it is built into Turtle, so it cannot be deleted or replaced. */
+  bundled: boolean
+  /** The name a PDF Style chooses the family by. */
+  name: string
+  /** From the lightest, upright before italic. */
+  styles: FontStyle[]
+}
+
+export type FontList = {
+  /** Those built into Turtle first, then the uploaded ones in order of name. */
+  families: FontFamily[]
+}
+
+export type FontStyle = {
+  /** The name of the uploaded file; absent for a font built into Turtle. */
+  file_name?: string | null
+  /** The uploaded file's ID, to delete it by; absent for a font built into Turtle. */
+  font_id?: string | null
+  italic: boolean
+  /** The style in words, such as "Bold Italic". */
+  style: string
+  /** From 100 (thin) to 900 (black); 400 is regular, 700 bold. */
+  weight: number
+}
+
 export type Fragment = {
   /** Whether this piece is a word that matched. */
   highlighted: boolean
@@ -517,6 +543,20 @@ export type Tree = {
   /** How many deleted Pages and Folders are in the Trash of the Area, for
 someone with the Write Role, who can see it; None for anyone else. */
   trash?: number | null
+}
+
+export type UploadedFont = {
+  /** The family it belongs to, as read from the file. */
+  family: string
+  /** The name of the uploaded file; absent for a font built into Turtle. */
+  file_name?: string | null
+  /** The uploaded file's ID, to delete it by; absent for a font built into Turtle. */
+  font_id?: string | null
+  italic: boolean
+  /** The style in words, such as "Bold Italic". */
+  style: string
+  /** From 100 (thin) to 900 (black); 400 is regular, 700 bold. */
+  weight: number
 }
 
 export type Version = {
@@ -1112,6 +1152,28 @@ of the Page. Needed only when several Sections have this heading. */
   delete_pdf_style: {
     input: {
       id: string
+    }
+    output: null
+  }
+  /** Lists the font families a PDF Style may use, each with its styles: those built into Turtle, marked as such, and those uploaded. For anyone signed in. */
+  list_fonts: {
+    input: Record<string, never>
+    output: FontList
+  }
+  /** Uploads a TTF or OTF font file of at most 10 MB, one style of one family, such as a corporate font's bold. Its family and style are read from the file. A family's regular, bold, italic and bold italic are separate files. Variable fonts, WOFF and WOFF2 are refused, as are a style uploaded already and the families built into Turtle. Only for a Workspace Admin. */
+  upload_font: {
+    input: {
+      /** The TTF or OTF file, in base64. */
+      content: string
+      /** The file's name, such as "Corporate-Bold.ttf". */
+      file_name: string
+    }
+    output: UploadedFont
+  }
+  /** Deletes an uploaded font file. The last file of a family a PDF Style uses cannot be deleted. Only for a Workspace Admin. */
+  delete_font: {
+    input: {
+      font_id: string
     }
     output: null
   }

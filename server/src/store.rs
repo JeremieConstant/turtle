@@ -331,6 +331,21 @@ const MIGRATIONS: &[&str] = &[
          code_font, body_size, h1_size, h2_size, h3_size, cover, toc, toc_depth, footer_text, language, created_at)
      VALUES ('standard', 'Standard', 1, '#23252b', '#17181c', '#2f5f8a', 'Inter', 'Inter', 'JetBrains Mono',
          9.6, 26, 13.5, 11, 1, 1, 2, NULL, 'en', 0);",
+    // Fonts uploaded by Workspace Admins for PDF Styles, each file one style
+    // of one family, kept beside the database under the hash of its content
+    // (ADR-0009). Typst picks a family's file by weight and italic, so the
+    // family has at most one file of each; families match as Typst matches
+    // them, in any case.
+    "CREATE TABLE fonts (
+         id TEXT PRIMARY KEY,
+         family TEXT NOT NULL,
+         weight INTEGER NOT NULL,
+         italic INTEGER NOT NULL,
+         file_name TEXT NOT NULL,
+         content_hash TEXT NOT NULL,
+         uploaded_at INTEGER NOT NULL
+     );
+     CREATE UNIQUE INDEX one_font_per_style ON fonts (family COLLATE NOCASE, weight, italic);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

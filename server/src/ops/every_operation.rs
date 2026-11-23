@@ -151,6 +151,14 @@ fn table() -> Vec<Row> {
         ),
         ("set_default_pdf_style", |_| json!({"id": "standard"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("delete_pdf_style", |_| json!({"id": "standard"}), [REFUSED, REFUSED, REFUSED, REFUSED, "conflict"]),
+        ("list_fonts", |_| json!({}), [OK; 5]),
+        // A Workspace Admin learns that a file of no bytes is no font.
+        (
+            "upload_font",
+            |_| json!({"file_name": "Corporate.ttf", "content": ""}),
+            [REFUSED, REFUSED, REFUSED, REFUSED, "invalid_input"],
+        ),
+        ("delete_font", |_| json!({"font_id": "made-up"}), [REFUSED, REFUSED, REFUSED, REFUSED, HIDDEN]),
         ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),
         // The Page has no headings, so those who may change it learn that.

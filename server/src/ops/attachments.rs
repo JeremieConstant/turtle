@@ -260,7 +260,7 @@ fn with_url(attachment: Attachment) -> Attachment {
 /// Writes the content under its hash, unless it is there already, and
 /// returns the hash. It is written beside its place first and then moved
 /// there, so a file under a hash is always complete.
-fn store_file(dir: &Path, content: &[u8]) -> Result<String, OpError> {
+pub(super) fn store_file(dir: &Path, content: &[u8]) -> Result<String, OpError> {
     let hash = hex(&Sha256::digest(content));
     let path = dir.join(&hash);
     if path.exists() {
@@ -274,7 +274,7 @@ fn store_file(dir: &Path, content: &[u8]) -> Result<String, OpError> {
 }
 
 /// The name without any folders a browser or Agent put before it.
-fn valid_name(name: &str) -> Result<String, OpError> {
+pub(super) fn valid_name(name: &str) -> Result<String, OpError> {
     let name = name.rsplit(['/', '\\']).next().unwrap_or_default().trim();
     if name.is_empty() {
         return Err(OpError::InvalidInput("Give the file a name.".into()));

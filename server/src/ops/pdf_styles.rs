@@ -306,9 +306,12 @@ fn valid_color(what: &str, color: &str) -> Result<String, OpError> {
     }
 }
 
-/// The font families a PDF Style may use: those built into Turtle.
-pub(super) fn font_families(_db: &Connection) -> Result<Vec<String>, OpError> {
-    Ok(crate::pdf::FONT_FAMILIES.iter().map(|family| family.to_string()).collect())
+/// The font families a PDF Style may use: those built into Turtle, then
+/// the uploaded ones.
+pub(super) fn font_families(db: &Connection) -> Result<Vec<String>, OpError> {
+    let mut families: Vec<String> = crate::pdf::FONT_FAMILIES.iter().map(|family| family.to_string()).collect();
+    families.extend(super::fonts::uploaded_families(db)?);
+    Ok(families)
 }
 
 /// A font family a PDF Style may use, as `font_families` names it; `what`
