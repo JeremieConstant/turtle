@@ -143,12 +143,16 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
 
 pub fn list_attachments(core: &Core, principal: &Principal, input: PageId) -> OpResult<Attachments> {
     tree::get_page(core, principal, PageId { id: input.id.clone() })?;
-    let db = core.db();
-    let mut statement = db.prepare(&format!("{SELECT} WHERE page_id = ?1 ORDER BY attached_at, rowid"))?;
-    let attachments = statement
-        .query_map([&input.id], |row| attachment_from(row).map(|(attachment, _)| attachment))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let attachments = stored_of(&core.db(), &input.id)?.into_iter().map(|(attachment, _)| attachment).collect();
     Ok(Attachments { attachments }.into())
+}
+
+/// The Attachments of a Page, the oldest first, each with the hash its file
+/// is stored under. It does not ask who may read them.
+pub(super) fn stored_of(db: &Connection, page_id: &str) -> rusqlite::Result<Vec<(Attachment, String)>> {
+    let mut statement = db.prepare(&format!("{SELECT} WHERE page_id = ?1 ORDER BY attached_at, rowid"))?;
+    let attachments = statement.query_map([page_id], attachment_from)?;
+    attachments.collect()
 }
 
 pub fn read_attachment(core: &Core, principal: &Principal, input: AttachmentId) -> OpResult<AttachmentContent> {

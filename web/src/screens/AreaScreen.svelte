@@ -18,6 +18,7 @@
   import { router } from '../lib/router.svelte'
   import { areaAddress, pageAddress } from '../lib/routes'
   import { ask } from '../lib/confirm.svelte'
+  import { exportToFile } from '../lib/exporting'
   import { reportFailure } from '../lib/toasts'
   import { UNDO_DURATION } from '../lib/trash'
   import { createEntry } from '../lib/tree'
@@ -162,12 +163,13 @@
     {:else if area}
       <div class="head">
         <h1>{area.name}</h1>
-        {#if area.role === 'admin' && !area.personal}
-          <div class="actions">
+        <div class="actions">
+          <button type="button" class="btn" onclick={() => area && exportToFile({ area_id: id }, area.name)}>Export</button>
+          {#if area.role === 'admin' && !area.personal}
             <button type="button" class="btn" onclick={() => renameDialog?.open(area?.name)}>Rename</button>
             <button type="button" class="btn" onclick={deleteArea}>Delete</button>
-          </div>
-        {/if}
+          {/if}
+        </div>
       </div>
       {#if area.personal}
         <p class="sub">Only you can see this Area. To share Pages, create them in another Area.</p>
