@@ -7,7 +7,7 @@
 //! OAuth itself (metadata, registration, the authorization and token
 //! endpoints) is spoken by `crate::oauth`; what is decided is decided here.
 
-use super::accounts::{digest, random_hex};
+use super::accounts::{digest, random_hex, Nothing};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use base64::Engine;
 use rusqlite::{Connection, OptionalExtension};
@@ -16,6 +16,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub(super) fn register(catalogue: &mut Catalogue) {
+    {
+        let operation = catalogue.add(
+            "describe_connecting",
+            "Says how the caller connects an AI client to Turtle: the MCP address to give it, or that connecting is not available.",
+            describe_connecting,
+        );
+        operation.browser_only = true;
+        operation.changes = false;
+    }
     {
         let operation = catalogue.add(
             "describe_connection_request",
@@ -186,6 +195,22 @@ fn deciding_member(principal: &Principal) -> Result<&str, OpError> {
         )),
         Principal::Anonymous => Err(OpError::NotPermitted("Sign in first.".into())),
     }
+}
+
+/// How the caller connects an AI client, as the Connect AI page shows it.
+#[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Connecting {
+    /// The address to give an AI client. Missing where Turtle does not know
+    /// its public address, since an AI client could not sign in through
+    /// OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it.
+    pub mcp_address: Option<String>,
+}
+
+pub fn describe_connecting(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Connecting> {
+    // Whoever may allow an app may learn how to connect one.
+    deciding_member(principal)?;
+    let mcp_address = core.public_url().map(|base| format!("{base}/mcp"));
+    Ok(Connecting { mcp_address }.into())
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -654,5 +679,18 @@ mod tests {
 
         super::super::members::deactivate_member(&core, &admin, super::super::members::MemberId { id: "member-ada".into() }).unwrap();
         assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
+    }
+
+    #[test]
+    fn a_member_is_told_the_mcp_address_only_where_turtle_knows_its_own() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let connecting = describe_connecting(&core, &ada, Nothing {}).unwrap().output;
+        assert_eq!(connecting.mcp_address.as_deref(), Some("https://turtle.example.org/mcp"));
+
+        let unknown = fresh();
+        let ada = member(&unknown, "Ada", false);
+        assert_eq!(describe_connecting(&unknown, &ada, Nothing {}).unwrap().output.mcp_address, None);
+        assert_eq!(describe_connecting(&unknown, &Principal::Anonymous, Nothing {}).unwrap_err().kind(), "not_permitted");
     }
 }
