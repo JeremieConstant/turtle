@@ -562,6 +562,8 @@ dialog[open] {
   position: absolute;
   width: var(--space-hair);
   height: var(--space-hair);
+  padding: 0;
+  border: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;

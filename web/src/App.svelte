@@ -196,7 +196,10 @@
     min-height: 0;
   }
 
+  /* Positioned, so that anything placed absolutely inside a screen scrolls with it
+     instead of stretching the window and giving it a second scrollbar. */
   .content {
+    position: relative;
     min-width: 0;
     overflow-y: auto;
     scrollbar-gutter: stable;
