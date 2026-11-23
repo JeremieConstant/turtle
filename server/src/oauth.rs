@@ -82,6 +82,7 @@ async fn resource_metadata(State(core): State<Arc<Core>>) -> Response {
         "authorization_servers": [base],
         "bearer_methods_supported": ["header"],
         "resource_name": "Turtle",
+        "scopes_supported": connections::SCOPES,
     })))
 }
 
@@ -96,6 +97,7 @@ async fn server_metadata(State(core): State<Arc<Core>>) -> Response {
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
+        "scopes_supported": connections::SCOPES,
     })))
 }
 
@@ -203,10 +205,10 @@ async fn authorize(State(core): State<Arc<Core>>, Query(query): Query<HashMap<St
         return back("invalid_request", description);
     }
 
-    // The consent page needs what the answer is made of; the rest of the
-    // request (scope, resource) asks for nothing Turtle can limit yet.
+    // The consent page needs what the answer is made of, and the scopes
+    // asked for, which the Member may lower. The resource is always Turtle.
     let mut forwarded = vec![("client_id", query.get("client_id").map(String::as_str)), ("redirect_uri", Some(redirect_uri.as_str()))];
-    for name in ["code_challenge", "code_challenge_method", "state"] {
+    for name in ["code_challenge", "code_challenge_method", "state", "scope"] {
         forwarded.push((name, query.get(name).map(String::as_str)));
     }
     Redirect::to(&with_query(CONSENT_SCREEN, &forwarded)).into_response()
@@ -249,6 +251,7 @@ async fn token(State(core): State<Arc<Core>>, form: Result<Form<HashMap<String, 
                 "access_token": issued.access_token,
                 "token_type": "Bearer",
                 "expires_in": issued.expires_in,
+                "scope": issued.scope,
                 "refresh_token": issued.refresh_token,
             });
             let mut response = open_to_any_site(Json(body));

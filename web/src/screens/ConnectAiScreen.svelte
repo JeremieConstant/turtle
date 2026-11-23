@@ -180,7 +180,9 @@
           </ol>
           <p class="muted">
             A client that cannot sign in that way can use a Token instead. Create one under
-            <a href="/settings/tokens" onclick={event => router.follow(event, '/settings/tokens')}>Tokens</a>, and give the client the
+            <a href="/settings/connected-apps#for-developers" onclick={event => router.follow(event, '/settings/connected-apps#for-developers')}
+              >Connected apps</a
+            >, and give the client the
             address above with the Token as <code>Authorization: Bearer …</code>
           </p>
         {/if}

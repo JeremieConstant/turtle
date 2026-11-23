@@ -12,7 +12,8 @@ export type Route =
   | { screen: 'members' }
   /** How to connect an AI client to Turtle. */
   | { screen: 'connect-ai' }
-  | { screen: 'tokens' }
+  /** Everything that can act as the signed-in Member: connected apps and Tokens made by hand. */
+  | { screen: 'connected-apps' }
   | { screen: 'agents' }
   /** The deleted Areas, for a Workspace Admin to restore. */
   | { screen: 'deleted-areas' }
@@ -33,7 +34,7 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/authorize') return { screen: 'authorize', query }
   if (pathname === '/connect-ai') return { screen: 'connect-ai' }
   if (pathname === '/settings/members') return { screen: 'members' }
-  if (pathname === '/settings/tokens') return { screen: 'tokens' }
+  if (pathname === '/settings/connected-apps') return { screen: 'connected-apps' }
   if (pathname === '/settings/agents') return { screen: 'agents' }
   if (pathname === '/settings/deleted-areas') return { screen: 'deleted-areas' }
   const link = pathname.match(/^\/(join|reset-password)\/([^/]+)$/)

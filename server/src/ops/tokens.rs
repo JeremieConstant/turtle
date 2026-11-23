@@ -18,12 +18,12 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         )
         .browser_only = true;
     {
-        let operation = catalogue.add("list_tokens", "Lists the caller's Tokens, or a standalone Agent's for a Workspace Admin, with when each was last used.", list_tokens);
+        let operation = catalogue.add("list_tokens", "Lists the caller's Tokens, those of apps they connected among them, or a standalone Agent's for a Workspace Admin, with when each was last used.", list_tokens);
         operation.browser_only = true;
         operation.changes = false;
     }
     catalogue
-        .add("revoke_token", "Revokes one of the caller's Tokens, or of a standalone Agent's for a Workspace Admin; it stops working at once.", revoke_token)
+        .add("revoke_token", "Revokes one of the caller's Tokens, or of a standalone Agent's for a Workspace Admin; it stops working at once, and so does everything a connected app was given for it.", revoke_token)
         .browser_only = true;
 }
 
@@ -65,6 +65,9 @@ pub struct TokenSummary {
     pub id: String,
     pub name: String,
     pub read_only: bool,
+    /// Whether an app made it by connecting through OAuth, rather than its
+    /// owner by hand. Its value was never shown to anyone.
+    pub connected: bool,
     /// The only Areas it reaches; every Area its owner reaches if absent.
     /// Areas the owner can no longer read are left out.
     pub areas: Option<Vec<TokenArea>>,
@@ -161,14 +164,7 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
                 "Choose at least one Area, or let the Token reach every Area.".into(),
             ));
         }
-        let mut found: Vec<TokenArea> = Vec::new();
-        for area_id in area_ids {
-            let area = areas::readable_area(&transaction, principal, area_id)?;
-            if found.iter().all(|known| known.id != area.id) {
-                found.push(TokenArea { id: area.id, name: area.name });
-            }
-        }
-        chosen = Some(found);
+        chosen = Some(readable_areas(&transaction, principal, area_ids)?);
     }
     let (owner_column, owner_id) = owner.column();
     transaction.execute(
@@ -189,6 +185,7 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
         id,
         name,
         read_only: input.read_only,
+        connected: false,
         areas: chosen.map(|mut chosen| {
             sort_areas(&mut chosen);
             chosen
@@ -200,12 +197,27 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
     Ok(CreatedToken { token, value }.into())
 }
 
+/// The Areas a Token or connection is limited to, each once, if the caller
+/// can read them all; an Area they cannot read is not found.
+pub(super) fn readable_areas(db: &Connection, principal: &Principal, area_ids: &[String]) -> Result<Vec<TokenArea>, OpError> {
+    let mut found: Vec<TokenArea> = Vec::new();
+    for area_id in area_ids {
+        let area = areas::readable_area(db, principal, area_id)?;
+        if found.iter().all(|known| known.id != area.id) {
+            found.push(TokenArea { id: area.id, name: area.name });
+        }
+    }
+    Ok(found)
+}
+
 pub fn list_tokens(core: &Core, principal: &Principal, input: TokensOf) -> OpResult<TokenList> {
     let db = core.db();
     let owner = owner(&db, principal, input.agent_id.as_deref())?;
+    // A connection unused for long has ended, even if nothing tried it since.
+    super::connections::end_idle_connections(&db, core.now())?;
     let (owner_column, owner_id) = owner.column();
     let mut statement = db.prepare(&format!(
-        "SELECT id, name, read_only, all_areas, expires_at, last_used_at, created_at
+        "SELECT id, name, read_only, all_areas, expires_at, last_used_at, created_at, client_id IS NOT NULL
          FROM tokens WHERE {owner_column} = ?1 ORDER BY created_at DESC, id"
     ))?;
     let rows = statement.query_map([owner_id], |row| {
@@ -214,6 +226,7 @@ pub fn list_tokens(core: &Core, principal: &Principal, input: TokensOf) -> OpRes
                 id: row.get(0)?,
                 name: row.get(1)?,
                 read_only: row.get(2)?,
+                connected: row.get(7)?,
                 areas: None,
                 expires_at: row.get(4)?,
                 last_used_at: row.get(5)?,

@@ -11,6 +11,7 @@
   import { session } from './lib/session.svelte'
   import { ui } from './lib/ui.svelte'
   import AgentsScreen from './screens/AgentsScreen.svelte'
+  import ConnectedAppsScreen from './screens/ConnectedAppsScreen.svelte'
   import AreaScreen from './screens/AreaScreen.svelte'
   import AuthorizeScreen from './screens/AuthorizeScreen.svelte'
   import ConnectAiScreen from './screens/ConnectAiScreen.svelte'
@@ -24,7 +25,6 @@
   import SetupScreen from './screens/SetupScreen.svelte'
   import SignInScreen from './screens/SignInScreen.svelte'
   import StartScreen from './screens/StartScreen.svelte'
-  import TokensScreen from './screens/TokensScreen.svelte'
   import TrashScreen from './screens/TrashScreen.svelte'
 
   const route = $derived(router.route)
@@ -175,8 +175,8 @@
         <ConnectAiScreen />
       {:else if route.screen === 'members'}
         <MembersScreen />
-      {:else if route.screen === 'tokens'}
-        <TokensScreen />
+      {:else if route.screen === 'connected-apps'}
+        <ConnectedAppsScreen />
       {:else if route.screen === 'agents'}
         <AgentsScreen />
       {:else if route.screen === 'deleted-areas'}
