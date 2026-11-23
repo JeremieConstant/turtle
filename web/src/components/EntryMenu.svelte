@@ -2,7 +2,7 @@
   /*
    * The menu of an Entry, shared by the sidebar's tree and the Area screen:
    * a new Page or Folder beneath it, renaming it, moving it elsewhere,
-   * copying its link, exporting it, and moving it to the Trash. What
+   * copying its link, exporting it as a PDF or as Markdown, and moving it to the Trash. What
    * it offers depends on the Role held on the Area (entryMenuItems). Creating
    * and renaming ask for the name in a dialog, then load the Area's tree
    * again, which both the sidebar and the Area screen show.
@@ -21,6 +21,7 @@
   import { collapsed } from '../lib/ui.svelte'
   import MoveDialog from './MoveDialog.svelte'
   import NameDialog from './NameDialog.svelte'
+  import PdfExportDialog from './PdfExportDialog.svelte'
 
   const LABELS: Record<EntryMenuItem, string> = {
     'new-page': 'New Page beneath…',
@@ -28,7 +29,8 @@
     rename: 'Rename…',
     move: 'Move…',
     'copy-link': 'Copy link',
-    export: 'Export as ZIP',
+    'export-pdf': 'Export as PDF…',
+    'export-markdown': 'Export as Markdown',
     trash: 'Move to Trash',
   }
 
@@ -39,7 +41,8 @@
   let moveDialog: MoveDialog
   /** The Entry the menu is open for, and the Area it is in. */
   let target = $state.raw<{ entry: Entry; area: Area } | null>(null)
-  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'copy-link' | 'export' | 'trash'>
+  let pdfDialog: PdfExportDialog
+  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'copy-link' | 'export-pdf' | 'export-markdown' | 'trash'>
   /** What the dialog asks for, what its button says, and what it creates. */
   const DIALOGS: Record<DialogPurpose, { label: (title: string) => string; action: string; kind?: Kind }> = {
     'new-page': { label: title => `Title of the new Page beneath ${title}`, action: 'Create Page', kind: 'page' },
@@ -50,7 +53,8 @@
   const shownDialog = $derived(DIALOGS[dialogPurpose])
 
   /** Items are shown in groups with a line between them: changing it, passing it on, and the Trash. */
-  const groupOf = (item: EntryMenuItem) => (item === 'trash' ? 2 : item === 'copy-link' || item === 'export' ? 1 : 0)
+  const groupOf = (item: EntryMenuItem) =>
+    item === 'trash' ? 2 : item === 'copy-link' || item === 'export-pdf' || item === 'export-markdown' ? 1 : 0
 
   const items = $derived(target ? entryMenuItems(target.entry.kind, target.area.role) : [])
 
@@ -68,7 +72,12 @@
       void copyLink(target.entry)
       return
     }
-    if (item === 'export') {
+    if (item === 'export-pdf') {
+      const { entry, area } = target
+      void pdfDialog.open(area.id, entry.id, entry.title)
+      return
+    }
+    if (item === 'export-markdown') {
       const { entry, area } = target
       void exportToFile({ area_id: area.id, entry_id: entry.id }, entry.title)
       return
@@ -141,6 +150,8 @@
 </div>
 
 <MoveDialog bind:this={moveDialog} />
+
+<PdfExportDialog bind:this={pdfDialog} />
 
 <NameDialog bind:this={dialog} label={shownDialog.label(target?.entry.title ?? '')} action={shownDialog.action} onsubmit={submit} />
 

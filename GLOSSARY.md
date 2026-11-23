@@ -62,6 +62,18 @@ _Avoid_: Upload, asset, media
 An Area or Subtree as a ZIP of Markdown files that is readable without Turtle: directories mirror the tree, every Page and Folder is a file named after its title with what an import needs as frontmatter, a Page's Attachments sit in its directory apart from its Pages, and Page links between its files are relative paths.
 _Avoid_: Backup, download, dump
 
+**PDF Export**:
+An Area, Subtree or Page typeset as one PDF for reading and handing on: a cover, a table of contents with page numbers, the Pages as chapters in tree order and the Folders as groups, laid out by a PDF Style. Unlike an Export it is not read back by an import.
+_Avoid_: Print, PDF download, report
+
+**PDF Style**:
+A named look for PDF Exports, shared across the Workspace and managed by Workspace Admins: a logo, colours, fonts, sizes, whether there is a cover and a table of contents, a footer text and the language of the PDF's fixed labels. It fills in fixed fields of one layout and holds no code; exactly one PDF Style is the default.
+_Avoid_: Template, theme, layout, Vorlage
+
+**Uploaded font**:
+A TTF or OTF file holding one style of one font family, such as a corporate font's bold, that a Workspace Admin uploads so every PDF Style can use the family besides those built into Turtle. It belongs to the Workspace, not to a PDF Style; the last file of a family a PDF Style uses cannot be deleted.
+_Avoid_: Custom font, Schriftart
+
 **Version**:
 A recorded state of a Page with its authors, the people whose changes arrived since the previous Version; it can be compared with other Versions and restored.
 _Avoid_: Revision, snapshot, history entry

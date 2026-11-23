@@ -96,9 +96,7 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
     // whatever is sent.
     tree::page_to_change(core, principal, &input.page_id)?;
     let name = valid_name(&input.name)?;
-    let content = base64::engine::general_purpose::STANDARD
-        .decode(input.content.trim())
-        .map_err(|_| OpError::InvalidInput("Send the file's content in base64.".into()))?;
+    let content = decode_content(&input.content)?;
     let limit = core.attachment_limit();
     if content.len() as u64 > limit {
         return Err(OpError::InvalidInput(format!(
@@ -184,6 +182,13 @@ pub fn open_attachment(core: &Core, principal: &Principal, id: &str) -> Result<(
     Ok((attachment, content))
 }
 
+/// An Attachment the principal may read, with the hash its file is stored
+/// under, or None as for one that does not exist.
+pub(super) fn readable_stored(db: &Connection, principal: &Principal, id: &str) -> rusqlite::Result<Option<(Attachment, String)>> {
+    let Some((attachment, content_hash)) = find(db, id)? else { return Ok(None) };
+    Ok(super::permissions::role_on(db, principal, &attachment.page_id)?.map(|_| (attachment, content_hash)))
+}
+
 /// The files the Attachments of these Pages hold, to give to
 /// `remove_unattached_files` once the Pages are gone.
 pub(super) fn files_of(db: &Connection, pages: &[String]) -> rusqlite::Result<Vec<String>> {
@@ -209,14 +214,7 @@ pub(super) fn remove_unattached_files(core: &Core, db: &Connection, hashes: &[St
         if still_attached.query_row([hash], |row| row.get::<_, bool>(0))? {
             continue;
         }
-        let path = core.attachments_dir().join(hash);
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            // What it belonged to is gone already; a file left behind only
-            // takes up space, so this is no reason to fail the removal.
-            Err(error) => eprintln!("removing {} failed: {error}", path.display()),
-        }
+        remove_stored_file(core.attachments_dir(), hash);
     }
     Ok(())
 }
@@ -253,7 +251,7 @@ fn with_url(attachment: Attachment) -> Attachment {
 /// Writes the content under its hash, unless it is there already, and
 /// returns the hash. It is written beside its place first and then moved
 /// there, so a file under a hash is always complete.
-fn store_file(dir: &Path, content: &[u8]) -> Result<String, OpError> {
+pub(super) fn store_file(dir: &Path, content: &[u8]) -> Result<String, OpError> {
     let hash = hex(&Sha256::digest(content));
     let path = dir.join(&hash);
     if path.exists() {
@@ -266,8 +264,27 @@ fn store_file(dir: &Path, content: &[u8]) -> Result<String, OpError> {
     Ok(hash)
 }
 
+/// Removes the file stored under the hash, if it is there. What it belonged
+/// to is gone already, and a file left behind only takes up space, so a
+/// failure is logged rather than returned.
+pub(super) fn remove_stored_file(dir: &Path, hash: &str) {
+    let path = dir.join(hash);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => eprintln!("removing {} failed: {error}", path.display()),
+    }
+}
+
+/// An uploaded file's content, sent in base64.
+pub(super) fn decode_content(content: &str) -> Result<Vec<u8>, OpError> {
+    base64::engine::general_purpose::STANDARD
+        .decode(content.trim())
+        .map_err(|_| OpError::InvalidInput("Send the file's content in base64.".into()))
+}
+
 /// The name without any folders a browser or Agent put before it.
-fn valid_name(name: &str) -> Result<String, OpError> {
+pub(super) fn valid_name(name: &str) -> Result<String, OpError> {
     let name = name.rsplit(['/', '\\']).next().unwrap_or_default().trim();
     if name.is_empty() {
         return Err(OpError::InvalidInput("Give the file a name.".into()));
@@ -297,7 +314,7 @@ fn content_type_of(name: &str) -> &'static str {
 }
 
 /// "25 MB" for 25 MiB, as people read file sizes.
-fn size_in_words(bytes: u64) -> String {
+pub(super) fn size_in_words(bytes: u64) -> String {
     const MB: u64 = 1024 * 1024;
     if bytes >= MB && bytes.is_multiple_of(MB) {
         format!("{} MB", bytes / MB)

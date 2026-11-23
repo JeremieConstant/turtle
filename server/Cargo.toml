@@ -24,8 +24,12 @@ tokio = { version = "1.54.1", features = ["full"] }
 tungstenite = "0.29.0"
 yrs = "0.28.2"
 zip = { version = "9.8.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+typst = "0.15.1"
+typst-pdf = "0.15.1"
+typst-layout = "0.15.1"
 
 [dev-dependencies]
+pdf-extract = "0.12.1"
 tempfile = "3.27.0"
 tokio-tungstenite = "0.29.0"
 tower = { version = "0.5.3", features = ["util"] }

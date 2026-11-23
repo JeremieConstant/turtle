@@ -17,6 +17,8 @@ export type Route =
   /** Every Member's connected apps and Tokens, for a Workspace Admin to see and disconnect. */
   | { screen: 'all-connected-apps' }
   | { screen: 'agents' }
+  /** The PDF Styles, for a Workspace Admin to manage. */
+  | { screen: 'pdf-styles' }
   /** The deleted Areas, for a Workspace Admin to restore. */
   | { screen: 'deleted-areas' }
   /** Where an invitation link leads; the secret is the link's last part. */
@@ -39,6 +41,7 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/settings/connected-apps') return { screen: 'connected-apps' }
   if (pathname === '/settings/all-connected-apps') return { screen: 'all-connected-apps' }
   if (pathname === '/settings/agents') return { screen: 'agents' }
+  if (pathname === '/settings/pdf-styles') return { screen: 'pdf-styles' }
   if (pathname === '/settings/deleted-areas') return { screen: 'deleted-areas' }
   const link = pathname.match(/^\/(join|reset-password)\/([^/]+)$/)
   if (link) {

@@ -8,6 +8,7 @@ mod mcp;
 mod model;
 mod oauth;
 mod ops;
+mod pdf;
 mod public_url;
 mod search;
 mod store;
@@ -176,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
             get(read_markdown).put(write_markdown),
         )
         .route("/api/attachments/{id}", get(download_attachment))
+        .route("/api/pdf_style_logos/{id}", get(show_pdf_style_logo))
         .with_state(app.clone())
         .merge(http_api::router(core.clone()))
         .merge(oauth::router(core.clone()))
@@ -337,6 +339,31 @@ async fn download_attachment(State(app): State<Arc<App>>, Path(id): Path<String>
             (header::CACHE_CONTROL, "private".into()),
         ],
         content,
+    )
+        .into_response()
+}
+
+/// A PDF Style's logo, as `open_pdf_style_logo` gives it to a Workspace
+/// Admin, for the settings to show in an `<img>`. Opened on its own it is
+/// downloaded, and sandboxed besides: an SVG could carry scripts.
+async fn show_pdf_style_logo(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+    let opened = as_caller(&app.core, headers, move |core, principal| {
+        ops::pdf_styles::open_pdf_style_logo(core, principal, &id)
+    })
+    .await;
+    let logo = match opened {
+        Ok(logo) => logo,
+        Err(refused) => return refused,
+    };
+    (
+        [
+            (header::CONTENT_TYPE, logo.format.content_type().to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename*=UTF-8''{}", percent_encoded(&logo.file_name))),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+            (header::CONTENT_SECURITY_POLICY, "sandbox".into()),
+            (header::CACHE_CONTROL, "private".into()),
+        ],
+        logo.content,
     )
         .into_response()
 }

@@ -300,6 +300,59 @@ const MIGRATIONS: &[&str] = &[
     // (4.1.2); it goes with the connection.
     "ALTER TABLE authorization_codes ADD COLUMN redirect_uri_named INTEGER NOT NULL DEFAULT 1;
      ALTER TABLE authorization_codes ADD COLUMN token_id TEXT REFERENCES tokens (id) ON DELETE CASCADE;",
+    // PDF Styles, shared across the Workspace. Exactly one is the default:
+    // the index allows no second, and no operation takes the flag from the
+    // last. "Standard" holds the look PDFs had before there were PDF Styles,
+    // so every Workspace, new or upgraded, starts with it.
+    "CREATE TABLE pdf_styles (
+         id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         is_default INTEGER NOT NULL DEFAULT 0,
+         text_color TEXT NOT NULL,
+         heading_color TEXT NOT NULL,
+         accent_color TEXT NOT NULL,
+         body_font TEXT NOT NULL,
+         heading_font TEXT NOT NULL,
+         code_font TEXT NOT NULL,
+         body_size REAL NOT NULL,
+         h1_size REAL NOT NULL,
+         h2_size REAL NOT NULL,
+         h3_size REAL NOT NULL,
+         cover INTEGER NOT NULL,
+         toc INTEGER NOT NULL,
+         toc_depth INTEGER NOT NULL,
+         footer_text TEXT,
+         language TEXT NOT NULL,
+         created_at INTEGER NOT NULL
+     );
+     CREATE UNIQUE INDEX pdf_styles_by_name ON pdf_styles (name COLLATE NOCASE);
+     CREATE UNIQUE INDEX one_default_pdf_style ON pdf_styles (is_default) WHERE is_default;
+     INSERT INTO pdf_styles (id, name, is_default, text_color, heading_color, accent_color, body_font, heading_font,
+         code_font, body_size, h1_size, h2_size, h3_size, cover, toc, toc_depth, footer_text, language, created_at)
+     VALUES ('standard', 'Standard', 1, '#23252b', '#17181c', '#2f5f8a', 'Inter', 'Inter', 'JetBrains Mono',
+         9.6, 26, 13.5, 11, 1, 1, 2, NULL, 'en', 0);",
+    // Fonts uploaded by Workspace Admins for PDF Styles, each file one style
+    // of one family, kept beside the database under the hash of its content
+    // (ADR-0009). Typst picks a family's file by weight and italic, so the
+    // family has at most one file of each; families match as Typst matches
+    // them, in any case.
+    "CREATE TABLE fonts (
+         id TEXT PRIMARY KEY,
+         family TEXT NOT NULL,
+         weight INTEGER NOT NULL,
+         italic INTEGER NOT NULL,
+         file_name TEXT NOT NULL,
+         content_hash TEXT NOT NULL,
+         uploaded_at INTEGER NOT NULL
+     );
+     CREATE UNIQUE INDEX one_font_per_style ON fonts (family COLLATE NOCASE, weight, italic);",
+    // A PDF Style's logo: its file lies in pdf-logos beside the database
+    // under the SHA-256 of its content (ADR-0009), apart from Attachments,
+    // whose clean-up only asks the attachments table. Its format is the one
+    // its content was found to have, so it is never judged by its name.
+    "ALTER TABLE pdf_styles ADD COLUMN logo_name TEXT;
+     ALTER TABLE pdf_styles ADD COLUMN logo_format TEXT;
+     ALTER TABLE pdf_styles ADD COLUMN logo_hash TEXT;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

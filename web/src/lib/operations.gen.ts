@@ -157,6 +157,32 @@ such as "Engineering.zip". */
   file_name: string
 }
 
+export type FontFamily = {
+  /** Whether it is built into Turtle, so it cannot be deleted or replaced. */
+  bundled: boolean
+  /** The name a PDF Style chooses the family by. */
+  name: string
+  /** From the lightest, upright before italic. */
+  styles: FontStyle[]
+}
+
+export type FontList = {
+  /** Those built into Turtle first, then the uploaded ones in order of name. */
+  families: FontFamily[]
+}
+
+export type FontStyle = {
+  /** The name of the uploaded file; absent for a font built into Turtle. */
+  file_name?: string | null
+  /** The uploaded file's ID, to delete it by; absent for a font built into Turtle. */
+  font_id?: string | null
+  italic: boolean
+  /** The style in words, such as "Bold Italic". */
+  style: string
+  /** From 100 (thin) to 900 (black); 400 is regular, 700 bold. */
+  weight: number
+}
+
 export type Fragment = {
   /** Whether this piece is a word that matched. */
   highlighted: boolean
@@ -201,6 +227,8 @@ export type GrantList = {
 }
 
 export type Kind = "page" | "folder"
+
+export type Language = "en" | "de"
 
 export type LastEdited = {
   /** Seconds since the Unix epoch. */
@@ -296,6 +324,68 @@ export type PathEntry = {
   /** Whether it is a Folder or a Page. */
   kind: Kind
   title: string
+}
+
+export type PdfExport = {
+  /** The PDF, in base64. */
+  content: string
+  /** A name to save it under, after the Area or the top of the Subtree,
+such as "Engineering.pdf". */
+  file_name: string
+}
+
+export type PdfStyle = {
+  /** The colour of links, rules, Callout bars and the table of contents' numbers, as `#rrggbb`. */
+  accent_color: string
+  /** The font family of body text, one of those `list_pdf_styles` names. */
+  body_font: string
+  /** The size of body text in points, from 8 to 14. */
+  body_size: number
+  /** The font family of code. */
+  code_font: string
+  /** Whether the PDF begins with a cover. */
+  cover: boolean
+  /** One line at the foot of every page but the cover, of at most 200 characters. */
+  footer_text?: string | null
+  /** The size of a chapter's title in points, from 10 to 36. */
+  h1_size: number
+  /** The size of a Page's top headings in points, from 10 to 36. */
+  h2_size: number
+  /** The size of the headings below those in points, from 10 to 36. */
+  h3_size: number
+  /** The colour of headings, as `#rrggbb`. */
+  heading_color: string
+  /** The font family of headings and the cover's title. */
+  heading_font: string
+  id: string
+  /** Whether a PDF is made with this PDF Style when none is chosen. Exactly one is. */
+  is_default: boolean
+  /** The language of the words the PDF shows itself, such as "Contents", and of its date. */
+  language: Language
+  /** Its logo, if it has one. */
+  logo?: PdfStyleLogo | null
+  /** Unique in the Workspace. */
+  name: string
+  /** The colour of body text, as `#rrggbb`. */
+  text_color: string
+  /** Whether the PDF has a table of contents. */
+  toc: boolean
+  /** What the table of contents lists: 1 the chapters, 2 also their `##` Sections, 3 also `###`. */
+  toc_depth: number
+}
+
+export type PdfStyleList = {
+  /** The font families a PDF Style may use. */
+  font_families: string[]
+  /** In order of name. */
+  pdf_styles: PdfStyle[]
+}
+
+export type PdfStyleLogo = {
+  /** The name of the file it came from. */
+  file_name: string
+  /** Where a Workspace Admin's browser shows it, as an image. */
+  url: string
 }
 
 export type Place = {
@@ -462,6 +552,20 @@ export type Tree = {
   /** How many deleted Pages and Folders are in the Trash of the Area, for
 someone with the Write Role, who can see it; None for anyone else. */
   trash?: number | null
+}
+
+export type UploadedFont = {
+  /** The family it belongs to, as read from the file. */
+  family: string
+  /** The name of the uploaded file; absent for a font built into Turtle. */
+  file_name?: string | null
+  /** The uploaded file's ID, to delete it by; absent for a font built into Turtle. */
+  font_id?: string | null
+  italic: boolean
+  /** The style in words, such as "Bold Italic". */
+  style: string
+  /** From 100 (thin) to 900 (black); 400 is regular, 700 bold. */
+  weight: number
 }
 
 export type Version = {
@@ -950,6 +1054,155 @@ of the Page. Needed only when several Sections have this heading. */
       entry_id?: string | null
     }
     output: Export
+  }
+  /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role. */
+  export_pdf: {
+    input: {
+      area_id: string
+      /** The Page or Folder whose Subtree to export; the whole Area if absent. */
+      entry_id?: string | null
+      /** The PDF Style to make it with, as `list_pdf_styles` names it; the default one if absent. */
+      pdf_style_id?: string | null
+      /** Shown on the cover, beneath the title. */
+      subtitle?: string | null
+    }
+    output: PdfExport
+  }
+  /** Lists every PDF Style with its values, marking the default one, and the font families a PDF Style may use. For anyone signed in, to choose one when exporting a PDF. */
+  list_pdf_styles: {
+    input: Record<string, never>
+    output: PdfStyleList
+  }
+  /** Creates a PDF Style. Only for a Workspace Admin. */
+  create_pdf_style: {
+    input: {
+      /** The colour of links, rules, Callout bars and the table of contents' numbers, as `#rrggbb`. */
+      accent_color: string
+      /** The font family of body text, one of those `list_pdf_styles` names. */
+      body_font: string
+      /** The size of body text in points, from 8 to 14. */
+      body_size: number
+      /** The font family of code. */
+      code_font: string
+      /** Whether the PDF begins with a cover. */
+      cover: boolean
+      /** One line at the foot of every page but the cover, of at most 200 characters. */
+      footer_text?: string | null
+      /** The size of a chapter's title in points, from 10 to 36. */
+      h1_size: number
+      /** The size of a Page's top headings in points, from 10 to 36. */
+      h2_size: number
+      /** The size of the headings below those in points, from 10 to 36. */
+      h3_size: number
+      /** The colour of headings, as `#rrggbb`. */
+      heading_color: string
+      /** The font family of headings and the cover's title. */
+      heading_font: string
+      /** The language of the words the PDF shows itself, such as "Contents", and of its date. */
+      language: Language
+      /** Unique in the Workspace. */
+      name: string
+      /** The colour of body text, as `#rrggbb`. */
+      text_color: string
+      /** Whether the PDF has a table of contents. */
+      toc: boolean
+      /** What the table of contents lists: 1 the chapters, 2 also their `##` Sections, 3 also `###`. */
+      toc_depth: number
+    }
+    output: PdfStyle
+  }
+  /** Changes every value of a PDF Style. Only for a Workspace Admin. */
+  update_pdf_style: {
+    input: {
+      /** The colour of links, rules, Callout bars and the table of contents' numbers, as `#rrggbb`. */
+      accent_color: string
+      /** The font family of body text, one of those `list_pdf_styles` names. */
+      body_font: string
+      /** The size of body text in points, from 8 to 14. */
+      body_size: number
+      /** The font family of code. */
+      code_font: string
+      /** Whether the PDF begins with a cover. */
+      cover: boolean
+      /** One line at the foot of every page but the cover, of at most 200 characters. */
+      footer_text?: string | null
+      /** The size of a chapter's title in points, from 10 to 36. */
+      h1_size: number
+      /** The size of a Page's top headings in points, from 10 to 36. */
+      h2_size: number
+      /** The size of the headings below those in points, from 10 to 36. */
+      h3_size: number
+      /** The colour of headings, as `#rrggbb`. */
+      heading_color: string
+      /** The font family of headings and the cover's title. */
+      heading_font: string
+      id: string
+      /** The language of the words the PDF shows itself, such as "Contents", and of its date. */
+      language: Language
+      /** Unique in the Workspace. */
+      name: string
+      /** The colour of body text, as `#rrggbb`. */
+      text_color: string
+      /** Whether the PDF has a table of contents. */
+      toc: boolean
+      /** What the table of contents lists: 1 the chapters, 2 also their `##` Sections, 3 also `###`. */
+      toc_depth: number
+    }
+    output: PdfStyle
+  }
+  /** Makes a PDF Style the default, with which a PDF is made when none is chosen. Only for a Workspace Admin. */
+  set_default_pdf_style: {
+    input: {
+      id: string
+    }
+    output: PdfStyle
+  }
+  /** Deletes a PDF Style. The default one cannot be deleted; make another one the default first. Only for a Workspace Admin. */
+  delete_pdf_style: {
+    input: {
+      id: string
+    }
+    output: null
+  }
+  /** Gives a PDF Style a logo, shown on the cover of a PDF and small in the footer of every page after it, replacing any it had. A PNG, JPEG or SVG of at most 2 MB, its content in base64. Only for a Workspace Admin. */
+  set_pdf_style_logo: {
+    input: {
+      /** The file's content, in base64: a PNG, JPEG or SVG of at most 2 MB. */
+      content: string
+      /** The file's name, such as "logo.svg". Any folders before it are left out. */
+      file_name: string
+      pdf_style_id: string
+    }
+    output: PdfStyle
+  }
+  /** Removes a PDF Style's logo. Only for a Workspace Admin. */
+  remove_pdf_style_logo: {
+    input: {
+      pdf_style_id: string
+    }
+    output: PdfStyle
+  }
+  /** Lists the font families a PDF Style may use, each with its styles: those built into Turtle, marked as such, and those uploaded. For anyone signed in. */
+  list_fonts: {
+    input: Record<string, never>
+    output: FontList
+  }
+  /** Uploads a TTF or OTF font file of at most 10 MB, one style of one family, such as a corporate font's bold. Its family and style are read from the file. A family's regular, bold, italic and bold italic are separate files. Variable fonts, WOFF and WOFF2 are refused, as are a style uploaded already and the families built into Turtle. Only for a Workspace Admin. */
+  upload_font: {
+    input: {
+      /** The TTF or OTF file, in base64. */
+      content: string
+      /** The file's name, such as "Corporate-Bold.ttf". */
+      file_name: string
+    }
+    output: UploadedFont
+  }
+  /** Deletes an uploaded font file. The last file of a family a PDF Style uses cannot be deleted. Only for a Workspace Admin. */
+  delete_font: {
+    input: {
+      font_id: string
+    }
+    output: null
   }
   /** Gets the current titles of the given Pages, as Page links show them. A Page the caller cannot read, or that is in the Trash, is left out, so its link shows no title. */
   get_page_titles: {

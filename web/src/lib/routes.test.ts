@@ -100,6 +100,11 @@ test('the Agents screen has its own address under settings', () => {
   expect(parseAddress('/settings/agents')).toEqual({ screen: 'agents' })
 })
 
+test('the PDF Styles screen has its own address under settings', () => {
+  expect(parseAddress('/settings/pdf-styles')).toEqual({ screen: 'pdf-styles' })
+  expect(inShell({ screen: 'pdf-styles' })).toBe(true)
+})
+
 test('the Connect AI page has its own address', () => {
   expect(parseAddress('/settings/connect-ai')).toEqual({ screen: 'connect-ai' })
   expect(parseAddress('/connect-ai')).toEqual({ screen: 'not-found' })

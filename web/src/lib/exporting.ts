@@ -1,6 +1,6 @@
 /*
- * Exporting an Area or a Subtree: the operation returns the ZIP in base64,
- * which is saved here as a download.
+ * Exporting an Area or a Subtree: the operations return the ZIP of Markdown
+ * or the PDF in base64, which is saved here as a download.
  */
 import { call, type Input } from './ops'
 import { reportFailure } from './toasts'
@@ -16,11 +16,23 @@ export async function exportToFile(
 ) {
   try {
     const { file_name, content } = await call('export', input)
-    const bytes = Uint8Array.from(atob(content), c => c.charCodeAt(0))
-    save(file_name, new Blob([bytes], { type: 'application/zip' }))
+    save(file_name, fileOf(content, 'application/zip'))
   } catch (caught) {
     reportFailure(caught, `${title} could not be exported. Try again.`)
   }
+}
+
+/**
+ * Exports an Area, or the Subtree of an Entry in it, as a PDF and saves it.
+ * A failure is thrown, for the dialog that asked to show.
+ */
+export async function exportPdfToFile(input: Input<'export_pdf'>, save: (name: string, file: Blob) => void = download) {
+  const { file_name, content } = await call('export_pdf', input)
+  save(file_name, fileOf(content, 'application/pdf'))
+}
+
+function fileOf(base64: string, type: string) {
+  return new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type })
 }
 
 /** Hands a file to the browser to save, as a link to it would. */

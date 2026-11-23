@@ -10,7 +10,9 @@
   import Grants from '../components/Grants.svelte'
   import Icon from '../components/Icon.svelte'
   import NameDialog from '../components/NameDialog.svelte'
+  import PdfExportDialog from '../components/PdfExportDialog.svelte'
   import { toast } from 'svelte-sonner'
+  import { menuKeys, openMenu } from '../lib/menu'
   import { entryMenuItems } from '../lib/entryMenu'
   import { navigation } from '../lib/navigation.svelte'
   import { call, OperationError } from '../lib/ops'
@@ -84,6 +86,8 @@
   })
 
   let renameDialog = $state<NameDialog>()
+  let pdfDialog = $state<PdfExportDialog>()
+  let exportMenu = $state() as HTMLDivElement
   let firstPageDialog = $state<NameDialog>()
   let menu = $state<EntryMenu>()
   /** The Entry whose menu is open, so its row stays marked. */
@@ -164,7 +168,29 @@
       <div class="head">
         <h1>{area.name}</h1>
         <div class="actions">
-          <button type="button" class="btn" onclick={() => area && exportToFile({ area_id: id }, area.name)}>Export</button>
+          <div class="split">
+            <button type="button" class="btn" onclick={() => area && pdfDialog?.open(id, undefined, area.name)}>Export as PDF</button>
+            <button
+              type="button"
+              class="btn more"
+              aria-label="More ways to export"
+              aria-haspopup="menu"
+              onclick={event => openMenu(exportMenu, event.currentTarget)}
+            >
+              <Icon name="chevron" size={14} />
+            </button>
+          </div>
+          <div class="menu" role="menu" tabindex="-1" aria-label="More ways to export" popover bind:this={exportMenu} onkeydown={menuKeys}>
+            <button
+              type="button"
+              class="menu-item"
+              role="menuitem"
+              onclick={() => {
+                exportMenu.hidePopover()
+                if (area) void exportToFile({ area_id: id }, area.name)
+              }}>Export as Markdown</button
+            >
+          </div>
           {#if area.role === 'admin' && !area.personal}
             <button type="button" class="btn" onclick={() => renameDialog?.open(area?.name)}>Rename</button>
             <button type="button" class="btn" onclick={deleteArea}>Delete</button>
@@ -218,6 +244,7 @@
   </main>
 
   <EntryMenu bind:this={menu} onclose={() => (menuFor = null)} />
+  <PdfExportDialog bind:this={pdfDialog} />
   <NameDialog bind:this={renameDialog} label="Name of the Area" action="Rename" onsubmit={rename} />
   <NameDialog bind:this={firstPageDialog} label="Title of the first Page" action="Create Page" onsubmit={createFirstPage} />
 {/if}
@@ -239,6 +266,34 @@
   .actions {
     display: flex;
     gap: var(--space-2);
+  }
+
+  /* The main way to export, and an arrow for the others, as one button. */
+  .split {
+    display: flex;
+  }
+
+  .split .btn:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .split .more {
+    margin-left: calc(-1 * var(--line));
+    padding-inline: var(--space-2);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+
+  .split .more :global(svg) {
+    transform: rotate(90deg);
+  }
+
+  .menu {
+    position: fixed;
+    inset: auto;
+    z-index: var(--layer-menu);
+    min-width: var(--width-menu-s);
   }
 
   h1 {
