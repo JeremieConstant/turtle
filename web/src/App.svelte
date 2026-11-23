@@ -11,6 +11,7 @@
   import { session } from './lib/session.svelte'
   import { ui } from './lib/ui.svelte'
   import AgentsScreen from './screens/AgentsScreen.svelte'
+  import AllConnectedAppsScreen from './screens/AllConnectedAppsScreen.svelte'
   import ConnectedAppsScreen from './screens/ConnectedAppsScreen.svelte'
   import AreaScreen from './screens/AreaScreen.svelte'
   import AuthorizeScreen from './screens/AuthorizeScreen.svelte'
@@ -177,6 +178,8 @@
         <MembersScreen />
       {:else if route.screen === 'connected-apps'}
         <ConnectedAppsScreen />
+      {:else if route.screen === 'all-connected-apps'}
+        <AllConnectedAppsScreen />
       {:else if route.screen === 'agents'}
         <AgentsScreen />
       {:else if route.screen === 'deleted-areas'}

@@ -210,6 +210,16 @@ export type MemberList = {
   members: MemberEntry[]
 }
 
+export type MembersToken = {
+  member: TokenOwner
+  token: TokenSummary
+}
+
+export type MembersTokenList = {
+  /** By Member name, then newest first. */
+  tokens: MembersToken[]
+}
+
 export type MovedEntry = {
   /** The Area it is in now. */
   area: Area
@@ -366,6 +376,11 @@ export type TokenArea = {
 export type TokenList = {
   /** Newest first. */
   tokens: TokenSummary[]
+}
+
+export type TokenOwner = {
+  id: string
+  name: string
 }
 
 export type TokenSummary = {
@@ -940,12 +955,20 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: TokenList
   }
-  /** Revokes one of the caller's Tokens, or of a standalone Agent's for a Workspace Admin; it stops working at once, and so does everything a connected app was given for it. */
+  /** Lists the Tokens of every active Member, those of apps they connected among them, with whose each is and when it was last used, for a Workspace Admin. */
+  list_members_tokens: {
+    input: Record<string, never>
+    output: MembersTokenList
+  }
+  /** Revokes one of the caller's Tokens, or, for a Workspace Admin, one of another Member's or of a standalone Agent's; it stops working at once, and so does everything a connected app was given for it. */
   revoke_token: {
     input: {
       /** The standalone Agent the Token is for; the caller's own if absent. */
       agent_id?: string | null
       id: string
+      /** The Member whose Token it is, for a Workspace Admin revoking another
+Member's; the caller's own if absent. */
+      member_id?: string | null
     }
     output: null
   }

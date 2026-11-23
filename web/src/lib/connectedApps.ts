@@ -1,4 +1,18 @@
-import type { TokenSummary } from './operations.gen'
+import type { MembersToken, TokenOwner, TokenSummary } from './operations.gen'
+
+/** One Member's apps and Tokens, as a Workspace Admin sees them. */
+export type MembersApps = { member: TokenOwner; apps: TokenSummary[] }
+
+/** Every Member's apps and Tokens, under the Member, keeping the order they came in. */
+export function byMember(entries: MembersToken[]): MembersApps[] {
+  const grouped: MembersApps[] = []
+  for (const { member, token } of entries) {
+    const last = grouped.at(-1)
+    if (last?.member.id === member.id) last.apps.push(token)
+    else grouped.push({ member, apps: [token] })
+  }
+  return grouped
+}
 
 /** A moment in seconds since the Unix epoch, as the reader's locale writes it. */
 export function when(seconds: number): string {

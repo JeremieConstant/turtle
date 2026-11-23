@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { access } from './connectedApps'
+import { access, byMember } from './connectedApps'
 import type { TokenSummary } from './operations.gen'
 
 const NOW = 1_700_000_000
@@ -24,4 +24,26 @@ test('a Token limited to Areas the Member can no longer read says so', () => {
 test('a Token with an expiry says until when it works, or that it expired', () => {
   expect(access(entry({ expires_at: NOW + 3600 }), NOW)).toMatch(/^Read and write · All your Areas · Until /)
   expect(access(entry({ expires_at: NOW - 1 }), NOW)).toMatch(/^Read and write · All your Areas · Expired /)
+})
+
+test("a Member's app reaching every Area reaches all of the Member's, as a Workspace Admin reads it", () => {
+  expect(access(entry({}), NOW, 'All their Areas')).toBe('Read and write · All their Areas')
+})
+
+test("every Member's apps are grouped under the Member, in the order given", () => {
+  const grace = { id: 'member-grace', name: 'Grace' }
+  const ken = { id: 'member-ken', name: 'Ken' }
+  const phone = entry({ id: 'p', name: 'Phone' })
+  const laptop = entry({ id: 'l', name: 'Laptop' })
+  const backup = entry({ id: 'b', name: 'Backup' })
+  const grouped = byMember([
+    { member: grace, token: phone },
+    { member: grace, token: laptop },
+    { member: ken, token: backup },
+  ])
+  expect(grouped).toEqual([
+    { member: grace, apps: [phone, laptop] },
+    { member: ken, apps: [backup] },
+  ])
+  expect(byMember([])).toEqual([])
 })

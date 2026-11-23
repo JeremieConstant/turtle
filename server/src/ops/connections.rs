@@ -745,7 +745,7 @@ mod tests {
         let seen: Vec<_> = listed.iter().map(|token| (token.name.as_str(), token.connected, token.read_only, token.last_used_at)).collect();
         assert_eq!(seen, [("Claude", true, false, Some(1_700_000_060)), ("Backup script", false, true, None)]);
 
-        revoke_token(&core, &ada, TokenId { id: listed[0].id.clone(), agent_id: None }).unwrap();
+        revoke_token(&core, &ada, TokenId { id: listed[0].id.clone(), agent_id: None, member_id: None }).unwrap();
         assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
         assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
         let names: Vec<_> = list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens.into_iter().map(|t| t.name).collect();
@@ -895,12 +895,37 @@ mod tests {
         let admin = member(&core, "Grace", true);
         let ada = member(&core, "Ada", false);
         let client = claude(&core);
-        let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
-        let code = parameter(&redirect, "code").unwrap();
-        let issued = exchange_code(&core, exchange(&client, &code, VERIFIER)).unwrap();
+        let first = connected(&core, &ada, &client);
+        // A refreshed connection holds a fresh pair; neither outlives Ada's leaving.
+        let issued = refresh_connection(&core, refresh(&client, &first.refresh_token)).unwrap();
 
         super::super::members::deactivate_member(&core, &admin, super::super::members::MemberId { id: "member-ada".into() }).unwrap();
         assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+    }
+
+    #[test]
+    fn a_workspace_admin_sees_and_disconnects_another_members_connection_at_once() {
+        use super::super::tokens::{list_members_tokens, revoke_token, TokenId};
+        let core = offering_oauth();
+        let admin = member(&core, "Grace", true);
+        let ada = member(&core, "Ada", false);
+        let ken = member(&core, "Ken", false);
+        let client = claude(&core);
+        let issued = connected(&core, &ada, &client);
+
+        let listed = list_members_tokens(&core, &admin, Nothing {}).unwrap().output.tokens;
+        let seen: Vec<_> = listed.iter().map(|entry| (entry.member.name.as_str(), entry.token.name.as_str(), entry.token.connected)).collect();
+        assert_eq!(seen, [("Ada", "Claude", true)]);
+        let disconnect = || TokenId { id: listed[0].token.id.clone(), agent_id: None, member_id: Some("member-ada".into()) };
+
+        assert_eq!(list_members_tokens(&core, &ken, Nothing {}).unwrap_err().kind(), "not_permitted");
+        assert_eq!(revoke_token(&core, &ken, disconnect()).unwrap_err().kind(), "not_permitted");
+        assert!(principal_for_token(&core, &issued.access_token).unwrap().is_some());
+
+        revoke_token(&core, &admin, disconnect()).unwrap();
+        assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
     }
 
     #[test]

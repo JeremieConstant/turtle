@@ -14,6 +14,8 @@ export type Route =
   | { screen: 'connect-ai' }
   /** Everything that can act as the signed-in Member: connected apps and Tokens made by hand. */
   | { screen: 'connected-apps' }
+  /** Every Member's connected apps and Tokens, for a Workspace Admin to see and disconnect. */
+  | { screen: 'all-connected-apps' }
   | { screen: 'agents' }
   /** The deleted Areas, for a Workspace Admin to restore. */
   | { screen: 'deleted-areas' }
@@ -35,6 +37,7 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/connect-ai') return { screen: 'connect-ai' }
   if (pathname === '/settings/members') return { screen: 'members' }
   if (pathname === '/settings/connected-apps') return { screen: 'connected-apps' }
+  if (pathname === '/settings/all-connected-apps') return { screen: 'all-connected-apps' }
   if (pathname === '/settings/agents') return { screen: 'agents' }
   if (pathname === '/settings/deleted-areas') return { screen: 'deleted-areas' }
   const link = pathname.match(/^\/(join|reset-password)\/([^/]+)$/)

@@ -88,6 +88,10 @@ test('Connected apps has its own address under settings', () => {
   expect(parseAddress('/settings/connected-apps')).toEqual({ screen: 'connected-apps' })
 })
 
+test("every Member's connected apps, for a Workspace Admin, have their own address under settings", () => {
+  expect(parseAddress('/settings/all-connected-apps')).toEqual({ screen: 'all-connected-apps' })
+})
+
 test('the Tokens screen is gone, and its old address leads nowhere', () => {
   expect(parseAddress('/settings/tokens')).toEqual({ screen: 'not-found' })
 })
@@ -101,7 +105,7 @@ test('the Connect AI page has its own address', () => {
 })
 
 test('the screens of a signed-in person sit in the shell', () => {
-  for (const address of ['/', '/connect-ai', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/connected-apps', '/settings/agents', '/nowhere']) {
+  for (const address of ['/', '/connect-ai', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/connected-apps', '/settings/all-connected-apps', '/settings/agents', '/nowhere']) {
     expect(inShell(parseAddress(address)), address).toBe(true)
   }
 })
