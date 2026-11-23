@@ -372,7 +372,8 @@ pub(crate) fn author_of(core: &Core, principal: &Principal) -> Result<crate::liv
 /// Member who owns it, or the standalone Agent it is for. The value is the
 /// Token's own, or an access token of a connection an app was allowed
 /// (`connections`), which works for an hour. An unknown, expired or revoked
-/// Token, or one whose owner was deactivated, is nobody. A use is
+/// Token, or one whose owner was deactivated, is nobody, and so is a
+/// connection while a Workspace Admin has turned connecting AI off. A use is
 /// remembered as the Token's last, to the minute.
 pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>, OpError> {
     if !value.starts_with(VALUE_PREFIX) {
@@ -392,7 +393,8 @@ pub fn principal_for_token(core: &Core, value: &str) -> Result<Option<Principal>
                      SELECT token_id FROM access_tokens WHERE digest = ?1 AND expires_at > ?2
                  )
                AND (tokens.expires_at IS NULL OR tokens.expires_at > ?2)
-               AND (members.id IS NOT NULL OR agents.id IS NOT NULL)",
+               AND (members.id IS NOT NULL OR agents.id IS NOT NULL)
+               AND (tokens.client_id IS NULL OR (SELECT connecting_ai FROM workspace_settings))",
             rusqlite::params![digest(value), now],
             |row| {
                 Ok((

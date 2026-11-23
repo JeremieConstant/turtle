@@ -397,3 +397,52 @@ async fn a_member_lowers_a_client_asking_to_read_and_write_to_reading() {
     assert!(!tool_fails(&server, access_token, "get_page", json!({ "id": page })).await);
     assert!(tool_fails(&server, access_token, "replace_page", json!({ "page_id": page, "markdown": "Written by Claude." })).await);
 }
+
+#[tokio::test]
+async fn a_workspace_admin_turns_connecting_ai_off_and_on_again() {
+    let server = TestServer::start_with_public_url(PUBLIC_URL).await;
+    let ada = server.sign_up().await;
+    let ken = server.invite(&ada, "Ken").await;
+    let client_id = register(&server, "Claude").await;
+    let authorize = get(&server, &format!("/oauth/authorize?{}", authorization_query(&client_id))).await;
+    let consent = authorize.header("location").unwrap().to_string();
+    let allowed = ken.call("answer_connection_request", answer_from(&consent, true)).await;
+    let code = parameter(allowed["redirect_to"].as_str().unwrap(), "code").unwrap();
+    let issued = json_of(&exchange(&server, &client_id, &code, Some(VERIFIER)).await);
+    let access_token = issued["access_token"].as_str().unwrap();
+    let refresh_token = issued["refresh_token"].as_str().unwrap();
+    let by_hand = ken.call("create_token", json!({ "name": "Backup script" })).await;
+    let by_hand = by_hand["value"].as_str().unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+
+    let (status, _) = ken.try_call("set_connecting_ai", json!({ "on": false })).await;
+    assert_eq!(status, 403);
+    ada.call("set_connecting_ai", json!({ "on": false })).await;
+    assert_eq!(ken.call("describe_connecting", json!({})).await["turned_off"], true);
+
+    let register = http::request(
+        server.addr(),
+        "POST",
+        "/oauth/register",
+        &[("Content-Type", "application/json")],
+        &json!({ "redirect_uris": [CALLBACK] }).to_string(),
+    )
+    .await;
+    assert_eq!(register.status, 403, "{}", register.body);
+    assert_eq!(json_of(&register)["error"], "access_denied");
+    let authorize = get(&server, &format!("/oauth/authorize?{}", authorization_query(&client_id))).await;
+    assert_eq!(authorize.status, 403, "{}", authorize.body);
+    assert!(authorize.body.contains("turned off connecting AI"), "{}", authorize.body);
+    let (status, _) = ken.try_call("describe_connection_request", json!({ "client_id": client_id, "redirect_uri": CALLBACK })).await;
+    assert_eq!(status, 403);
+    assert_eq!(mcp(&server, Some(access_token), list.clone()).await.status, 401);
+    let refused = refresh(&server, &client_id, refresh_token).await;
+    assert_eq!(refused.status, 400);
+    assert_eq!(json_of(&refused)["error"], "unauthorized_client");
+    // Tokens made by hand serve scripts as well as AI, so they keep working.
+    assert_eq!(mcp(&server, Some(by_hand), list.clone()).await.status, 200);
+
+    ada.call("set_connecting_ai", json!({ "on": true })).await;
+    assert_eq!(mcp(&server, Some(access_token), list).await.status, 200);
+    assert_eq!(refresh(&server, &client_id, refresh_token).await.status, 200);
+}

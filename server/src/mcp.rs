@@ -214,7 +214,7 @@ mod tests {
     /// The operations that only make sense in a browser, so they have no MCP
     /// tool. Written out on purpose: an operation gets onto this list by a
     /// deliberate change here, never by accident.
-    const BROWSER_ONLY: [&str; 12] = [
+    const BROWSER_ONLY: [&str; 13] = [
         "create_first_account",
         "sign_in",
         "sign_out",
@@ -225,6 +225,7 @@ mod tests {
         "list_members_tokens",
         "revoke_token",
         "describe_connecting",
+        "set_connecting_ai",
         "describe_connection_request",
         "answer_connection_request",
     ];

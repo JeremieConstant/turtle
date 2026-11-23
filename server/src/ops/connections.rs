@@ -38,6 +38,13 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     }
     catalogue
         .add(
+            "set_connecting_ai",
+            "Turns connecting AI on or off for the whole Workspace. While it is off, apps cannot register or be allowed, and connected apps cannot act; Tokens made by hand keep working. Only a Workspace Admin may.",
+            set_connecting_ai,
+        )
+        .browser_only = true;
+    catalogue
+        .add(
             "answer_connection_request",
             "Allows an app to act as the caller, or denies it, and returns the address to send the browser back to the app with the answer.",
             answer_connection_request,
@@ -94,6 +101,7 @@ pub struct Client {
 /// sends the answer.
 pub fn register_client(core: &Core, input: NewClient) -> Result<Client, OpError> {
     require_oauth(core)?;
+    require_connecting_ai(core)?;
     if input.redirect_uris.is_empty() {
         return Err(OpError::InvalidInput("Register at least one redirect address.".into()));
     }
@@ -163,6 +171,7 @@ fn redirect_domain(uri: &str) -> &str {
 /// of its own. Without a redirect address, its only one is meant.
 pub fn requesting_client(core: &Core, client_id: &str, redirect_uri: Option<&str>) -> Result<(Client, String), OpError> {
     require_oauth(core)?;
+    require_connecting_ai(core)?;
     let invalid = || OpError::NotFound("This connection request is not valid. Start connecting again from the app.".into());
     let client = client(&core.db(), client_id)?.ok_or_else(invalid)?;
     let redirect_uri = match redirect_uri {
@@ -215,6 +224,9 @@ pub struct Connecting {
     /// its public address, since an AI client could not sign in through
     /// OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it.
     pub mcp_address: Option<String>,
+    /// Whether a Workspace Admin has turned connecting AI off. While it is,
+    /// no app can connect and connected apps cannot act.
+    pub turned_off: bool,
     /// Whether Turtle looks reachable only from inside its network, judged
     /// from its public address alone, so that claude.ai, which reaches an
     /// AI client's connector from the internet, probably cannot reach it.
@@ -226,7 +238,40 @@ pub fn describe_connecting(core: &Core, principal: &Principal, _: Nothing) -> Op
     // Whoever may allow an app may learn how to connect one.
     deciding_member(principal)?;
     let mcp_address = core.public_url().map(|base| format!("{base}/mcp"));
-    Ok(Connecting { mcp_address, intranet_only: core.looks_intranet_only() }.into())
+    let turned_off = !connecting_ai_on(&core.db())?;
+    Ok(Connecting { mcp_address, turned_off, intranet_only: core.looks_intranet_only() }.into())
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConnectingAiSwitch {
+    /// Whether AI clients may connect and connected apps may act.
+    pub on: bool,
+}
+
+pub fn set_connecting_ai(core: &Core, principal: &Principal, input: ConnectingAiSwitch) -> OpResult<()> {
+    super::require_workspace_admin(principal, "Only a Workspace Admin can turn connecting AI on or off.")?;
+    core.db().execute("UPDATE workspace_settings SET connecting_ai = ?1", [input.on])?;
+    // Open editors of connected apps recheck whether they may go on.
+    core.access_changed();
+    Ok(().into())
+}
+
+/// What a client or Member is told while connecting AI is off.
+pub const TURNED_OFF: &str = "A Workspace Admin has turned off connecting AI to this Turtle.";
+
+/// Whether connecting AI is on for the Workspace. While it is off, the
+/// connections are kept but `tokens::principal_for_token` does not let them
+/// act.
+fn connecting_ai_on(db: &Connection) -> rusqlite::Result<bool> {
+    db.query_row("SELECT connecting_ai FROM workspace_settings", [], |row| row.get(0))
+}
+
+fn require_connecting_ai(core: &Core) -> Result<(), OpError> {
+    if connecting_ai_on(&core.db())? {
+        Ok(())
+    } else {
+        Err(OpError::NotPermitted(TURNED_OFF.into()))
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -432,6 +477,9 @@ pub enum GrantRefusal {
     /// client, the code for another redirect address, or the code verifier
     /// does not match it.
     InvalidGrant,
+    /// A Workspace Admin has turned connecting AI off. Nothing was used up,
+    /// so the same request works once it is on again.
+    TurnedOff,
     Failed(OpError),
 }
 
@@ -455,6 +503,9 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
     require_oauth(core)?;
     let now = core.now();
     let mut db = core.db();
+    if !connecting_ai_on(&db)? {
+        return Err(GrantRefusal::TurnedOff);
+    }
     let transaction = db.transaction()?;
     // Its Areas go with the code, so they are read first.
     let area_ids: Vec<String> = transaction
@@ -538,6 +589,9 @@ pub fn refresh_connection(core: &Core, input: RefreshExchange) -> Result<IssuedA
     require_oauth(core)?;
     let now = core.now();
     let mut db = core.db();
+    if !connecting_ai_on(&db)? {
+        return Err(GrantRefusal::TurnedOff);
+    }
     let transaction = db.transaction()?;
     end_idle_connections(&transaction, now)?;
     let found = transaction
@@ -1146,6 +1200,73 @@ mod tests {
         let ada = member(&unknown, "Ada", false);
         assert_eq!(describe_connecting(&unknown, &ada, Nothing {}).unwrap().output.mcp_address, None);
         assert_eq!(describe_connecting(&unknown, &Principal::Anonymous, Nothing {}).unwrap_err().kind(), "not_permitted");
+    }
+
+    fn turn(on: bool) -> ConnectingAiSwitch {
+        ConnectingAiSwitch { on }
+    }
+
+    #[test]
+    fn a_workspace_admin_turns_connecting_ai_off_and_on_and_nobody_else_can() {
+        let core = offering_oauth();
+        let grace = member(&core, "Grace", true);
+        let ada = member(&core, "Ada", false);
+        assert!(!describe_connecting(&core, &ada, Nothing {}).unwrap().output.turned_off);
+
+        assert_eq!(set_connecting_ai(&core, &ada, turn(false)).unwrap_err().kind(), "not_permitted");
+        set_connecting_ai(&core, &grace, turn(false)).unwrap();
+        let connecting = describe_connecting(&core, &ada, Nothing {}).unwrap().output;
+        assert!(connecting.turned_off);
+        // The address stays known; it is just of no use while it is off.
+        assert_eq!(connecting.mcp_address.as_deref(), Some("https://turtle.example.org/mcp"));
+
+        assert_eq!(set_connecting_ai(&core, &ada, turn(true)).unwrap_err().kind(), "not_permitted");
+        set_connecting_ai(&core, &grace, turn(true)).unwrap();
+        assert!(!describe_connecting(&core, &ada, Nothing {}).unwrap().output.turned_off);
+    }
+
+    #[test]
+    fn while_connecting_ai_is_off_connected_apps_cannot_act_but_tokens_made_by_hand_can() {
+        let core = offering_oauth();
+        let grace = member(&core, "Grace", true);
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let issued = connected(&core, &ada, &client);
+        let by_hand = super::super::tokens::NewToken { name: "Backup script".into(), read_only: false, area_ids: None, expires_at: None, agent_id: None };
+        let by_hand = super::super::tokens::create_token(&core, &ada, by_hand).unwrap().output.value;
+
+        set_connecting_ai(&core, &grace, turn(false)).unwrap();
+        assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::TurnedOff)));
+        assert!(principal_for_token(&core, &by_hand).unwrap().is_some());
+
+        // On again, the connection works as before: its access token, which
+        // has not expired, and its refresh token, which was not used up.
+        set_connecting_ai(&core, &grace, turn(true)).unwrap();
+        assert!(principal_for_token(&core, &issued.access_token).unwrap().is_some());
+        assert!(refresh_connection(&core, refresh(&client, &issued.refresh_token)).is_ok());
+    }
+
+    #[test]
+    fn while_connecting_ai_is_off_no_app_registers_or_is_allowed() {
+        let core = offering_oauth();
+        let grace = member(&core, "Grace", true);
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+
+        set_connecting_ai(&core, &grace, turn(false)).unwrap();
+        let registered = register_client(&core, NewClient { redirect_uris: vec![CALLBACK.into()], client_name: None });
+        assert_eq!(registered.unwrap_err().kind(), "not_permitted");
+        let request = RequestedConnection { client_id: client.id.clone(), redirect_uri: Some(CALLBACK.into()), scope: None };
+        assert_eq!(describe_connection_request(&core, &ada, request).unwrap_err().kind(), "not_permitted");
+        assert_eq!(answer_connection_request(&core, &ada, answer(&client, true)).unwrap_err().kind(), "not_permitted");
+        assert_eq!(requesting_client(&core, &client.id, Some(CALLBACK)).unwrap_err().kind(), "not_permitted");
+        assert!(matches!(exchange_code(&core, exchange(&client, &code, VERIFIER)), Err(GrantRefusal::TurnedOff)));
+
+        set_connecting_ai(&core, &grace, turn(true)).unwrap();
+        assert!(exchange_code(&core, exchange(&client, &code, VERIFIER)).is_ok());
     }
 
     #[test]

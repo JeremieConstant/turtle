@@ -10,7 +10,7 @@
 //! of its own, which carries the session cookie even though the browser came
 //! from the client's site, where a `SameSite=Strict` cookie stays behind.
 
-use crate::ops::connections::{self, with_query, CodeExchange, GrantRefusal, NewClient, RefreshExchange};
+use crate::ops::connections::{self, with_query, CodeExchange, GrantRefusal, NewClient, RefreshExchange, TURNED_OFF};
 use crate::ops::{Core, OpError};
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, Query, State};
@@ -166,6 +166,7 @@ async fn register(State(core): State<Arc<Core>>, body: String) -> Response {
             })),
         )),
         Ok(Err(OpError::InvalidInput(message))) => oauth_error(StatusCode::BAD_REQUEST, "invalid_redirect_uri", &message),
+        Ok(Err(OpError::NotPermitted(message))) => oauth_error(StatusCode::FORBIDDEN, "access_denied", &message),
         Ok(Err(error)) => server_error(error),
         Err(error) => server_error(OpError::Internal(error.into())),
     }
@@ -186,6 +187,7 @@ async fn authorize(State(core): State<Arc<Core>>, Query(query): Query<HashMap<St
     let redirect_uri = match checked {
         Ok(Ok((_, redirect_uri))) => redirect_uri,
         Ok(Err(OpError::NotFound(message))) => return (StatusCode::BAD_REQUEST, message).into_response(),
+        Ok(Err(OpError::NotPermitted(message))) => return (StatusCode::FORBIDDEN, message).into_response(),
         Ok(Err(error)) => return server_error(error),
         Err(error) => return server_error(OpError::Internal(error.into())),
     };
@@ -261,6 +263,8 @@ async fn token(State(core): State<Arc<Core>>, form: Result<Form<HashMap<String, 
             "invalid_grant",
             "The code or refresh token is unknown, used or expired, or the code_verifier does not match the code. Connect again.",
         ),
+        // Not invalid_grant: the grant is still good once it is on again.
+        Ok(Err(GrantRefusal::TurnedOff)) => oauth_error(StatusCode::BAD_REQUEST, "unauthorized_client", TURNED_OFF),
         Ok(Err(GrantRefusal::Failed(error))) => server_error(error),
         Err(error) => server_error(OpError::Internal(error.into())),
     }

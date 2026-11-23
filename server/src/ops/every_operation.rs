@@ -105,6 +105,7 @@ fn table() -> Vec<Row> {
         ("revoke_token", |_| json!({"id": "made-up"}), [HIDDEN; 5]),
         ("list_members_tokens", |_| json!({}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("describe_connecting", |_| json!({}), [OK; 5]),
+        ("set_connecting_ai", |_| json!({"on": true}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         // This Turtle offers no OAuth, so no connection request exists.
         ("describe_connection_request", |_| json!({"client_id": "made-up"}), [HIDDEN; 5]),
         ("answer_connection_request", |_| json!({"client_id": "made-up", "allow": true}), [HIDDEN; 5]),

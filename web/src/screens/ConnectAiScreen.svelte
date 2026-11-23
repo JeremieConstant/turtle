@@ -1,8 +1,9 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { toast } from 'svelte-sonner'
+  import { ask } from '../lib/confirm.svelte'
   import type { Connecting } from '../lib/operations.gen'
-  import { call } from '../lib/ops'
+  import { call, OperationError } from '../lib/ops'
   import { router } from '../lib/router.svelte'
   import { session } from '../lib/session.svelte'
 
@@ -15,6 +16,33 @@
   call('describe_connecting', {})
     .then(found => (connecting = found))
     .catch(() => (failed = true))
+
+  let switching = $state(false)
+  let switchError = $state<string | null>(null)
+
+  /** Turns connecting AI on or off for the whole Workspace, as a Workspace Admin. */
+  async function setConnectingAi(on: boolean) {
+    if (!on) {
+      const sure = await ask({
+        title: 'Turn off connecting AI?',
+        message:
+          'No AI client can connect to Turtle, and connected apps stop working for everyone until it is on again. Tokens made by hand keep working.',
+        action: 'Turn off',
+        destructive: true,
+      })
+      if (!sure) return
+    }
+    switching = true
+    switchError = null
+    try {
+      await call('set_connecting_ai', { on })
+      connecting = await call('describe_connecting', {})
+    } catch (caught) {
+      switchError = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'
+    } finally {
+      switching = false
+    }
+  }
 
   const CLIENTS = [
     { id: 'claude', label: 'Claude' },
@@ -75,6 +103,16 @@
   <!-- Notices about connecting, such as why it may not work from here, go first, above the steps. -->
   {#if failed}
     <p class="error" role="alert">How to connect could not be loaded. Reload the page to try again.</p>
+  {:else if connecting?.turned_off}
+    <section class="notice">
+      <strong>A Workspace Admin has turned off connecting AI</strong>
+      <p>No AI client can connect to Turtle for now, and apps already connected do not work until it is turned on again.</p>
+      {#if session.member?.workspace_admin}
+        <p>Turn it on again below when you are ready.</p>
+      {:else}
+        <p>Ask a Workspace Admin if you need it.</p>
+      {/if}
+    </section>
   {:else if connecting && !connecting.mcp_address}
     <section class="notice">
       <strong>Connecting an AI client is not available yet</strong>
@@ -89,7 +127,8 @@
     </section>
   {/if}
 
-  {#if connecting?.intranet_only}
+  <!-- While connecting AI is off, nothing else about connecting applies. -->
+  {#if connecting?.intranet_only && !connecting.turned_off}
     <section class="notice">
       <strong>claude.ai probably cannot reach this Turtle</strong>
       <p>
@@ -108,7 +147,7 @@
     </section>
   {/if}
 
-  {#if connecting?.mcp_address}
+  {#if connecting?.mcp_address && !connecting.turned_off}
     {@const address = connecting.mcp_address}
     <section class="section">
       <div class="field">
@@ -177,6 +216,29 @@
           </p>
         {/if}
       </div>
+    </section>
+  {/if}
+
+  {#if connecting && session.member?.workspace_admin}
+    <section class="section stack">
+      <h2 class="section-title">For Workspace Admins</h2>
+      {#if connecting.turned_off}
+        <p class="muted">Connecting AI is off for the whole Workspace. Turned on again, connected apps work as before.</p>
+        <div class="controls">
+          <button type="button" class="btn primary" disabled={switching} onclick={() => setConnectingAi(true)}>Turn on connecting AI</button>
+        </div>
+      {:else}
+        <p class="muted">
+          You can turn connecting AI off for the whole Workspace, for example while a policy is being decided. Connected apps stop working
+          until it is on again; Tokens made by hand keep working.
+        </p>
+        <div class="controls">
+          <button type="button" class="btn" disabled={switching} onclick={() => setConnectingAi(false)}>Turn off connecting AI</button>
+        </div>
+      {/if}
+      {#if switchError}
+        <p class="error" role="alert">{switchError}</p>
+      {/if}
     </section>
   {/if}
 </main>
