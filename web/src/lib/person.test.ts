@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { currentPerson, personColor } from './person'
+import { currentPerson, personColor, presenceLabel } from './person'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -44,4 +44,12 @@ test('anything else that arrives from another browser is shown in a quiet colour
   expect(personColor({ colorNumber: 0 })).toBe('var(--color-muted)')
   expect(personColor({ colorNumber: '2); background: url(x)' })).toBe('var(--color-muted)')
   expect(personColor({})).toBe('var(--color-muted)')
+})
+
+test('an app acting for a Member is named the way its changes are credited', () => {
+  expect(presenceLabel({ name: 'Claude', agent: true, member: 'Ada' })).toBe('Ada via Claude')
+})
+
+test('a standalone Agent is recognisable as one', () => {
+  expect(presenceLabel({ name: 'Release notes writer', agent: true })).toBe('Release notes writer (Agent)')
 })

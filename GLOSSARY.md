@@ -100,6 +100,10 @@ _Avoid_: Personal agent, delegate
 A credential that lets an Agent act, either as the Member who owns it or as a standalone Agent, and never with more access than its owner has.
 _Avoid_: API key, secret, access key
 
+**Connected app**:
+An Agent acting for a Member as the Member sees it on their Connected apps page, named after its Token: an app they allowed by connecting it through OAuth, or a script or client they gave a Token by hand. Disconnecting it revokes the Token.
+_Avoid_: Integration, authorized application
+
 ### Permissions
 
 **Grant**:

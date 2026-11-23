@@ -79,8 +79,9 @@ test('the settings screens, Grants, Versions and the account screens keep no sty
   const shared = [
     'screens/MembersScreen.svelte',
     'screens/AgentsScreen.svelte',
-    'screens/TokensScreen.svelte',
+    'screens/ConnectedAppsScreen.svelte',
     'components/TokenManager.svelte',
+    'components/TokenForm.svelte',
     'components/Grants.svelte',
     'components/Versions.svelte',
     'screens/SetupScreen.svelte',

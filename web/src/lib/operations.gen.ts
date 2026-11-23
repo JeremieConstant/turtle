@@ -377,6 +377,9 @@ export type TokenSummary = {
   /** The only Areas it reaches; every Area its owner reaches if absent.
 Areas the owner can no longer read are left out. */
   areas?: TokenArea[] | null
+  /** Whether an app made it by connecting through OAuth, rather than its
+owner by hand. Its value was never shown to anyone. */
+  connected: boolean
   created_at: number
   /** When it stops working, in seconds since the Unix epoch. */
   expires_at?: number | null
@@ -934,7 +937,7 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: CreatedToken
   }
-  /** Lists the caller's Tokens, or a standalone Agent's for a Workspace Admin, with when each was last used. */
+  /** Lists the caller's Tokens, those of apps they connected among them, or a standalone Agent's for a Workspace Admin, with when each was last used. */
   list_tokens: {
     input: {
       /** The standalone Agent whose Tokens to list; the caller's own if absent. */
@@ -942,7 +945,7 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: TokenList
   }
-  /** Revokes one of the caller's Tokens, or of a standalone Agent's for a Workspace Admin; it stops working at once. */
+  /** Revokes one of the caller's Tokens, or of a standalone Agent's for a Workspace Admin; it stops working at once, and so does everything a connected app was given for it. */
   revoke_token: {
     input: {
       /** The standalone Agent the Token is for; the caller's own if absent. */

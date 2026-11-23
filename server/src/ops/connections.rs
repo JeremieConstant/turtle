@@ -734,6 +734,47 @@ mod tests {
     }
 
     #[test]
+    fn a_connection_is_listed_with_the_members_tokens_and_disconnecting_it_stops_it_at_once() {
+        use super::super::tokens::{create_token, list_tokens, revoke_token, NewToken, TokenId, TokensOf};
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let by_hand = NewToken { name: "Backup script".into(), read_only: true, area_ids: None, expires_at: None, agent_id: None };
+        create_token(&core, &ada, by_hand).unwrap();
+        core.advance(60);
+        let client = claude(&core);
+        let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+        let issued = exchange_code(&core, exchange(&client, &code, VERIFIER)).unwrap();
+        principal_for_token(&core, &issued.access_token).unwrap().expect("the access token works");
+
+        let listed = list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens;
+        let seen: Vec<_> = listed.iter().map(|token| (token.name.as_str(), token.connected, token.read_only, token.last_used_at)).collect();
+        assert_eq!(seen, [("Claude", true, false, Some(1_700_000_060)), ("Backup script", false, true, None)]);
+
+        revoke_token(&core, &ada, TokenId { id: listed[0].id.clone(), agent_id: None }).unwrap();
+        assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+        let names: Vec<_> = list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens.into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["Backup script"]);
+    }
+
+    #[test]
+    fn a_connection_unused_for_90_days_is_no_longer_listed() {
+        use super::super::tokens::{list_tokens, TokensOf};
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+        exchange_code(&core, exchange(&client, &code, VERIFIER)).unwrap();
+
+        core.advance(90 * 24 * 60 * 60 - 1);
+        assert_eq!(list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens.len(), 1);
+        core.advance(1);
+        assert!(list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens.is_empty());
+    }
+
+    #[test]
     fn a_code_needs_the_matching_code_verifier() {
         let core = offering_oauth();
         let ada = member(&core, "Ada", false);
