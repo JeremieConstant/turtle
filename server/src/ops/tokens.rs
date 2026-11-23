@@ -207,6 +207,8 @@ pub fn create_token(core: &Core, principal: &Principal, input: NewToken) -> OpRe
 pub fn list_tokens(core: &Core, principal: &Principal, input: TokensOf) -> OpResult<TokenList> {
     let db = core.db();
     let owner = owner(&db, principal, input.agent_id.as_deref())?;
+    // A connection unused for long has ended, even if nothing tried it since.
+    super::connections::end_idle_connections(&db, core.now())?;
     let (owner_column, owner_id) = owner.column();
     let mut statement = db.prepare(&format!(
         "SELECT id, name, read_only, all_areas, expires_at, last_used_at, created_at, client_id IS NOT NULL

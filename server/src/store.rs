@@ -265,6 +265,16 @@ const MIGRATIONS: &[&str] = &[
          expires_at INTEGER NOT NULL
      );
      CREATE INDEX access_tokens_by_token ON access_tokens (token_id);",
+    // A connection's refresh tokens. Each works once and is then kept as
+    // used, so one presented again is recognised as stolen and the whole
+    // connection ends (OAuth 2.1 refresh token rotation). They go with the
+    // connection's Token.
+    "CREATE TABLE refresh_tokens (
+         digest TEXT PRIMARY KEY,
+         token_id TEXT NOT NULL REFERENCES tokens (id) ON DELETE CASCADE,
+         used_at INTEGER
+     );
+     CREATE INDEX refresh_tokens_by_token ON refresh_tokens (token_id);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

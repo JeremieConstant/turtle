@@ -2,7 +2,8 @@
 //! act as them (ADR-0010). A connection is a Token of the Member, named
 //! after the client, so it never has more access than the Member and its
 //! changes are credited like any Token's. The client holds only access
-//! tokens for it, which last an hour.
+//! tokens for it, which last an hour, and a refresh token for the next,
+//! which works once. A connection unused for 90 days ends.
 //!
 //! OAuth itself (metadata, registration, the authorization and token
 //! endpoints) is spoken by `crate::oauth`; what is decided is decided here.
@@ -325,19 +326,21 @@ pub struct CodeExchange {
     pub code_verifier: String,
 }
 
-/// An access token for a connection.
+/// An access token for a connection, and the refresh token for its next.
 #[derive(Debug, PartialEq, Eq)]
 pub struct IssuedAccess {
     pub access_token: String,
+    pub refresh_token: String,
     /// In seconds.
     pub expires_in: i64,
 }
 
-/// Why a code was not exchanged, in OAuth's terms.
+/// Why a code or refresh token was not exchanged, in OAuth's terms.
 #[derive(Debug)]
 pub enum GrantRefusal {
-    /// The code is unknown, used, expired, for another client or redirect
-    /// address, or the code verifier does not match it.
+    /// The code or refresh token is unknown, used, expired or for another
+    /// client, the code for another redirect address, or the code verifier
+    /// does not match it.
     InvalidGrant,
     Failed(OpError),
 }
@@ -355,7 +358,8 @@ impl From<rusqlite::Error> for GrantRefusal {
 }
 
 /// Exchanges an authorization code for the connection it allows: a new
-/// Token of the Member, named after the client, and its first access token.
+/// Token of the Member, named after the client, and its first access and
+/// refresh tokens.
 /// A code works once, whether the exchange succeeds or not.
 pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, GrantRefusal> {
     require_oauth(core)?;
@@ -400,9 +404,8 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
 
     let token_id = random_hex(16)?;
     // The connection's own secret is never handed out; the client holds
-    // only access tokens for it.
+    // only access and refresh tokens for it.
     let unused_secret = random_hex(32)?;
-    let access_token = format!("{ACCESS_TOKEN_PREFIX}{}", random_hex(32)?);
     let transaction = db.transaction()?;
     transaction
         .execute(
@@ -411,14 +414,93 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
             rusqlite::params![token_id, member_id, client.name, digest(&unused_secret), client.id, now],
         )
         ?;
-    transaction
-        .execute(
-            "INSERT INTO access_tokens (digest, token_id, expires_at) VALUES (?1, ?2, ?3)",
-            rusqlite::params![digest(&access_token), token_id, now + ACCESS_TOKEN_LIFETIME],
-        )
-        ?;
+    let issued = issue(&transaction, &token_id, now)?;
     transaction.commit()?;
-    Ok(IssuedAccess { access_token, expires_in: ACCESS_TOKEN_LIFETIME })
+    Ok(issued)
+}
+
+/// What a client sends to use its refresh token.
+#[derive(Debug, Default)]
+pub struct RefreshExchange {
+    pub refresh_token: String,
+    pub client_id: String,
+}
+
+/// Uses a refresh token: it gives a new access token and a new refresh
+/// token, and works only once. Presented again, it was stolen (whoever
+/// presents it second, the client or a thief, the other already holds the
+/// connection), so the whole connection ends. A connection unused for
+/// `IDLE_LIMIT`, or whose Member was deactivated, cannot be refreshed.
+pub fn refresh_connection(core: &Core, input: RefreshExchange) -> Result<IssuedAccess, GrantRefusal> {
+    require_oauth(core)?;
+    let now = core.now();
+    let mut db = core.db();
+    let transaction = db.transaction()?;
+    end_idle_connections(&transaction, now)?;
+    let found = transaction
+        .query_row(
+            "SELECT tokens.id, tokens.client_id, refresh_tokens.used_at IS NOT NULL, members.deactivated_at IS NULL
+             FROM refresh_tokens
+             JOIN tokens ON tokens.id = refresh_tokens.token_id
+             JOIN members ON members.id = tokens.member_id
+             WHERE refresh_tokens.digest = ?1",
+            [digest(&input.refresh_token)],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, bool>(2)?, row.get::<_, bool>(3)?)),
+        )
+        .optional()?;
+    let Some((token_id, client_id, used, active)) = found else { return Err(GrantRefusal::InvalidGrant) };
+    // A refresh token is bound to its client; another one presenting it
+    // proves nothing about who holds the connection.
+    if client_id.as_deref() != Some(input.client_id.as_str()) || !active {
+        return Err(GrantRefusal::InvalidGrant);
+    }
+    if used {
+        transaction.execute("DELETE FROM tokens WHERE id = ?1", [&token_id])?;
+        transaction.commit()?;
+        drop(db);
+        core.access_changed();
+        return Err(GrantRefusal::InvalidGrant);
+    }
+    transaction.execute(
+        "UPDATE refresh_tokens SET used_at = ?1 WHERE digest = ?2",
+        rusqlite::params![now, digest(&input.refresh_token)],
+    )?;
+    let issued = issue(&transaction, &token_id, now)?;
+    transaction.commit()?;
+    Ok(issued)
+}
+
+/// How long a connection may go unused before it ends by itself, in
+/// seconds. A client that is still in use refreshes far more often.
+pub const IDLE_LIMIT: i64 = 90 * 24 * 60 * 60;
+
+/// Ends the connections unused for `IDLE_LIMIT`. An access token lasts far
+/// less, so only a refresh could revive one, and refreshing ends them first.
+pub fn end_idle_connections(db: &Connection, now: i64) -> rusqlite::Result<()> {
+    db.execute(
+        "DELETE FROM tokens WHERE client_id IS NOT NULL AND COALESCE(last_used_at, created_at) <= ?1",
+        [now - IDLE_LIMIT],
+    )?;
+    Ok(())
+}
+
+/// Hands a connection a new access token and refresh token. Being given
+/// them is a use of the connection.
+fn issue(db: &Connection, token_id: &str, now: i64) -> Result<IssuedAccess, GrantRefusal> {
+    let access_token = format!("{ACCESS_TOKEN_PREFIX}{}", random_hex(32)?);
+    let refresh_token = format!("{ACCESS_TOKEN_PREFIX}{}", random_hex(32)?);
+    db.execute(
+        "INSERT INTO access_tokens (digest, token_id, expires_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![digest(&access_token), token_id, now + ACCESS_TOKEN_LIFETIME],
+    )?;
+    db.execute(
+        "INSERT INTO refresh_tokens (digest, token_id) VALUES (?1, ?2)",
+        rusqlite::params![digest(&refresh_token), token_id],
+    )?;
+    // Access tokens of the connection that have expired are of no further use.
+    db.execute("DELETE FROM access_tokens WHERE token_id = ?1 AND expires_at <= ?2", rusqlite::params![token_id, now])?;
+    db.execute("UPDATE tokens SET last_used_at = ?1 WHERE id = ?2", rusqlite::params![now, token_id])?;
+    Ok(IssuedAccess { access_token, refresh_token, expires_in: ACCESS_TOKEN_LIFETIME })
 }
 
 /// Whether a PKCE code verifier is the one its S256 challenge was made from.
@@ -521,6 +603,105 @@ mod tests {
         assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
     }
 
+    /// Ada allows Claude and Claude exchanges its code.
+    fn connected(core: &Core, ada: &Principal, client: &Client) -> IssuedAccess {
+        let redirect = answer_connection_request(core, ada, answer(client, true)).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+        exchange_code(core, exchange(client, &code, VERIFIER)).unwrap()
+    }
+
+    fn refresh(client: &Client, refresh_token: &str) -> RefreshExchange {
+        RefreshExchange { refresh_token: refresh_token.into(), client_id: client.id.clone() }
+    }
+
+    #[test]
+    fn a_refresh_token_gives_a_new_access_token_and_a_new_refresh_token_once() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let first = connected(&core, &ada, &client);
+
+        core.advance(3600);
+        assert_eq!(principal_for_token(&core, &first.access_token).unwrap(), None);
+        let second = refresh_connection(&core, refresh(&client, &first.refresh_token)).unwrap();
+        assert_eq!(second.expires_in, 3600);
+        assert_ne!(second.refresh_token, first.refresh_token);
+        let acting = principal_for_token(&core, &second.access_token).unwrap().expect("the new access token works");
+        assert!(matches!(&acting, Principal::Member { id, .. } if id == "member-ada"), "{acting:?}");
+
+        let third = refresh_connection(&core, refresh(&client, &second.refresh_token)).unwrap();
+        assert!(principal_for_token(&core, &third.access_token).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_used_refresh_token_presented_again_ends_the_connection() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let first = connected(&core, &ada, &client);
+        let second = refresh_connection(&core, refresh(&client, &first.refresh_token)).unwrap();
+
+        // Someone else had the first refresh token: it was stolen.
+        assert!(matches!(refresh_connection(&core, refresh(&client, &first.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+        assert_eq!(principal_for_token(&core, &second.access_token).unwrap(), None);
+        assert_eq!(principal_for_token(&core, &first.access_token).unwrap(), None);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &second.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+
+        // Ada's other connections go on.
+        let other = connected(&core, &ada, &client);
+        assert!(principal_for_token(&core, &other.access_token).unwrap().is_some());
+        assert!(refresh_connection(&core, refresh(&client, &other.refresh_token)).is_ok());
+    }
+
+    const DAY: i64 = 24 * 60 * 60;
+
+    #[test]
+    fn a_connection_unused_for_90_days_ends() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let issued = connected(&core, &ada, &client);
+
+        // Refreshing is using.
+        core.advance(90 * DAY - 1);
+        let refreshed = refresh_connection(&core, refresh(&client, &issued.refresh_token)).unwrap();
+        // So is acting through an access token, well after the refresh.
+        core.advance(50 * 60);
+        assert!(principal_for_token(&core, &refreshed.access_token).unwrap().is_some());
+        core.advance(90 * DAY - 1);
+        let refreshed = refresh_connection(&core, refresh(&client, &refreshed.refresh_token)).unwrap();
+
+        core.advance(90 * DAY);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &refreshed.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+    }
+
+    #[test]
+    fn a_deactivated_member_s_connection_cannot_be_refreshed() {
+        let core = offering_oauth();
+        let admin = member(&core, "Grace", true);
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let issued = connected(&core, &ada, &client);
+
+        super::super::members::deactivate_member(&core, &admin, super::super::members::MemberId { id: "member-ada".into() }).unwrap();
+        assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+    }
+
+    #[test]
+    fn a_refresh_token_is_only_for_its_client_and_unknown_ones_are_refused() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let other = claude(&core);
+        let issued = connected(&core, &ada, &client);
+
+        assert!(matches!(refresh_connection(&core, refresh(&other, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
+        assert!(matches!(refresh_connection(&core, refresh(&client, "turtle_made_up")), Err(GrantRefusal::InvalidGrant)));
+        // Another client presenting it neither used it up nor ended the connection.
+        assert!(principal_for_token(&core, &issued.access_token).unwrap().is_some());
+        assert!(refresh_connection(&core, refresh(&client, &issued.refresh_token)).is_ok());
+    }
+
     #[test]
     fn a_connection_is_listed_with_the_members_tokens_and_disconnecting_it_stops_it_at_once() {
         use super::super::tokens::{create_token, list_tokens, revoke_token, NewToken, TokenId, TokensOf};
@@ -541,8 +722,25 @@ mod tests {
 
         revoke_token(&core, &ada, TokenId { id: listed[0].id.clone(), agent_id: None }).unwrap();
         assert_eq!(principal_for_token(&core, &issued.access_token).unwrap(), None);
+        assert!(matches!(refresh_connection(&core, refresh(&client, &issued.refresh_token)), Err(GrantRefusal::InvalidGrant)));
         let names: Vec<_> = list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens.into_iter().map(|t| t.name).collect();
         assert_eq!(names, ["Backup script"]);
+    }
+
+    #[test]
+    fn a_connection_unused_for_90_days_is_no_longer_listed() {
+        use super::super::tokens::{list_tokens, TokensOf};
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+        exchange_code(&core, exchange(&client, &code, VERIFIER)).unwrap();
+
+        core.advance(90 * 24 * 60 * 60 - 1);
+        assert_eq!(list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens.len(), 1);
+        core.advance(1);
+        assert!(list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens.is_empty());
     }
 
     #[test]

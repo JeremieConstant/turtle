@@ -52,7 +52,7 @@ async fn with_a_public_url_turtle_describes_itself_as_protected_resource_and_aut
     assert_eq!(metadata["token_endpoint"], "https://turtle.example.org/oauth/token");
     assert_eq!(metadata["registration_endpoint"], "https://turtle.example.org/oauth/register");
     assert_eq!(metadata["response_types_supported"], json!(["code"]));
-    assert_eq!(metadata["grant_types_supported"], json!(["authorization_code"]));
+    assert_eq!(metadata["grant_types_supported"], json!(["authorization_code", "refresh_token"]));
     assert_eq!(metadata["code_challenge_methods_supported"], json!(["S256"]));
     assert_eq!(metadata["token_endpoint_auth_methods_supported"], json!(["none"]));
 
@@ -133,6 +133,7 @@ async fn register(server: &TestServer, name: &str) -> String {
     assert_eq!(registered["client_name"], name);
     assert_eq!(registered["redirect_uris"], json!([CALLBACK]));
     assert_eq!(registered["token_endpoint_auth_method"], "none");
+    assert_eq!(registered["grant_types"], json!(["authorization_code", "refresh_token"]));
     registered["client_id"].as_str().unwrap().to_string()
 }
 
@@ -259,6 +260,54 @@ async fn a_client_registers_a_member_allows_it_and_it_acts_as_the_member() {
     let again = exchange(&server, &client_id, &code, Some(VERIFIER)).await;
     assert_eq!(again.status, 400);
     assert_eq!(json_of(&again)["error"], "invalid_grant");
+}
+
+async fn refresh(server: &TestServer, client_id: &str, refresh_token: &str) -> http::Response {
+    let form = format!("grant_type=refresh_token&refresh_token={refresh_token}&client_id={client_id}");
+    http::request(
+        server.addr(),
+        "POST",
+        "/oauth/token",
+        &[("Content-Type", "application/x-www-form-urlencoded")],
+        &form,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_client_keeps_its_connection_with_refresh_tokens_that_work_once() {
+    let server = TestServer::start_with_public_url(PUBLIC_URL).await;
+    let ada = server.sign_up().await;
+    let client_id = register(&server, "Claude").await;
+    let authorize = get(&server, &format!("/oauth/authorize?{}", authorization_query(&client_id))).await;
+    let consent = authorize.header("location").unwrap().to_string();
+    let allowed = ada.call("answer_connection_request", answer_from(&consent, true)).await;
+    let code = parameter(allowed["redirect_to"].as_str().unwrap(), "code").unwrap();
+    let first = json_of(&exchange(&server, &client_id, &code, Some(VERIFIER)).await);
+    let first_refresh = first["refresh_token"].as_str().expect("a refresh token comes with the first access token");
+
+    let refreshed = refresh(&server, &client_id, first_refresh).await;
+    assert_eq!(refreshed.status, 200, "{}", refreshed.body);
+    assert_eq!(refreshed.header("cache-control"), Some("no-store"));
+    let second = json_of(&refreshed);
+    assert_eq!(second["token_type"], "Bearer");
+    assert_eq!(second["expires_in"], 3600);
+    let second_refresh = second["refresh_token"].as_str().unwrap();
+    assert_ne!(second_refresh, first_refresh);
+    let access_token = second["access_token"].as_str().unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    assert_eq!(mcp(&server, Some(access_token), list.clone()).await.status, 200);
+
+    // The first refresh token, presented again, was stolen: the connection ends.
+    let reused = refresh(&server, &client_id, first_refresh).await;
+    assert_eq!(reused.status, 400);
+    assert_eq!(json_of(&reused)["error"], "invalid_grant");
+    assert_eq!(mcp(&server, Some(access_token), list).await.status, 401);
+    assert_eq!(json_of(&refresh(&server, &client_id, second_refresh).await)["error"], "invalid_grant");
+
+    let missing = refresh(&server, &client_id, "").await;
+    assert_eq!(missing.status, 400);
+    assert_eq!(json_of(&missing)["error"], "invalid_request");
 }
 
 #[tokio::test]
