@@ -227,6 +227,11 @@ pub struct Connecting {
     /// Whether a Workspace Admin has turned connecting AI off. While it is,
     /// no app can connect and connected apps cannot act.
     pub turned_off: bool,
+    /// Whether Turtle looks reachable only from inside its network, judged
+    /// from its public address alone, so that claude.ai, which reaches an
+    /// AI client's connector from the internet, probably cannot reach it.
+    /// A client on the caller's own machine can still connect with a Token.
+    pub intranet_only: bool,
 }
 
 pub fn describe_connecting(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Connecting> {
@@ -234,7 +239,7 @@ pub fn describe_connecting(core: &Core, principal: &Principal, _: Nothing) -> Op
     deciding_member(principal)?;
     let mcp_address = core.public_url().map(|base| format!("{base}/mcp"));
     let turned_off = !connecting_ai_on(&core.db())?;
-    Ok(Connecting { mcp_address, turned_off }.into())
+    Ok(Connecting { mcp_address, turned_off, intranet_only: core.looks_intranet_only() }.into())
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -670,6 +675,7 @@ mod tests {
     use super::super::testing::{fresh, member, TestCore};
     use super::super::tokens::{author_of, principal_for_token};
     use super::*;
+    use std::sync::Arc;
 
     const CALLBACK: &str = "https://claude.ai/api/mcp/auth_callback";
     /// The worked example of RFC 7636, appendix B.
@@ -1236,5 +1242,19 @@ mod tests {
 
         set_connecting_ai(&core, &grace, turn(true)).unwrap();
         assert!(exchange_code(&core, exchange(&client, &code, VERIFIER)).is_ok());
+    }
+
+    #[test]
+    fn a_member_is_told_when_turtle_looks_reachable_only_from_its_intranet() {
+        let mut core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        core.core.set_resolver(Arc::new(|_| vec!["192.168.1.20".parse().unwrap()]));
+        assert!(describe_connecting(&core, &ada, Nothing {}).unwrap().output.intranet_only);
+
+        core.core.set_resolver(Arc::new(|_| vec!["93.184.215.14".parse().unwrap()]));
+        assert!(!describe_connecting(&core, &ada, Nothing {}).unwrap().output.intranet_only);
+
+        core.core.set_public_url(None);
+        assert!(describe_connecting(&core, &ada, Nothing {}).unwrap().output.intranet_only);
     }
 }
