@@ -90,6 +90,11 @@ export type Comparison = {
 }
 
 export type Connecting = {
+  /** Whether Turtle looks reachable only from inside its network, judged
+from its public address alone, so that claude.ai, which reaches an
+AI client's connector from the internet, probably cannot reach it.
+A client on the caller's own machine can still connect with a Token. */
+  intranet_only: boolean
   /** The address to give an AI client. Missing where Turtle does not know
 its public address, since an AI client could not sign in through
 OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it. */
@@ -103,6 +108,9 @@ export type ConnectionRedirect = {
 export type ConnectionRequest = {
   /** The name the app registered with. Any app can choose any name. */
   app_name: string
+  /** Whether the app asks to change things too, not only to read them.
+An app that asks only to read can never change anything. */
+  asks_to_change: boolean
   /** The domain the answer is sent to, which tells who really asks. */
   redirect_domain: string
 }
@@ -984,6 +992,8 @@ Member's; the caller's own if absent. */
       client_id: string
       /** Where the app wants the answer, as it sent it. */
       redirect_uri?: string | null
+      /** The scopes the app asked for, as it sent them. */
+      scope?: string | null
     }
     output: ConnectionRequest
   }
@@ -992,14 +1002,21 @@ Member's; the caller's own if absent. */
     input: {
       /** Whether the caller allows the app to act as them. */
       allow: boolean
+      /** The only Areas the app reaches; every Area the caller reaches if absent. */
+      area_ids?: string[] | null
       /** The app's client ID, as it sent it. */
       client_id: string
       /** The PKCE code challenge the app sent. */
       code_challenge?: string | null
       /** The PKCE method the app sent; only S256 is accepted. */
       code_challenge_method?: string | null
+      /** Whether the caller lets the app only read, though it asked to change
+things too. */
+      only_reading?: boolean
       /** Where the app wants the answer, as it sent it. */
       redirect_uri?: string | null
+      /** The scopes the app asked for, as it sent them. */
+      scope?: string | null
       /** What the app sent to recognise the answer, given back unchanged. */
       state?: string | null
     }

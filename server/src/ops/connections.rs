@@ -9,6 +9,7 @@
 //! endpoints) is spoken by `crate::oauth`; what is decided is decided here.
 
 use super::accounts::{digest, random_hex, Nothing};
+use super::tokens::readable_areas;
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use base64::Engine;
 use rusqlite::{Connection, OptionalExtension};
@@ -43,6 +44,15 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         )
         .browser_only = true;
 }
+
+/// The scope that lets a connection read what its Member can read.
+pub const READ_SCOPE: &str = "turtle:read";
+
+/// The scope that also lets a connection change what its Member can change.
+pub const WRITE_SCOPE: &str = "turtle:write";
+
+/// Every scope a client may ask for.
+pub const SCOPES: [&str; 2] = [READ_SCOPE, WRITE_SCOPE];
 
 /// How long an access token works, in seconds.
 pub const ACCESS_TOKEN_LIFETIME: i64 = 60 * 60;
@@ -205,13 +215,18 @@ pub struct Connecting {
     /// its public address, since an AI client could not sign in through
     /// OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it.
     pub mcp_address: Option<String>,
+    /// Whether Turtle looks reachable only from inside its network, judged
+    /// from its public address alone, so that claude.ai, which reaches an
+    /// AI client's connector from the internet, probably cannot reach it.
+    /// A client on the caller's own machine can still connect with a Token.
+    pub intranet_only: bool,
 }
 
 pub fn describe_connecting(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Connecting> {
     // Whoever may allow an app may learn how to connect one.
     deciding_member(principal)?;
     let mcp_address = core.public_url().map(|base| format!("{base}/mcp"));
-    Ok(Connecting { mcp_address }.into())
+    Ok(Connecting { mcp_address, intranet_only: core.looks_intranet_only() }.into())
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -221,6 +236,9 @@ pub struct RequestedConnection {
     /// Where the app wants the answer, as it sent it.
     #[serde(default)]
     pub redirect_uri: Option<String>,
+    /// The scopes the app asked for, as it sent them.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// An app asking to act as the caller.
@@ -230,6 +248,9 @@ pub struct ConnectionRequest {
     pub app_name: String,
     /// The domain the answer is sent to, which tells who really asks.
     pub redirect_domain: String,
+    /// Whether the app asks to change things too, not only to read them.
+    /// An app that asks only to read can never change anything.
+    pub asks_to_change: bool,
 }
 
 pub fn describe_connection_request(core: &Core, principal: &Principal, input: RequestedConnection) -> OpResult<ConnectionRequest> {
@@ -238,6 +259,7 @@ pub fn describe_connection_request(core: &Core, principal: &Principal, input: Re
     Ok(ConnectionRequest {
         app_name: client.name,
         redirect_domain: redirect_domain(&redirect_uri).to_string(),
+        asks_to_change: asks_to_change(input.scope.as_deref()),
     }
     .into())
 }
@@ -258,6 +280,16 @@ pub struct ConnectionAnswer {
     /// What the app sent to recognise the answer, given back unchanged.
     #[serde(default)]
     pub state: Option<String>,
+    /// The scopes the app asked for, as it sent them.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Whether the caller lets the app only read, though it asked to change
+    /// things too.
+    #[serde(default)]
+    pub only_reading: bool,
+    /// The only Areas the app reaches; every Area the caller reaches if absent.
+    #[serde(default)]
+    pub area_ids: Option<Vec<String>>,
     /// Whether the caller allows the app to act as them.
     pub allow: bool,
 }
@@ -285,16 +317,47 @@ pub fn answer_connection_request(core: &Core, principal: &Principal, input: Conn
     };
     let code = random_hex(32)?;
     let now = core.now();
-    let db = core.db();
+    let mut db = core.db();
+    let transaction = db.transaction()?;
+    // Only Areas the Member can read, so a connection never reaches further.
+    let areas = match &input.area_ids {
+        Some(area_ids) if area_ids.is_empty() => {
+            return Err(OpError::InvalidInput("Choose at least one Area, or let the app reach every Area.".into()));
+        }
+        Some(area_ids) => Some(readable_areas(&transaction, principal, area_ids)?),
+        None => None,
+    };
     // Codes nobody exchanged are of no further use.
-    db.execute("DELETE FROM authorization_codes WHERE expires_at <= ?1", [now])?;
-    db.execute(
-        "INSERT INTO authorization_codes (digest, client_id, member_id, redirect_uri, code_challenge, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![digest(&code), client.id, member_id, redirect_uri, challenge, now + CODE_LIFETIME],
+    transaction.execute("DELETE FROM authorization_codes WHERE expires_at <= ?1", [now])?;
+    let read_only = input.only_reading || !asks_to_change(input.scope.as_deref());
+    transaction.execute(
+        "INSERT INTO authorization_codes (digest, client_id, member_id, redirect_uri, code_challenge, expires_at, read_only, all_areas)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![digest(&code), client.id, member_id, redirect_uri, challenge, now + CODE_LIFETIME, read_only, areas.is_none()],
     )?;
+    for area in areas.iter().flatten() {
+        transaction.execute(
+            "INSERT INTO authorization_code_areas (code_digest, area_id) VALUES (?1, ?2)",
+            rusqlite::params![digest(&code), area.id],
+        )?;
+    }
+    transaction.commit()?;
     let redirect_to = with_query(&redirect_uri, &[("code", Some(&code)), ("state", state)]);
     Ok(ConnectionRedirect { redirect_to }.into())
+}
+
+/// Whether a client asks to change things, from the scopes it sent. A
+/// client that names none of Turtle's scopes asks for what its Member may
+/// do, as before Turtle had scopes; one that names only reading gets only
+/// reading. Scopes Turtle does not know are left aside.
+fn asks_to_change(scope: Option<&str>) -> bool {
+    let known: Vec<&str> = scope.unwrap_or_default().split_whitespace().filter(|asked| SCOPES.contains(asked)).collect();
+    known.is_empty() || known.contains(&WRITE_SCOPE)
+}
+
+/// The scopes a connection has, as the token response states them.
+fn granted_scope(read_only: bool) -> String {
+    if read_only { READ_SCOPE.to_string() } else { SCOPES.join(" ") }
 }
 
 /// The PKCE code challenge, if the client sent one Turtle accepts: S256
@@ -358,6 +421,8 @@ pub struct IssuedAccess {
     pub refresh_token: String,
     /// In seconds.
     pub expires_in: i64,
+    /// The scopes granted, space-separated as OAuth states them.
+    pub scope: String,
 }
 
 /// Why a code or refresh token was not exchanged, in OAuth's terms.
@@ -391,10 +456,15 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
     let now = core.now();
     let mut db = core.db();
     let transaction = db.transaction()?;
+    // Its Areas go with the code, so they are read first.
+    let area_ids: Vec<String> = transaction
+        .prepare("SELECT area_id FROM authorization_code_areas WHERE code_digest = ?1")?
+        .query_map([digest(&input.code)], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
     let found = transaction
         .query_row(
             "DELETE FROM authorization_codes WHERE digest = ?1
-             RETURNING client_id, member_id, redirect_uri, code_challenge, expires_at",
+             RETURNING client_id, member_id, redirect_uri, code_challenge, expires_at, read_only, all_areas",
             [digest(&input.code)],
             |row| {
                 Ok((
@@ -403,6 +473,8 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, bool>(5)?,
+                    row.get::<_, bool>(6)?,
                 ))
             },
         )
@@ -410,7 +482,7 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
         ?;
     // The code is gone even if what follows refuses it.
     transaction.commit()?;
-    let Some((client_id, member_id, redirect_uri, challenge, expires_at)) = found else {
+    let Some((client_id, member_id, redirect_uri, challenge, expires_at, read_only, all_areas)) = found else {
         return Err(GrantRefusal::InvalidGrant);
     };
     let redirect_matches = input.redirect_uri.as_ref().is_none_or(|uri| *uri == redirect_uri);
@@ -435,10 +507,16 @@ pub fn exchange_code(core: &Core, input: CodeExchange) -> Result<IssuedAccess, G
     transaction
         .execute(
             "INSERT INTO tokens (id, member_id, name, secret_digest, read_only, all_areas, client_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, 0, 1, ?5, ?6)",
-            rusqlite::params![token_id, member_id, client.name, digest(&unused_secret), client.id, now],
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![token_id, member_id, client.name, digest(&unused_secret), read_only, all_areas, client.id, now],
         )
         ?;
+    for area_id in &area_ids {
+        transaction.execute(
+            "INSERT INTO token_areas (token_id, area_id) VALUES (?1, ?2)",
+            rusqlite::params![token_id, area_id],
+        )?;
+    }
     let issued = issue(&transaction, &token_id, now)?;
     transaction.commit()?;
     Ok(issued)
@@ -525,7 +603,8 @@ fn issue(db: &Connection, token_id: &str, now: i64) -> Result<IssuedAccess, Gran
     // Access tokens of the connection that have expired are of no further use.
     db.execute("DELETE FROM access_tokens WHERE token_id = ?1 AND expires_at <= ?2", rusqlite::params![token_id, now])?;
     db.execute("UPDATE tokens SET last_used_at = ?1 WHERE id = ?2", rusqlite::params![now, token_id])?;
-    Ok(IssuedAccess { access_token, refresh_token, expires_in: ACCESS_TOKEN_LIFETIME })
+    let read_only: bool = db.query_row("SELECT read_only FROM tokens WHERE id = ?1", [token_id], |row| row.get(0))?;
+    Ok(IssuedAccess { access_token, refresh_token, expires_in: ACCESS_TOKEN_LIFETIME, scope: granted_scope(read_only) })
 }
 
 /// Whether a PKCE code verifier is the one its S256 challenge was made from.
@@ -542,6 +621,7 @@ mod tests {
     use super::super::testing::{fresh, member, TestCore};
     use super::super::tokens::{author_of, principal_for_token};
     use super::*;
+    use std::sync::Arc;
 
     const CALLBACK: &str = "https://claude.ai/api/mcp/auth_callback";
     /// The worked example of RFC 7636, appendix B.
@@ -565,8 +645,26 @@ mod tests {
             code_challenge: Some(CHALLENGE.into()),
             code_challenge_method: Some("S256".into()),
             state: Some("a b&c".into()),
+            scope: None,
+            only_reading: false,
+            area_ids: None,
             allow,
         }
+    }
+
+    /// Allows the connection as answered and exchanges its code.
+    fn connect(core: &Core, member: &Principal, client: &Client, answered: ConnectionAnswer) -> IssuedAccess {
+        let redirect = answer_connection_request(core, member, answered).unwrap().output.redirect_to;
+        let code = parameter(&redirect, "code").unwrap();
+        exchange_code(core, exchange(client, &code, VERIFIER)).unwrap()
+    }
+
+    /// Whether the connection may create an Area, which changes something.
+    fn changes(core: &Core, issued: &IssuedAccess) -> Result<(), String> {
+        let acting = principal_for_token(core, &issued.access_token).unwrap().unwrap();
+        let catalogue = super::super::catalogue();
+        let created = catalogue.call(core, &acting, "create_area", serde_json::json!({ "name": "Elsewhere" }));
+        created.map(|_| ()).map_err(|error| error.kind().to_string())
     }
 
     /// The value of a parameter of the address the browser is sent to.
@@ -596,11 +694,11 @@ mod tests {
         let request = describe_connection_request(
             &core,
             &ada,
-            RequestedConnection { client_id: client.id.clone(), redirect_uri: Some(CALLBACK.into()) },
+            RequestedConnection { client_id: client.id.clone(), redirect_uri: Some(CALLBACK.into()), scope: None },
         )
         .unwrap()
         .output;
-        assert_eq!(request, ConnectionRequest { app_name: "Claude".into(), redirect_domain: "claude.ai".into() });
+        assert_eq!(request, ConnectionRequest { app_name: "Claude".into(), redirect_domain: "claude.ai".into(), asks_to_change: true });
 
         let redirect = answer_connection_request(&core, &ada, answer(&client, true)).unwrap().output.redirect_to;
         assert!(redirect.starts_with("https://claude.ai/api/mcp/auth_callback?code="), "{redirect}");
@@ -853,12 +951,12 @@ mod tests {
             ("made-up", Some(CALLBACK)),
             (client.id.as_str(), Some("https://evil.example.com/callback")),
         ] {
-            let request = RequestedConnection { client_id: client_id.into(), redirect_uri: redirect_uri.map(Into::into) };
+            let request = RequestedConnection { client_id: client_id.into(), redirect_uri: redirect_uri.map(Into::into), scope: None };
             let error = describe_connection_request(&core, &ada, request).unwrap_err();
             assert_eq!(error.kind(), "not_found");
         }
         // A client with one redirect address need not repeat it.
-        let request = RequestedConnection { client_id: client.id.clone(), redirect_uri: None };
+        let request = RequestedConnection { client_id: client.id.clone(), redirect_uri: None, scope: None };
         assert_eq!(describe_connection_request(&core, &ada, request).unwrap().output.redirect_domain, "claude.ai");
     }
 
@@ -885,7 +983,7 @@ mod tests {
         let ada = member(&core, "Ada", false);
         let registered = register_client(&core, NewClient { redirect_uris: vec![CALLBACK.into()], client_name: None });
         assert_eq!(registered.unwrap_err().kind(), "not_found");
-        let request = RequestedConnection { client_id: "any".into(), redirect_uri: Some(CALLBACK.into()) };
+        let request = RequestedConnection { client_id: "any".into(), redirect_uri: Some(CALLBACK.into()), scope: None };
         assert_eq!(describe_connection_request(&core, &ada, request).unwrap_err().kind(), "not_found");
     }
 
@@ -929,6 +1027,115 @@ mod tests {
     }
 
     #[test]
+    fn a_member_lowers_a_connection_to_reading() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let both = Some(format!("{READ_SCOPE} {WRITE_SCOPE}"));
+
+        let full = connect(&core, &ada, &client, ConnectionAnswer { scope: both.clone(), ..answer(&client, true) });
+        assert_eq!(full.scope, "turtle:read turtle:write");
+        assert_eq!(changes(&core, &full), Ok(()));
+
+        let reading = connect(&core, &ada, &client, ConnectionAnswer { scope: both, only_reading: true, ..answer(&client, true) });
+        assert_eq!(reading.scope, "turtle:read");
+        assert_eq!(changes(&core, &reading), Err("not_permitted".into()));
+
+        // Refreshed, it stays limited.
+        let refreshed = refresh_connection(&core, refresh(&client, &reading.refresh_token)).unwrap();
+        assert_eq!(refreshed.scope, "turtle:read");
+        assert_eq!(changes(&core, &refreshed), Err("not_permitted".into()));
+    }
+
+    #[test]
+    fn a_client_asking_only_to_read_cannot_be_raised() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let request = RequestedConnection { client_id: client.id.clone(), redirect_uri: None, scope: Some(READ_SCOPE.into()) };
+        assert!(!describe_connection_request(&core, &ada, request).unwrap().output.asks_to_change);
+
+        let reading = connect(&core, &ada, &client, ConnectionAnswer { scope: Some(READ_SCOPE.into()), ..answer(&client, true) });
+        assert_eq!(reading.scope, "turtle:read");
+        assert_eq!(changes(&core, &reading), Err("not_permitted".into()));
+    }
+
+    #[test]
+    fn a_client_asking_for_no_scope_of_turtles_gets_full_access() {
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        for scope in [None, Some(""), Some("openid profile")] {
+            let request = RequestedConnection { client_id: client.id.clone(), redirect_uri: None, scope: scope.map(Into::into) };
+            assert!(describe_connection_request(&core, &ada, request).unwrap().output.asks_to_change, "{scope:?}");
+            let issued = connect(&core, &ada, &client, ConnectionAnswer { scope: scope.map(Into::into), ..answer(&client, true) });
+            assert_eq!(issued.scope, "turtle:read turtle:write", "{scope:?}");
+        }
+    }
+
+    #[test]
+    fn a_connection_limited_to_areas_reaches_only_those_also_in_search() {
+        use super::super::areas::{create_area, NewArea};
+        use super::super::search::{search, SearchQuery};
+        use super::super::tree::{create_page, NewEntry};
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let mut area_ids = Vec::new();
+        for name in ["Handbook", "Secret"] {
+            let area = create_area(&core, &ada, NewArea { name: name.into() }).unwrap().output.id;
+            let page = NewEntry { area_id: area.clone(), parent_id: None, title: format!("Roadmap in {name}") };
+            create_page(&core, &ada, page.into()).unwrap();
+            area_ids.push(area);
+        }
+
+        let issued = connect(&core, &ada, &client, ConnectionAnswer { area_ids: Some(vec![area_ids[0].clone()]), ..answer(&client, true) });
+        // Limited to Areas, it may still change things there.
+        assert_eq!(issued.scope, "turtle:read turtle:write");
+        let acting = principal_for_token(&core, &issued.access_token).unwrap().unwrap();
+        core.catch_up_search().unwrap();
+        let query = SearchQuery { query: "roadmap".into(), area_id: None, limit: None };
+        let found: Vec<String> = search(&core, &acting, query).unwrap().output.results.into_iter().map(|result| result.title).collect();
+        assert_eq!(found, ["Roadmap in Handbook"]);
+        let elsewhere = NewEntry { area_id: area_ids[1].clone(), parent_id: None, title: "Leak".into() };
+        assert_eq!(create_page(&core, &acting, elsewhere.into()).unwrap_err().kind(), "not_found");
+    }
+
+    #[test]
+    fn a_limited_connection_is_listed_with_its_limits() {
+        use super::super::areas::{create_area, NewArea};
+        use super::super::tokens::{list_tokens, TokensOf};
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let client = claude(&core);
+        let handbook = create_area(&core, &ada, NewArea { name: "Handbook".into() }).unwrap().output.id;
+        create_area(&core, &ada, NewArea { name: "Secret".into() }).unwrap();
+        let answered = ConnectionAnswer { only_reading: true, area_ids: Some(vec![handbook]), ..answer(&client, true) };
+        connect(&core, &ada, &client, answered);
+
+        let listed = list_tokens(&core, &ada, TokensOf::default()).unwrap().output.tokens;
+        let seen: Vec<_> = listed
+            .iter()
+            .map(|token| (token.connected, token.read_only, token.areas.as_ref().map(|areas| areas.iter().map(|area| area.name.clone()).collect::<Vec<_>>())))
+            .collect();
+        assert_eq!(seen, [(true, true, Some(vec!["Handbook".to_string()]))]);
+    }
+
+    #[test]
+    fn a_connection_can_only_be_limited_to_areas_the_member_reads() {
+        use super::super::areas::{create_area, NewArea};
+        let core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        let linus = member(&core, "Linus", false);
+        let client = claude(&core);
+        let kernel = create_area(&core, &linus, NewArea { name: "Kernel".into() }).unwrap().output.id;
+        for (area_ids, kind) in [(vec![kernel], "not_found"), (vec![], "invalid_input")] {
+            let answered = ConnectionAnswer { area_ids: Some(area_ids), ..answer(&client, true) };
+            assert_eq!(answer_connection_request(&core, &ada, answered).unwrap_err().kind(), kind);
+        }
+    }
+
+    #[test]
     fn a_member_is_told_the_mcp_address_only_where_turtle_knows_its_own() {
         let core = offering_oauth();
         let ada = member(&core, "Ada", false);
@@ -939,5 +1146,19 @@ mod tests {
         let ada = member(&unknown, "Ada", false);
         assert_eq!(describe_connecting(&unknown, &ada, Nothing {}).unwrap().output.mcp_address, None);
         assert_eq!(describe_connecting(&unknown, &Principal::Anonymous, Nothing {}).unwrap_err().kind(), "not_permitted");
+    }
+
+    #[test]
+    fn a_member_is_told_when_turtle_looks_reachable_only_from_its_intranet() {
+        let mut core = offering_oauth();
+        let ada = member(&core, "Ada", false);
+        core.core.set_resolver(Arc::new(|_| vec!["192.168.1.20".parse().unwrap()]));
+        assert!(describe_connecting(&core, &ada, Nothing {}).unwrap().output.intranet_only);
+
+        core.core.set_resolver(Arc::new(|_| vec!["93.184.215.14".parse().unwrap()]));
+        assert!(!describe_connecting(&core, &ada, Nothing {}).unwrap().output.intranet_only);
+
+        core.core.set_public_url(None);
+        assert!(describe_connecting(&core, &ada, Nothing {}).unwrap().output.intranet_only);
     }
 }

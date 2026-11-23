@@ -14,6 +14,7 @@ pub mod content;
 #[cfg(test)]
 mod every_operation;
 pub mod grants;
+pub mod intranet;
 pub mod links;
 pub mod members;
 pub mod moves;
@@ -54,6 +55,9 @@ pub struct Core {
     /// The address Turtle is reached at from outside, without a trailing
     /// slash. OAuth is offered only when it is known (ADR-0010).
     public_url: Option<String>,
+    /// Looks up host names, to tell whether Turtle's public address is
+    /// reachable only from inside its network.
+    resolve: intranet::Resolver,
 }
 
 impl Core {
@@ -79,6 +83,7 @@ impl Core {
             attachments: db_path.with_file_name("attachments"),
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             public_url: None,
+            resolve: intranet::system_resolver(),
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -102,6 +107,18 @@ impl Core {
     /// slash, if it is known.
     pub fn public_url(&self) -> Option<&str> {
         self.public_url.as_deref()
+    }
+
+    /// Sets how host names are looked up, so tests need no network.
+    #[cfg(test)]
+    pub fn set_resolver(&mut self, resolve: intranet::Resolver) {
+        self.resolve = resolve;
+    }
+
+    /// Whether Turtle looks reachable only from inside its network, so that
+    /// claude.ai could not reach it.
+    pub fn looks_intranet_only(&self) -> bool {
+        intranet::looks_intranet_only(self.public_url(), &self.resolve)
     }
 
     /// Where Attachment files are kept.
@@ -532,9 +549,11 @@ pub(crate) mod testing {
         let dir = tempfile::tempdir().unwrap();
         let time = Arc::new(AtomicI64::new(1_700_000_000));
         let shown = time.clone();
-        let core =
+        let mut core =
             Core::open_with_clock(&dir.path().join("turtle.db"), Arc::new(move || shown.load(Ordering::SeqCst)))
                 .unwrap();
+        // Tests look nothing up on the network.
+        core.set_resolver(Arc::new(|_| Vec::new()));
         TestCore {
             core,
             time,
