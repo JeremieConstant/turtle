@@ -3,7 +3,7 @@
   import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { PdfStyle } from '../lib/operations.gen'
-  import { newPdfStyleValues, valuesOf, type PdfStyleValues } from '../lib/pdfStyles'
+  import { changeLogo, newPdfStyleValues, valuesOf, type LogoChange, type PdfStyleValues } from '../lib/pdfStyles'
   import { session } from '../lib/session.svelte'
 
   let styles = $state.raw<PdfStyle[] | null>(null)
@@ -44,11 +44,14 @@
     }
   }
 
-  function save(values: PdfStyleValues) {
+  function save(values: PdfStyleValues, logo: LogoChange) {
     const id = editing
     return attempt(async () => {
-      if (id === 'new') await call('create_pdf_style', values)
-      else if (id) await call('update_pdf_style', { ...values, id })
+      if (!id) return
+      const saved = id === 'new' ? await call('create_pdf_style', values) : await call('update_pdf_style', { ...values, id })
+      // Created now; should the logo be refused, the form stays open on it.
+      editing = saved.id
+      await changeLogo(saved.id, logo)
       editing = null
     })
   }
@@ -73,7 +76,7 @@
 <main class="screen">
   <h1>PDF Styles</h1>
   <p class="lede">
-    A PDF Style sets how an exported PDF looks: its colours, fonts and sizes, whether it has a cover and a table of contents, and the
+    A PDF Style sets how an exported PDF looks: its logo, colours, fonts and sizes, whether it has a cover and a table of contents, and the
     language of its own words. Whoever exports a PDF chooses one; the default is chosen for them.
   </p>
   {#if loadError}
@@ -100,7 +103,7 @@
           {#if editing === style.id}
             <div class="detail">
               {#if error}<p class="error" role="alert">{error}</p>{/if}
-              <PdfStyleForm values={valuesOf(style)} {fontFamilies} action="Save" {busy} onsave={save} oncancel={() => (editing = null)} />
+              <PdfStyleForm values={valuesOf(style)} logo={style.logo} {fontFamilies} action="Save" {busy} onsave={save} oncancel={() => (editing = null)} />
             </div>
           {:else}
             <div class="item">

@@ -54,6 +54,7 @@ pub struct Core {
     live: crate::live::Pages,
     /// Where Attachment files are kept, each under the hash of its content.
     attachments: std::path::PathBuf,
+    pdf_logos: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
     /// The address Turtle is reached at from outside. OAuth is offered only
@@ -89,6 +90,7 @@ impl Core {
             search: crate::search::Index::open(&db_path.with_file_name("search"))?,
             live: crate::live::Pages::new(crate::store::open(db_path)?, clock.clone()),
             attachments: db_path.with_file_name("attachments"),
+            pdf_logos: db_path.with_file_name("pdf-logos"),
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             public_url: None,
             resolve: intranet::system_resolver(),
@@ -136,6 +138,11 @@ impl Core {
     /// Where Attachment files are kept.
     pub fn attachments_dir(&self) -> &Path {
         &self.attachments
+    }
+
+    /// Where the files of PDF Styles' logos are kept.
+    pub fn pdf_logos_dir(&self) -> &Path {
+        &self.pdf_logos
     }
 
     pub fn db(&self) -> MutexGuard<'_, Connection> {

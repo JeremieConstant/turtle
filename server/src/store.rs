@@ -331,6 +331,13 @@ const MIGRATIONS: &[&str] = &[
          code_font, body_size, h1_size, h2_size, h3_size, cover, toc, toc_depth, footer_text, language, created_at)
      VALUES ('standard', 'Standard', 1, '#23252b', '#17181c', '#2f5f8a', 'Inter', 'Inter', 'JetBrains Mono',
          9.6, 26, 13.5, 11, 1, 1, 2, NULL, 'en', 0);",
+    // A PDF Style's logo: its file lies in pdf-logos beside the database
+    // under the SHA-256 of its content (ADR-0009), apart from Attachments,
+    // whose clean-up only asks the attachments table. Its format is the one
+    // its content was found to have, so it is never judged by its name.
+    "ALTER TABLE pdf_styles ADD COLUMN logo_name TEXT;
+     ALTER TABLE pdf_styles ADD COLUMN logo_format TEXT;
+     ALTER TABLE pdf_styles ADD COLUMN logo_hash TEXT;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

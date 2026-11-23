@@ -50,12 +50,14 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
     areas::signed_in(principal)?;
     // What is in the PDF is decided under one lock, so the tree is seen as
     // it was at one moment; the content is read afterwards, as each Page is now.
-    let (name, entries, look) = {
+    let (name, entries, look, logo) = {
         let db = core.db();
         let (name, entries) = readable_subtree(&db, principal, &input.area_id, input.entry_id.as_deref())?;
         let style = pdf_styles::pdf_style(&db, input.pdf_style_id.as_deref())?;
-        (name, entries, pdf_styles::look_of(style.values))
+        let logo = pdf_styles::stored_logo(&db, &style.id)?;
+        (name, entries, pdf_styles::look_of(style.values), logo)
     };
+    let logo = pdf_styles::logo_for_pdf(core, logo);
     let mut flat = Vec::new();
     flatten(&entries, 0, &mut flat);
     let mut contents = HashMap::new();
@@ -109,6 +111,7 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
         as_of: pdf::Date::of(core.now()),
         parts,
         images: found.images,
+        logo,
     };
     let pdf = pdf::typeset(document, &look)?;
     Ok(PdfExport {
@@ -406,7 +409,10 @@ mod tests {
     use crate::ops::permissions::{self, Holder, Role};
     use crate::ops::testing::{fresh, give_role, member};
     use crate::ops::accounts::Nothing;
-    use crate::ops::pdf_styles::{create_pdf_style, list_pdf_styles, set_default_pdf_style, PdfStyleId, PdfStyleValues};
+    use crate::ops::pdf_styles::{
+        create_pdf_style, list_pdf_styles, remove_pdf_style_logo, set_default_pdf_style, set_pdf_style_logo, NewPdfStyleLogo,
+        OfPdfStyle, PdfStyleId, PdfStyleValues,
+    };
     use crate::ops::tree::{create_folder, create_page, NewEntry, NewPage};
     use crate::pdf::Language;
     use std::collections::BTreeSet;
@@ -926,5 +932,128 @@ mod tests {
             ["Engineering STAND 14. November 2023", "ENGINEERING Inhalt Runbook 3 2", "ENGINEERING Runbook TIPP Restart it. 3"]
                 .map(squashed)
         );
+    }
+
+    /// The size of every image or drawing the PDF places, page by page, as
+    /// (width, height) in whole tenths of a millimetre.
+    fn placed_in(export: &PdfExport) -> Vec<Vec<(i64, i64)>> {
+        let document = pdf_of(export);
+        let mut pages = Vec::new();
+        for page_id in document.get_pages().into_values() {
+            let content = pdf_extract::content::Content::decode(&document.get_page_content(page_id).unwrap()).unwrap();
+            // The current transformation, [a b c d e f], and those saved.
+            let mut matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0f32];
+            let mut saved = Vec::new();
+            let mut placed = Vec::new();
+            for operation in content.operations {
+                match operation.operator.as_str() {
+                    "q" => saved.push(matrix),
+                    "Q" => matrix = saved.pop().unwrap(),
+                    "cm" => {
+                        let n: Vec<f32> = operation.operands.iter().map(|operand| operand.as_float().unwrap()).collect();
+                        let m = matrix;
+                        matrix = [
+                            n[0] * m[0] + n[1] * m[2],
+                            n[0] * m[1] + n[1] * m[3],
+                            n[2] * m[0] + n[3] * m[2],
+                            n[2] * m[1] + n[3] * m[3],
+                            n[4] * m[0] + n[5] * m[2] + m[4],
+                            n[4] * m[1] + n[5] * m[3] + m[5],
+                        ];
+                    }
+                    "Do" => {
+                        let tenths = |points: f32| (points * 254.0 / 72.0).round() as i64;
+                        placed.push((tenths(matrix[0].hypot(matrix[1])), tenths(matrix[2].hypot(matrix[3]))));
+                    }
+                    _ => {}
+                }
+            }
+            pages.push(placed);
+        }
+        pages
+    }
+
+    /// A PNG four pixels wide and one high.
+    const WIDE_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAIAAAB2XpiaAAAADUlEQVR4nGNQcEiAIwASjQMB99WrigAAAABJRU5ErkJggg==";
+    /// A PNG one pixel wide and four high.
+    const TALL_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAECAIAAADAusJtAAAADklEQVR4nGNQcEhgQMIAFxADASm6FqEAAAAASUVORK5CYII=";
+
+    fn set_logo(core: &Core, admin: &Principal, pdf_style_id: &str, content: &str) {
+        let input = NewPdfStyleLogo { pdf_style_id: pdf_style_id.into(), file_name: "logo".into(), content: content.into() };
+        set_pdf_style_logo(core, admin, input).unwrap();
+    }
+
+    #[test]
+    fn the_logo_is_on_the_cover_and_small_in_every_footer_after_it_in_proportion() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
+
+        set_logo(&core, &ada, "standard", WIDE_PNG);
+        let wide = export_with(&core, &grace, &area_id, None).unwrap();
+        set_logo(&core, &ada, "standard", TALL_PNG);
+        let tall = export_with(&core, &grace, &area_id, None).unwrap();
+
+        // At most 40 mm wide and 20 mm high on the cover, 6 mm high in the footer.
+        assert_eq!(placed_in(&wide), [vec![(400, 100)], vec![(240, 60)], vec![(240, 60)]]);
+        assert_eq!(placed_in(&tall), [vec![(50, 200)], vec![(15, 60)], vec![(15, 60)]]);
+        assert_eq!(pages_of(&wide), pages_of(&tall));
+        assert_eq!(pages_of(&wide)[2], squashed("ENGINEERING Runbook Restart the server. 3"));
+    }
+
+    #[test]
+    fn an_svg_logo_is_drawn_into_the_pdf() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
+        // 20 by 10, so as wide as the cover allows.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#aa3300"/></svg>"##;
+        set_logo(&core, &ada, "standard", &base64::engine::general_purpose::STANDARD.encode(svg));
+
+        let exported = export_with(&core, &grace, &area_id, None).unwrap();
+
+        assert!(colors_in(&exported).contains("#aa3300"), "{:?}", colors_in(&exported));
+        assert_eq!(pages_of(&exported).len(), 3);
+    }
+
+    #[test]
+    fn a_pdf_style_without_a_logo_gives_the_same_pdf_as_before_it_had_one() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
+        let before = export_with(&core, &grace, &area_id, None).unwrap();
+
+        set_logo(&core, &ada, "standard", WIDE_PNG);
+        let with_logo = export_with(&core, &grace, &area_id, None).unwrap();
+        remove_pdf_style_logo(&core, &ada, OfPdfStyle { pdf_style_id: "standard".into() }).unwrap();
+        let after = export_with(&core, &grace, &area_id, None).unwrap();
+
+        assert_eq!(placed_in(&before), [vec![], vec![], vec![]]);
+        assert_ne!(with_logo.content, before.content);
+        assert_eq!(after.content, before.content);
+    }
+
+    #[test]
+    fn a_logo_file_that_cannot_be_shown_any_more_leaves_the_pdf_without_a_logo() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
+        let before = export_with(&core, &grace, &area_id, None).unwrap();
+        set_logo(&core, &ada, "standard", WIDE_PNG);
+        for file in std::fs::read_dir(core.pdf_logos_dir()).unwrap() {
+            std::fs::write(file.unwrap().path(), b"damaged").unwrap();
+        }
+
+        let damaged = export_with(&core, &grace, &area_id, None).unwrap();
+
+        assert_eq!(damaged.content, before.content);
     }
 }

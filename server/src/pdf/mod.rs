@@ -13,7 +13,7 @@ use typst::foundations::{Bytes, Datetime, Duration};
 use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
-use typst::visualize::{ExchangeFormat, RasterImage};
+use typst::visualize::{ExchangeFormat, RasterImage, SvgImage};
 use typst::{Library, LibraryExt, World};
 
 /// The fonts built into Turtle, so it needs nothing else on disk (ADR-0002).
@@ -172,6 +172,55 @@ pub struct Document {
     pub parts: Vec<Part>,
     /// The images the content shows, by the path an `Inline::Image` names.
     pub images: HashMap<String, Vec<u8>>,
+    /// The PDF Style's logo, shown on the cover and in the footer.
+    pub logo: Option<Logo>,
+}
+
+/// A logo `logo_format` found the layout can show.
+pub struct Logo {
+    pub format: LogoFormat,
+    pub content: Vec<u8>,
+}
+
+/// The kinds of file a logo may be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogoFormat {
+    Png,
+    Jpeg,
+    Svg,
+}
+
+impl LogoFormat {
+    /// The format's name, as stored.
+    pub fn code(self) -> &'static str {
+        match self {
+            LogoFormat::Png => "png",
+            LogoFormat::Jpeg => "jpeg",
+            LogoFormat::Svg => "svg",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<LogoFormat> {
+        [LogoFormat::Png, LogoFormat::Jpeg, LogoFormat::Svg].into_iter().find(|format| format.code() == code)
+    }
+
+    pub fn content_type(self) -> &'static str {
+        match self {
+            LogoFormat::Png => "image/png",
+            LogoFormat::Jpeg => "image/jpeg",
+            LogoFormat::Svg => "image/svg+xml",
+        }
+    }
+
+    /// The path the layout reads the logo from. Typst tells the format by
+    /// its extension.
+    fn path(self) -> &'static str {
+        match self {
+            LogoFormat::Png => "/logo.png",
+            LogoFormat::Jpeg => "/logo.jpg",
+            LogoFormat::Svg => "/logo.svg",
+        }
+    }
 }
 
 /// A Folder, shown as a group heading, or a Page, shown as a chapter.
@@ -251,6 +300,25 @@ pub fn is_image(bytes: &[u8]) -> bool {
     ExchangeFormat::detect(bytes).is_some_and(|format| RasterImage::plain(Bytes::new(bytes.to_vec()), format).is_ok())
 }
 
+/// What kind of logo these bytes are, if they are a PNG, JPEG or SVG the
+/// layout can show. Each is typeset on a page of its own to find out: an SVG
+/// can be read and still fail the PDF, such as one that names a file
+/// elsewhere, and a logo that fails would fail every PDF made with it.
+pub fn logo_format(content: &[u8]) -> Option<LogoFormat> {
+    let format = match ExchangeFormat::detect(content) {
+        Some(ExchangeFormat::Png) => LogoFormat::Png,
+        Some(ExchangeFormat::Jpg) => LogoFormat::Jpeg,
+        Some(_) => return None,
+        None if SvgImage::new(Bytes::new(content.to_vec())).is_ok() => LogoFormat::Svg,
+        None => return None,
+    };
+    let files = HashMap::from([(file_id(format.path()), Bytes::new(content.to_vec()))]);
+    let world = PdfWorld::new(&format!("#image({:?}, width: 40mm)", format.path()), files);
+    let shown = typeset_world(&world).is_ok();
+    typst::comemo::evict(0);
+    shown.then_some(format)
+}
+
 /// Typesets the document in the look as a PDF.
 pub fn typeset(document: Document, look: &Look) -> anyhow::Result<Vec<u8>> {
     #[derive(Serialize)]
@@ -260,6 +328,8 @@ pub fn typeset(document: Document, look: &Look) -> anyhow::Result<Vec<u8>> {
         title: String,
         subtitle: Option<String>,
         date: String,
+        /// The path of the logo, if there is one.
+        logo: Option<&'static str>,
         parts: Vec<Part>,
     }
     let data = Data {
@@ -268,12 +338,16 @@ pub fn typeset(document: Document, look: &Look) -> anyhow::Result<Vec<u8>> {
         title: document.title,
         subtitle: document.subtitle,
         date: look.language.date(document.as_of),
+        logo: document.logo.as_ref().map(|logo| logo.format.path()),
         parts: document.parts,
     };
     let mut files: HashMap<FileId, Bytes> =
         document.images.into_iter().map(|(path, bytes)| (file_id(&path), Bytes::new(bytes))).collect();
+    if let Some(logo) = document.logo {
+        files.insert(file_id(logo.format.path()), Bytes::new(logo.content));
+    }
     files.insert(file_id("/data.json"), Bytes::new(serde_json::to_vec(&data)?));
-    let world = PdfWorld::new(files);
+    let world = PdfWorld::new(LAYOUT, files);
     let result = typeset_world(&world);
     // Typst keeps what it worked out for reuse; a server would only gather it.
     typst::comemo::evict(0);
@@ -304,13 +378,14 @@ struct PdfWorld {
 }
 
 impl PdfWorld {
-    fn new(files: HashMap<FileId, Bytes>) -> PdfWorld {
+    /// A world whose main file is `main`.
+    fn new(main: &str, files: HashMap<FileId, Bytes>) -> PdfWorld {
         let fonts: Vec<Font> = FONTS.iter().flat_map(|data| Font::iter(Bytes::new(*data))).collect();
         PdfWorld {
             library: LazyHash::new(Library::builder().build()),
             book: LazyHash::new(FontBook::from_fonts(&fonts)),
             fonts,
-            main: Source::new(file_id("/layout.typ"), LAYOUT.into()),
+            main: Source::new(file_id("/main.typ"), main.into()),
             files,
         }
     }

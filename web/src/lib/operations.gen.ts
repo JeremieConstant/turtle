@@ -336,6 +336,8 @@ export type PdfStyle = {
   is_default: boolean
   /** The language of the words the PDF shows itself, such as "Contents", and of its date. */
   language: Language
+  /** Its logo, if it has one. */
+  logo?: PdfStyleLogo | null
   /** Unique in the Workspace. */
   name: string
   /** The colour of body text, as `#rrggbb`. */
@@ -351,6 +353,13 @@ export type PdfStyleList = {
   font_families: string[]
   /** In order of name. */
   pdf_styles: PdfStyle[]
+}
+
+export type PdfStyleLogo = {
+  /** The name of the file it came from. */
+  file_name: string
+  /** Where a Workspace Admin's browser shows it, as an image. */
+  url: string
 }
 
 export type Place = {
@@ -1114,6 +1123,24 @@ of the Page. Needed only when several Sections have this heading. */
       id: string
     }
     output: null
+  }
+  /** Gives a PDF Style a logo, shown on the cover of a PDF and small in the footer of every page after it, replacing any it had. A PNG, JPEG or SVG of at most 2 MB, its content in base64. Only for a Workspace Admin. */
+  set_pdf_style_logo: {
+    input: {
+      /** The file's content, in base64: a PNG, JPEG or SVG of at most 2 MB. */
+      content: string
+      /** The file's name, such as "logo.svg". Any folders before it are left out. */
+      file_name: string
+      pdf_style_id: string
+    }
+    output: PdfStyle
+  }
+  /** Removes a PDF Style's logo. Only for a Workspace Admin. */
+  remove_pdf_style_logo: {
+    input: {
+      pdf_style_id: string
+    }
+    output: PdfStyle
   }
   /** Gets the current titles of the given Pages, as Page links show them. A Page the caller cannot read, or that is in the Trash, is left out, so its link shows no title. */
   get_page_titles: {

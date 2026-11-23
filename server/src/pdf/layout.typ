@@ -22,6 +22,16 @@
   danger: rgb("#c53030"),
 )
 
+// The PDF Style's logo as large as fits in the size given, in proportion.
+#let logo(max-width, max-height) = context {
+  let natural = measure(image(data.logo))
+  if natural.height == 0pt or natural.width / natural.height > max-width / max-height {
+    image(data.logo, width: max-width)
+  } else {
+    image(data.logo, height: max-height)
+  }
+}
+
 #set document(title: data.title)
 #set text(
   font: look.body_font,
@@ -47,6 +57,10 @@
   header: align(bottom, text(size: 7.5pt, weight: 500, tracking: 0.06em, fill: faint, upper(data.title))),
   footer: {
     set text(size: 7.5pt, weight: 500, fill: faint)
+    if data.logo != none {
+      box(baseline: 2mm, logo(40mm, 6mm))
+      h(3mm)
+    }
     if look.footer_text != none { look.footer_text }
     h(1fr)
     text(fill: muted, context counter(page).display())
@@ -208,6 +222,7 @@
 
 #if look.cover {
   page(margin: (top: 26mm, x: 24mm, bottom: 24mm), header: none, footer: none, {
+    if data.logo != none { logo(40mm, 20mm) }
     v(1fr)
     block(width: 140mm, {
       box(width: 22mm, height: 2.2pt, fill: accent, radius: 2pt)

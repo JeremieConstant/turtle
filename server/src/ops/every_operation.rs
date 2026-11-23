@@ -151,6 +151,13 @@ fn table() -> Vec<Row> {
         ),
         ("set_default_pdf_style", |_| json!({"id": "standard"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("delete_pdf_style", |_| json!({"id": "standard"}), [REFUSED, REFUSED, REFUSED, REFUSED, "conflict"]),
+        (
+            "set_pdf_style_logo",
+            // A PNG of one pixel.
+            |_| json!({"pdf_style_id": "standard", "file_name": "logo.png", "content": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}),
+            [REFUSED, REFUSED, REFUSED, REFUSED, OK],
+        ),
+        ("remove_pdf_style_logo", |_| json!({"pdf_style_id": "standard"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),
         // The Page has no headings, so those who may change it learn that.
