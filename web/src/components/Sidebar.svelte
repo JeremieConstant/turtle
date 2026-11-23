@@ -20,6 +20,7 @@
   import { createEntry, foldable } from '../lib/tree'
   import { collapsed, ui } from '../lib/ui.svelte'
   import Icon from './Icon.svelte'
+  import Logo from './Logo.svelte'
   import NameDialog from './NameDialog.svelte'
   import SearchBox from './SearchBox.svelte'
   import SidebarTree from './SidebarTree.svelte'
@@ -135,7 +136,7 @@
 <nav class="side" aria-label="Areas">
   <div class="top">
     <a class="brand" href="/" onclick={event => router.follow(event, '/')}>
-      <span class="mark" aria-hidden="true">T</span>
+      <Logo size="var(--size-mark)" />
       Turtle
     </a>
   </div>
@@ -301,16 +302,6 @@
     text-decoration: none;
   }
 
-  .mark {
-    display: grid;
-    place-items: center;
-    width: var(--size-mark);
-    height: var(--size-mark);
-    border-radius: var(--radius-s);
-    background: var(--color-text);
-    color: var(--color-bg);
-    font-size: var(--text-xs);
-  }
 
   .search {
     flex: none;

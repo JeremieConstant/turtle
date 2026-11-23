@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import { OperationError } from '../lib/ops'
+  import Logo from './Logo.svelte'
 
   const {
     heading,
@@ -37,7 +38,7 @@
 <main class="standalone">
   <div class="standalone-card">
     <div>
-      <strong class="wordmark">Turtle</strong>
+      <strong class="wordmark"><Logo size="var(--size-mark)" />Turtle</strong>
       <h1>{heading}</h1>
       <p class="muted">{intro}</p>
     </div>
