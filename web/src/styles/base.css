@@ -411,6 +411,11 @@ dialog[open] {
   margin: 0;
 }
 
+/* Notices that follow one another stay separate cards. */
+.notice + .notice {
+  margin-top: var(--space-3);
+}
+
 .notice code {
   overflow-wrap: anywhere;
 }
