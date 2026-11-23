@@ -94,6 +94,9 @@ export type Connecting = {
 its public address, since an AI client could not sign in through
 OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it. */
   mcp_address?: string | null
+  /** Whether a Workspace Admin has turned connecting AI off. While it is,
+no app can connect and connected apps cannot act. */
+  turned_off: boolean
 }
 
 export type ConnectionRedirect = {
@@ -960,6 +963,14 @@ of the Page. Needed only when several Sections have this heading. */
       redirect_uri?: string | null
     }
     output: ConnectionRequest
+  }
+  /** Turns connecting AI on or off for the whole Workspace. While it is off, apps cannot register or be allowed, and connected apps cannot act; Tokens made by hand keep working. Only a Workspace Admin may. */
+  set_connecting_ai: {
+    input: {
+      /** Whether AI clients may connect and connected apps may act. */
+      on: boolean
+    }
+    output: null
   }
   /** Allows an app to act as the caller, or denies it, and returns the address to send the browser back to the app with the answer. */
   answer_connection_request: {

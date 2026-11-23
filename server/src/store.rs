@@ -275,6 +275,15 @@ const MIGRATIONS: &[&str] = &[
          used_at INTEGER
      );
      CREATE INDEX refresh_tokens_by_token ON refresh_tokens (token_id);",
+    // Settings of the whole Workspace, which a Workspace Admin changes. One
+    // installation is one Workspace (ADR-0002), so there is exactly one row.
+    // Connecting AI can be turned off, for example while a policy is being
+    // decided; the connections are kept, so turning it on again restores them.
+    "CREATE TABLE workspace_settings (
+         id INTEGER PRIMARY KEY CHECK (id = 1),
+         connecting_ai INTEGER NOT NULL DEFAULT 1
+     );
+     INSERT INTO workspace_settings (id) VALUES (1);",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
