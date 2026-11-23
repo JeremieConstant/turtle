@@ -3,7 +3,7 @@
 
 use super::export::{file_name_of, readable_subtree};
 use super::tree::{Entry, Kind};
-use super::{areas, attachments, links, pdf_styles};
+use super::{areas, attachments, fonts, links, pdf_styles};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use crate::model::{Block, Inline, Marks};
 use crate::pdf;
@@ -50,12 +50,15 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
     areas::signed_in(principal)?;
     // What is in the PDF is decided under one lock, so the tree is seen as
     // it was at one moment; the content is read afterwards, as each Page is now.
-    let (name, entries, look, logo) = {
+    let (name, entries, look, fonts, logo) = {
         let db = core.db();
         let (name, entries) = readable_subtree(&db, principal, &input.area_id, input.entry_id.as_deref())?;
         let style = pdf_styles::pdf_style(&db, input.pdf_style_id.as_deref())?;
         let logo = pdf_styles::stored_logo(&db, &style.id)?;
-        (name, entries, pdf_styles::look_of(style.values), logo)
+        let look = pdf_styles::look_of(style.values);
+        let families = [look.body_font.as_str(), look.heading_font.as_str(), look.code_font.as_str()];
+        let fonts = fonts::files_of_families(core, &db, &families)?;
+        (name, entries, look, fonts, logo)
     };
     let logo = pdf_styles::logo_for_pdf(core, logo);
     let mut flat = Vec::new();
@@ -112,6 +115,7 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
         parts,
         images: found.images,
         logo,
+        fonts,
     };
     let pdf = pdf::typeset(document, &look)?;
     Ok(PdfExport {
@@ -1055,5 +1059,52 @@ mod tests {
         let damaged = export_with(&core, &grace, &area_id, None).unwrap();
 
         assert_eq!(damaged.content, before.content);
+    }
+
+    /// The fonts the PDF's text is in, by their full names, such as "Inter-Bold".
+    fn font_names_in(export: &PdfExport) -> BTreeSet<String> {
+        let document = pdf_of(export);
+        document
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .filter(|dict| dict.get(b"Type").and_then(|kind| kind.as_name()).ok() == Some(b"FontDescriptor"))
+            .map(|dict| {
+                let name = String::from_utf8(dict.get(b"FontName").unwrap().as_name().unwrap().to_vec()).unwrap();
+                // Without the tag of the subset the PDF embeds.
+                name.split_once('+').map_or(name.clone(), |(_, name)| name.to_string())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_uploaded_family_is_used_with_its_bold_and_italic() {
+        use crate::ops::fonts::{upload_font, NewFont};
+        use crate::ops::testing::{font_file, TestStyle};
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart **the server** *gently*, `now`.");
+        for (file_name, style) in [("Regular.ttf", TestStyle::Regular), ("Bold.otf", TestStyle::Bold), ("Italic.ttf", TestStyle::Italic)] {
+            let content = base64::engine::general_purpose::STANDARD.encode(font_file("Corporate Sans", style));
+            upload_font(&core, &ada, NewFont { file_name: file_name.into(), content }).unwrap();
+        }
+        let corporate = PdfStyleValues {
+            name: "Corporate".into(),
+            body_font: "Corporate Sans".into(),
+            heading_font: "Corporate Sans".into(),
+            code_font: "Corporate Sans".into(),
+            ..standard_values(&core, &grace)
+        };
+        let corporate = style(&core, &ada, corporate);
+
+        let styled = export_with(&core, &grace, &area_id, Some(&corporate)).unwrap();
+
+        assert_eq!(
+            font_names_in(&styled),
+            BTreeSet::from(["CorporateSans-Regular".into(), "CorporateSans-Bold".into(), "CorporateSans-Italic".into()])
+        );
+        assert_eq!(pages_of(&styled)[2], squashed("ENGINEERING Runbook Restart the server gently, now. 3"));
     }
 }

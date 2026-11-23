@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PdfFonts from '../components/PdfFonts.svelte'
   import PdfStyleForm from '../components/PdfStyleForm.svelte'
   import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
@@ -125,5 +126,7 @@
         </li>
       {/each}
     </ul>
+
+    <PdfFonts onchange={() => load().catch(() => undefined)} />
   {/if}
 </main>
