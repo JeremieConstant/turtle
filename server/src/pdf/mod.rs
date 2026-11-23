@@ -5,7 +5,8 @@
 //! look, is handed to it as data in a JSON file it reads, so nothing from a
 //! Page is ever read as Typst: it is always shown as written.
 
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use typst::diag::{FileError, FileResult};
 use typst::foundations::{Bytes, Datetime, Duration};
@@ -25,11 +26,19 @@ const FONTS: &[&[u8]] = &[
     include_bytes!("../../fonts/inter/Inter-SemiBoldItalic.ttf"),
     include_bytes!("../../fonts/inter/Inter-Bold.ttf"),
     include_bytes!("../../fonts/inter/Inter-BoldItalic.ttf"),
+    include_bytes!("../../fonts/source-serif-4/SourceSerif4-Regular.ttf"),
+    include_bytes!("../../fonts/source-serif-4/SourceSerif4-It.ttf"),
+    include_bytes!("../../fonts/source-serif-4/SourceSerif4-Semibold.ttf"),
+    include_bytes!("../../fonts/source-serif-4/SourceSerif4-Bold.ttf"),
+    include_bytes!("../../fonts/source-serif-4/SourceSerif4-BoldIt.ttf"),
     include_bytes!("../../fonts/jetbrains-mono/JetBrainsMono-Regular.ttf"),
     include_bytes!("../../fonts/jetbrains-mono/JetBrainsMono-Italic.ttf"),
     include_bytes!("../../fonts/jetbrains-mono/JetBrainsMono-Bold.ttf"),
     include_bytes!("../../fonts/jetbrains-mono/JetBrainsMono-BoldItalic.ttf"),
 ];
+
+/// The font families built in, by the names a PDF Style uses for them.
+pub const FONT_FAMILIES: &[&str] = &["Inter", "Source Serif 4", "JetBrains Mono"];
 
 const LAYOUT: &str = include_str!("layout.typ");
 
@@ -51,43 +60,36 @@ pub struct Look {
     pub h2_size: f64,
     pub h3_size: f64,
     pub cover: bool,
-    pub contents: bool,
+    /// Whether there is a table of contents.
+    pub toc: bool,
     /// 1 lists the chapters, 2 also their `##` Sections, 3 also `###`.
-    pub contents_depth: u8,
+    pub toc_depth: u8,
     pub footer_text: Option<String>,
     pub language: Language,
 }
 
-impl Look {
-    /// Turtle's own neutral look.
-    pub fn built_in() -> Look {
-        Look {
-            text_color: "#23252b".into(),
-            heading_color: "#17181c".into(),
-            accent_color: "#2f5f8a".into(),
-            body_font: "Inter".into(),
-            heading_font: "Inter".into(),
-            code_font: "JetBrains Mono".into(),
-            body_size: 9.6,
-            h1_size: 26.0,
-            h2_size: 13.5,
-            h3_size: 11.0,
-            cover: true,
-            contents: true,
-            contents_depth: 2,
-            footer_text: None,
-            language: Language::English,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
+/// The language of the words a PDF shows itself and of its date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum Language {
     #[serde(rename = "en")]
     English,
+    #[serde(rename = "de")]
+    German,
 }
 
 impl Language {
+    /// The language's code, as stored and as the API names it.
+    pub fn code(self) -> &'static str {
+        match self {
+            Language::English => "en",
+            Language::German => "de",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Language> {
+        [Language::English, Language::German].into_iter().find(|language| language.code() == code)
+    }
+
     fn labels(self) -> Labels {
         match self {
             Language::English => Labels {
@@ -98,6 +100,14 @@ impl Language {
                 warning: "Warning",
                 danger: "Danger",
             },
+            Language::German => Labels {
+                contents: "Inhalt",
+                as_of: "Stand",
+                note: "Hinweis",
+                tip: "Tipp",
+                warning: "Warnung",
+                danger: "Gefahr",
+            },
         }
     }
 
@@ -106,8 +116,14 @@ impl Language {
             "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
             "November", "December",
         ];
+        const MONATE: [&str; 12] = [
+            "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+            "November", "Dezember",
+        ];
+        let month = usize::from(date.month - 1);
         match self {
-            Language::English => format!("{} {} {}", date.day, MONTHS[usize::from(date.month - 1)], date.year),
+            Language::English => format!("{} {} {}", date.day, MONTHS[month], date.year),
+            Language::German => format!("{}. {} {}", date.day, MONATE[month], date.year),
         }
     }
 }

@@ -247,6 +247,7 @@
       >All connected apps</a
     >
     <a class="menu-item" role="menuitem" href="/settings/agents" onclick={event => go(event, '/settings/agents')}>Agents</a>
+    <a class="menu-item" role="menuitem" href="/settings/pdf-styles" onclick={event => go(event, '/settings/pdf-styles')}>PDF Styles</a>
     <a class="menu-item" role="menuitem" href="/settings/deleted-areas" onclick={event => go(event, '/settings/deleted-areas')}>Deleted Areas</a>
   {/if}
   <a class="menu-item" role="menuitem" href="/settings/connect-ai" onclick={event => go(event, '/settings/connect-ai')}>Connect AI</a>

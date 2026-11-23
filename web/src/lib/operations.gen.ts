@@ -202,6 +202,8 @@ export type GrantList = {
 
 export type Kind = "page" | "folder"
 
+export type Language = "en" | "de"
+
 export type LastEdited = {
   /** Seconds since the Unix epoch. */
   at: number
@@ -304,6 +306,51 @@ export type PdfExport = {
   /** A name to save it under, after the Area or the top of the Subtree,
 such as "Engineering.pdf". */
   file_name: string
+}
+
+export type PdfStyle = {
+  /** The colour of links, rules, Callout bars and the table of contents' numbers, as `#rrggbb`. */
+  accent_color: string
+  /** The font family of body text, one of those `list_pdf_styles` names. */
+  body_font: string
+  /** The size of body text in points, from 8 to 14. */
+  body_size: number
+  /** The font family of code. */
+  code_font: string
+  /** Whether the PDF begins with a cover. */
+  cover: boolean
+  /** One line at the foot of every page but the cover, of at most 200 characters. */
+  footer_text?: string | null
+  /** The size of a chapter's title in points, from 10 to 36. */
+  h1_size: number
+  /** The size of a Page's top headings in points, from 10 to 36. */
+  h2_size: number
+  /** The size of the headings below those in points, from 10 to 36. */
+  h3_size: number
+  /** The colour of headings, as `#rrggbb`. */
+  heading_color: string
+  /** The font family of headings and the cover's title. */
+  heading_font: string
+  id: string
+  /** Whether a PDF is made with this PDF Style when none is chosen. Exactly one is. */
+  is_default: boolean
+  /** The language of the words the PDF shows itself, such as "Contents", and of its date. */
+  language: Language
+  /** Unique in the Workspace. */
+  name: string
+  /** The colour of body text, as `#rrggbb`. */
+  text_color: string
+  /** Whether the PDF has a table of contents. */
+  toc: boolean
+  /** What the table of contents lists: 1 the chapters, 2 also their `##` Sections, 3 also `###`. */
+  toc_depth: number
+}
+
+export type PdfStyleList = {
+  /** The font families a PDF Style may use. */
+  font_families: string[]
+  /** In order of name. */
+  pdf_styles: PdfStyle[]
 }
 
 export type Place = {
@@ -959,16 +1006,114 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: Export
   }
-  /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. Needs the Read Role. */
+  /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role. */
   export_pdf: {
     input: {
       area_id: string
       /** The Page or Folder whose Subtree to export; the whole Area if absent. */
       entry_id?: string | null
+      /** The PDF Style to make it with, as `list_pdf_styles` names it; the default one if absent. */
+      pdf_style_id?: string | null
       /** Shown on the cover, beneath the title. */
       subtitle?: string | null
     }
     output: PdfExport
+  }
+  /** Lists every PDF Style with its values, marking the default one, and the font families a PDF Style may use. For anyone signed in, to choose one when exporting a PDF. */
+  list_pdf_styles: {
+    input: Record<string, never>
+    output: PdfStyleList
+  }
+  /** Creates a PDF Style. Only for a Workspace Admin. */
+  create_pdf_style: {
+    input: {
+      /** The colour of links, rules, Callout bars and the table of contents' numbers, as `#rrggbb`. */
+      accent_color: string
+      /** The font family of body text, one of those `list_pdf_styles` names. */
+      body_font: string
+      /** The size of body text in points, from 8 to 14. */
+      body_size: number
+      /** The font family of code. */
+      code_font: string
+      /** Whether the PDF begins with a cover. */
+      cover: boolean
+      /** One line at the foot of every page but the cover, of at most 200 characters. */
+      footer_text?: string | null
+      /** The size of a chapter's title in points, from 10 to 36. */
+      h1_size: number
+      /** The size of a Page's top headings in points, from 10 to 36. */
+      h2_size: number
+      /** The size of the headings below those in points, from 10 to 36. */
+      h3_size: number
+      /** The colour of headings, as `#rrggbb`. */
+      heading_color: string
+      /** The font family of headings and the cover's title. */
+      heading_font: string
+      /** The language of the words the PDF shows itself, such as "Contents", and of its date. */
+      language: Language
+      /** Unique in the Workspace. */
+      name: string
+      /** The colour of body text, as `#rrggbb`. */
+      text_color: string
+      /** Whether the PDF has a table of contents. */
+      toc: boolean
+      /** What the table of contents lists: 1 the chapters, 2 also their `##` Sections, 3 also `###`. */
+      toc_depth: number
+    }
+    output: PdfStyle
+  }
+  /** Changes every value of a PDF Style. Only for a Workspace Admin. */
+  update_pdf_style: {
+    input: {
+      /** The colour of links, rules, Callout bars and the table of contents' numbers, as `#rrggbb`. */
+      accent_color: string
+      /** The font family of body text, one of those `list_pdf_styles` names. */
+      body_font: string
+      /** The size of body text in points, from 8 to 14. */
+      body_size: number
+      /** The font family of code. */
+      code_font: string
+      /** Whether the PDF begins with a cover. */
+      cover: boolean
+      /** One line at the foot of every page but the cover, of at most 200 characters. */
+      footer_text?: string | null
+      /** The size of a chapter's title in points, from 10 to 36. */
+      h1_size: number
+      /** The size of a Page's top headings in points, from 10 to 36. */
+      h2_size: number
+      /** The size of the headings below those in points, from 10 to 36. */
+      h3_size: number
+      /** The colour of headings, as `#rrggbb`. */
+      heading_color: string
+      /** The font family of headings and the cover's title. */
+      heading_font: string
+      id: string
+      /** The language of the words the PDF shows itself, such as "Contents", and of its date. */
+      language: Language
+      /** Unique in the Workspace. */
+      name: string
+      /** The colour of body text, as `#rrggbb`. */
+      text_color: string
+      /** Whether the PDF has a table of contents. */
+      toc: boolean
+      /** What the table of contents lists: 1 the chapters, 2 also their `##` Sections, 3 also `###`. */
+      toc_depth: number
+    }
+    output: PdfStyle
+  }
+  /** Makes a PDF Style the default, with which a PDF is made when none is chosen. Only for a Workspace Admin. */
+  set_default_pdf_style: {
+    input: {
+      id: string
+    }
+    output: PdfStyle
+  }
+  /** Deletes a PDF Style. The default one cannot be deleted; make another one the default first. Only for a Workspace Admin. */
+  delete_pdf_style: {
+    input: {
+      id: string
+    }
+    output: null
   }
   /** Gets the current titles of the given Pages, as Page links show them. A Page the caller cannot read, or that is in the Trash, is left out, so its link shows no title. */
   get_page_titles: {

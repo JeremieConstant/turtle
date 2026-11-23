@@ -114,9 +114,12 @@
 
 #let inlines(xs) = all(xs, inline-of)
 
-// A heading other content can link to, by its label.
-#let labelled-heading(level, title, name) = {
-  if name == none { heading(level: level, outlined: false, title) } else [#heading(level: level, outlined: false, title)#label(name)]
+// A heading other content can link to, by its label. It keeps the size of
+// the text around it, which Typst would make larger by its level: the PDF
+// Style's sizes are the sizes headings have.
+#let labelled-heading(level, title, name) = context {
+  let shown = heading(level: level, outlined: false, text(size: text.size, title))
+  if name == none { shown } else [#shown#label(name)]
 }
 
 #let block-of(b, level) = {
@@ -234,7 +237,7 @@
   text(size: number-size, fill: muted, page-of(name))
 })
 
-#if look.contents {
+#if look.toc {
   block(below: 12mm, text(font: look.heading_font, size: look.h1_size * 1pt, weight: 600, tracking: -0.03em, fill: ink-strong, data.labels.contents))
   for (index, part) in data.parts.enumerate() {
     let indent = part.depth * 9mm
@@ -249,7 +252,7 @@
     } else {
       block(width: 100%, breakable: false, inset: (left: indent, bottom: 3.2mm), below: 3.2mm, stroke: (bottom: 0.5pt + rule-soft), {
         contents-line(part.label, text(size: 11pt, weight: 500, tracking: -0.01em, fill: ink-strong, part.title), 9pt)
-        for section in part.sections.filter(s => s.rank <= look.contents_depth) {
+        for section in part.sections.filter(s => s.rank <= look.toc_depth) {
           block(above: 1.8mm, inset: (left: 5mm * (section.rank - 1)), contents-line(section.label, text(size: 8.8pt, fill: soft, section.title), 8.5pt))
         }
       })

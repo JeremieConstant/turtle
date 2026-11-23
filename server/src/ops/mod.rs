@@ -20,6 +20,7 @@ pub mod links;
 pub mod members;
 pub mod moves;
 pub mod pdf_export;
+pub mod pdf_styles;
 pub mod permissions;
 pub mod quick_notes;
 pub mod search;
@@ -475,6 +476,7 @@ pub fn catalogue() -> Catalogue {
     content::register(&mut catalogue);
     export::register(&mut catalogue);
     pdf_export::register(&mut catalogue);
+    pdf_styles::register(&mut catalogue);
     links::register(&mut catalogue);
     tokens::register(&mut catalogue);
     connections::register(&mut catalogue);

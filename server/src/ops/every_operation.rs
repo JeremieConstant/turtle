@@ -33,6 +33,18 @@ const OK: &str = "ok";
 const HIDDEN: &str = "not_found";
 const REFUSED: &str = "not_permitted";
 
+/// The values of a PDF Style called `name`, with `extra` fields added.
+fn pdf_style(name: &str, extra: Value) -> Value {
+    let mut values = json!({
+        "name": name, "text_color": "#23252b", "heading_color": "#17181c", "accent_color": "#2f5f8a",
+        "body_font": "Inter", "heading_font": "Inter", "code_font": "JetBrains Mono",
+        "body_size": 9.6, "h1_size": 26, "h2_size": 13.5, "h3_size": 11,
+        "cover": true, "toc": true, "toc_depth": 2, "language": "en",
+    });
+    values.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    values
+}
+
 fn table() -> Vec<Row> {
     vec![
         ("get_session", |_| json!({}), [OK; 5]),
@@ -129,6 +141,16 @@ fn table() -> Vec<Row> {
         ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("export", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         ("export_pdf", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
+        // Every Workspace has the PDF Style "standard", its default.
+        ("list_pdf_styles", |_| json!({}), [OK; 5]),
+        ("create_pdf_style", |_| pdf_style("Handout", json!({})), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        (
+            "update_pdf_style",
+            |_| pdf_style("Plain", json!({"id": "standard"})),
+            [REFUSED, REFUSED, REFUSED, REFUSED, OK],
+        ),
+        ("set_default_pdf_style", |_| json!({"id": "standard"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        ("delete_pdf_style", |_| json!({"id": "standard"}), [REFUSED, REFUSED, REFUSED, REFUSED, "conflict"]),
         ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),
         // The Page has no headings, so those who may change it learn that.

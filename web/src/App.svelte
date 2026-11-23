@@ -22,6 +22,7 @@
   import NotFoundScreen from './screens/NotFoundScreen.svelte'
   import PageScreen from './screens/PageScreen.svelte'
   import PasswordResetScreen from './screens/PasswordResetScreen.svelte'
+  import PdfStylesScreen from './screens/PdfStylesScreen.svelte'
   import SearchScreen from './screens/SearchScreen.svelte'
   import SetupScreen from './screens/SetupScreen.svelte'
   import SignInScreen from './screens/SignInScreen.svelte'
@@ -182,6 +183,8 @@
         <AllConnectedAppsScreen />
       {:else if route.screen === 'agents'}
         <AgentsScreen />
+      {:else if route.screen === 'pdf-styles'}
+        <PdfStylesScreen />
       {:else if route.screen === 'deleted-areas'}
         <DeletedAreasScreen />
       {:else}

@@ -3,7 +3,7 @@
 
 use super::export::{file_name_of, readable_subtree};
 use super::tree::{Entry, Kind};
-use super::{areas, attachments, links};
+use super::{areas, attachments, links, pdf_styles};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use crate::model::{Block, Inline, Marks};
 use crate::pdf;
@@ -16,7 +16,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "export_pdf",
-            "Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. Needs the Read Role.",
+            "Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role.",
             export_pdf,
         )
         .changes = false;
@@ -31,6 +31,9 @@ pub struct ToExportPdf {
     /// Shown on the cover, beneath the title.
     #[serde(default)]
     pub subtitle: Option<String>,
+    /// The PDF Style to make it with, as `list_pdf_styles` names it; the default one if absent.
+    #[serde(default)]
+    pub pdf_style_id: Option<String>,
 }
 
 /// A PDF.
@@ -47,7 +50,12 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
     areas::signed_in(principal)?;
     // What is in the PDF is decided under one lock, so the tree is seen as
     // it was at one moment; the content is read afterwards, as each Page is now.
-    let (name, entries) = readable_subtree(&core.db(), principal, &input.area_id, input.entry_id.as_deref())?;
+    let (name, entries, look) = {
+        let db = core.db();
+        let (name, entries) = readable_subtree(&db, principal, &input.area_id, input.entry_id.as_deref())?;
+        let style = pdf_styles::pdf_style(&db, input.pdf_style_id.as_deref())?;
+        (name, entries, pdf_styles::look_of(style.values))
+    };
     let mut flat = Vec::new();
     flatten(&entries, 0, &mut flat);
     let mut contents = HashMap::new();
@@ -102,7 +110,7 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
         parts,
         images: found.images,
     };
-    let pdf = pdf::typeset(document, &pdf::Look::built_in())?;
+    let pdf = pdf::typeset(document, &look)?;
     Ok(PdfExport {
         file_name: format!("{}.pdf", file_name_of(&name)),
         content: base64::engine::general_purpose::STANDARD.encode(pdf),
@@ -397,7 +405,11 @@ mod tests {
     use crate::ops::content::{replace_page, NewContent};
     use crate::ops::permissions::{self, Holder, Role};
     use crate::ops::testing::{fresh, give_role, member};
+    use crate::ops::accounts::Nothing;
+    use crate::ops::pdf_styles::{create_pdf_style, list_pdf_styles, set_default_pdf_style, PdfStyleId, PdfStyleValues};
     use crate::ops::tree::{create_folder, create_page, NewEntry, NewPage};
+    use crate::pdf::Language;
+    use std::collections::BTreeSet;
     use base64::Engine;
 
     fn area(core: &Core, admin: &Principal, name: &str) -> String {
@@ -435,7 +447,7 @@ mod tests {
     }
 
     fn export_area(core: &Core, reader: &Principal, area_id: &str) -> PdfExport {
-        let input = ToExportPdf { area_id: area_id.into(), entry_id: None, subtitle: None };
+        let input = ToExportPdf { area_id: area_id.into(), entry_id: None, subtitle: None, pdf_style_id: None };
         export_pdf(core, reader, input).unwrap().output
     }
 
@@ -492,7 +504,7 @@ mod tests {
         let runbook = page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
         page(&core, &grace, &area_id, Some(&runbook), "Deploy", "Ship it.");
 
-        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: Some("For whoever is on call".into()) };
+        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: Some("For whoever is on call".into()), pdf_style_id: None };
         let exported = export_pdf(&core, &grace, input).unwrap().output;
         let pages = pages_of(&exported);
 
@@ -661,7 +673,7 @@ mod tests {
         let deploy = page(&core, &grace, &area_id, Some(&runbook), "Deploy", "");
         write(&core, &grace, &runbook, &format!("See [](turtle:{overview}) and [](turtle:{deploy})."));
 
-        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: None };
+        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: None, pdf_style_id: None };
         let exported = export_pdf(&core, &grace, input).unwrap().output;
 
         assert_eq!(pages_of(&exported)[2], squashed("RUNBOOK Runbook See Overview and Deploy. 3"));
@@ -680,7 +692,7 @@ mod tests {
         let overview = page(&core, &grace, &area_id, None, "Overview", "");
         let runbook = page(&core, &grace, &area_id, None, "Runbook", &format!("See [](turtle:{overview})."));
 
-        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: None };
+        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: None, pdf_style_id: None };
         let exported = export_pdf(&core, &grace, input).unwrap().output;
 
         assert_eq!(pages_of(&exported)[2], squashed("RUNBOOK Runbook See Overview. 3"));
@@ -714,9 +726,9 @@ mod tests {
             ["ENGINEERING Contents Runbook 3 Rotation 4 2", "ENGINEERING Runbook Keep safe. 3", "ENGINEERING Rotation Rotate monthly. 4"]
                 .map(squashed)
         );
-        let hidden = ToExportPdf { area_id: area_id.clone(), entry_id: Some(secrets), subtitle: None };
+        let hidden = ToExportPdf { area_id: area_id.clone(), entry_id: Some(secrets), subtitle: None, pdf_style_id: None };
         let hidden = export_pdf(&core, &ken, hidden).unwrap_err();
-        let made_up = ToExportPdf { area_id, entry_id: Some("made-up".into()), subtitle: None };
+        let made_up = ToExportPdf { area_id, entry_id: Some("made-up".into()), subtitle: None, pdf_style_id: None };
         let made_up = export_pdf(&core, &ken, made_up).unwrap_err();
         assert_eq!((hidden.kind(), hidden.message()), (made_up.kind(), made_up.message()));
         assert_eq!(hidden.kind(), "not_found");
@@ -738,5 +750,181 @@ mod tests {
 
         let text = pages[2..].join("");
         assert!(text.contains("level0") && text.contains("level59") && text.contains("deepquote"), "{text}");
+    }
+
+    /// Every drawing operation on the PDF's pages, with its numbers.
+    fn operations_in(export: &PdfExport) -> Vec<(String, Vec<f32>)> {
+        let document = pdf_of(export);
+        let mut operations = Vec::new();
+        for page_id in document.get_pages().into_values() {
+            let content = pdf_extract::content::Content::decode(&document.get_page_content(page_id).unwrap()).unwrap();
+            for operation in content.operations {
+                let numbers = operation.operands.iter().filter_map(|operand| operand.as_float().ok()).collect();
+                operations.push((operation.operator, numbers));
+            }
+        }
+        operations
+    }
+
+    /// The colours the PDF paints with, as `#rrggbb`.
+    fn colors_in(export: &PdfExport) -> BTreeSet<String> {
+        let channel = |value: f32| (value * 255.0).round() as u8;
+        operations_in(export)
+            .into_iter()
+            .filter(|(operator, numbers)| ["scn", "SCN"].contains(&operator.as_str()) && numbers.len() == 3)
+            .map(|(_, rgb)| format!("#{:02x}{:02x}{:02x}", channel(rgb[0]), channel(rgb[1]), channel(rgb[2])))
+            .collect()
+    }
+
+    /// The sizes of the PDF's text, in points.
+    fn text_sizes_in(export: &PdfExport) -> BTreeSet<String> {
+        operations_in(export)
+            .into_iter()
+            .filter(|(operator, numbers)| operator == "Tf" && numbers.len() == 1)
+            .map(|(_, size)| size[0].to_string())
+            .collect()
+    }
+
+    /// The font families the PDF's text is in, as the fonts name them.
+    fn fonts_in(export: &PdfExport) -> BTreeSet<String> {
+        let document = pdf_of(export);
+        document
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .filter(|dict| dict.get(b"Type").and_then(|kind| kind.as_name()).ok() == Some(b"FontDescriptor"))
+            .map(|dict| {
+                let name = String::from_utf8(dict.get(b"FontName").unwrap().as_name().unwrap().to_vec()).unwrap();
+                // Without the tag of the subset the PDF embeds, and the style.
+                let name = name.split_once('+').map_or(name.as_str(), |(_, name)| name);
+                name.split_once('-').map_or(name, |(family, _)| family).to_string()
+            })
+            .collect()
+    }
+
+    fn export_with(core: &Core, reader: &Principal, area_id: &str, pdf_style_id: Option<&str>) -> Result<PdfExport, OpError> {
+        let input = ToExportPdf { area_id: area_id.into(), entry_id: None, subtitle: None, pdf_style_id: pdf_style_id.map(Into::into) };
+        export_pdf(core, reader, input).map(|reply| reply.output)
+    }
+
+    fn style(core: &Core, admin: &Principal, values: PdfStyleValues) -> String {
+        create_pdf_style(core, admin, values).unwrap().output.id
+    }
+
+    fn standard_values(core: &Core, reader: &Principal) -> PdfStyleValues {
+        let list = list_pdf_styles(core, reader, Nothing {}).unwrap().output;
+        list.pdf_styles.into_iter().find(|style| style.is_default).unwrap().values
+    }
+
+    #[test]
+    fn the_default_pdf_style_is_used_unless_another_is_chosen() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
+        let bare = PdfStyleValues { name: "Bare".into(), cover: false, toc: false, ..standard_values(&core, &grace) };
+        let bare = style(&core, &ada, bare);
+
+        let with_standard = export_with(&core, &grace, &area_id, None).unwrap();
+        set_default_pdf_style(&core, &ada, PdfStyleId { id: bare }).unwrap();
+        let with_bare = export_with(&core, &grace, &area_id, None).unwrap();
+        let chosen_standard = export_with(&core, &grace, &area_id, Some("standard")).unwrap();
+        let made_up = export_with(&core, &grace, &area_id, Some("made-up")).map(|_| ()).unwrap_err();
+
+        assert_eq!(pages_of(&with_standard).len(), 3);
+        assert_eq!(pages_of(&with_bare), [squashed("ENGINEERING Runbook Restart the server. 1")]);
+        assert_eq!(pages_of(&chosen_standard), pages_of(&with_standard));
+        assert_eq!((made_up.kind(), made_up.message()), ("not_found", "There is no such PDF Style."));
+    }
+
+    #[test]
+    fn the_colours_fonts_and_sizes_of_a_pdf_style_change_the_pdf() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart [the server](https://example.org) with `turtle`.\n\n## Install\n\n### Details");
+        let standard = export_with(&core, &grace, &area_id, None).unwrap();
+        let handout = PdfStyleValues {
+            name: "Handout".into(),
+            text_color: "#102030".into(),
+            heading_color: "#405060".into(),
+            accent_color: "#a03010".into(),
+            body_font: "Source Serif 4".into(),
+            heading_font: "JetBrains Mono".into(),
+            code_font: "Inter".into(),
+            body_size: 11.0,
+            h1_size: 30.0,
+            h2_size: 16.0,
+            h3_size: 12.0,
+            ..standard_values(&core, &grace)
+        };
+        let handout = style(&core, &ada, handout);
+
+        let styled = export_with(&core, &grace, &area_id, Some(&handout)).unwrap();
+
+        for color in ["#23252b", "#17181c", "#2f5f8a"] {
+            assert!(colors_in(&standard).contains(color), "{color} in {:?}", colors_in(&standard));
+            assert!(!colors_in(&styled).contains(color), "{color} in {:?}", colors_in(&styled));
+        }
+        for color in ["#102030", "#405060", "#a03010"] {
+            assert!(colors_in(&styled).contains(color), "{color} in {:?}", colors_in(&styled));
+        }
+        for size in ["9.6", "26", "13.5", "11"] {
+            assert!(text_sizes_in(&standard).contains(size), "{size} in {:?}", text_sizes_in(&standard));
+        }
+        for size in ["11", "30", "16", "12"] {
+            assert!(text_sizes_in(&styled).contains(size), "{size} in {:?}", text_sizes_in(&styled));
+        }
+        for size in ["9.6", "26", "13.5"] {
+            assert!(!text_sizes_in(&styled).contains(size), "{size} in {:?}", text_sizes_in(&styled));
+        }
+        assert_eq!(fonts_in(&standard), BTreeSet::from(["Inter".into(), "JetBrainsMono".into()]));
+        assert_eq!(fonts_in(&styled), BTreeSet::from(["Inter".into(), "JetBrainsMono".into(), "SourceSerif4".into()]));
+    }
+
+    #[test]
+    fn a_pdf_style_leaves_out_the_cover_and_sets_the_depth_of_the_contents_and_the_footer() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "## Install\n\n### Details");
+        let standard = standard_values(&core, &grace);
+        let deep = style(&core, &ada, PdfStyleValues { name: "Deep".into(), cover: false, toc_depth: 3, footer_text: Some("Internal use only".into()), ..standard.clone() });
+        let shallow = style(&core, &ada, PdfStyleValues { name: "Shallow".into(), cover: false, toc_depth: 1, ..standard });
+
+        let deep = pages_of(&export_with(&core, &grace, &area_id, Some(&deep)).unwrap());
+        let shallow = pages_of(&export_with(&core, &grace, &area_id, Some(&shallow)).unwrap());
+
+        assert_eq!(
+            deep,
+            [
+                "ENGINEERING Contents Runbook 2 Install 2 Details 2 Internal use only 1",
+                "ENGINEERING Runbook Install Details Internal use only 2",
+            ]
+            .map(squashed)
+        );
+        assert_eq!(shallow[0], squashed("ENGINEERING Contents Runbook 2 1"));
+    }
+
+    #[test]
+    fn a_pdf_style_in_german_shows_the_pdfs_own_words_and_date_in_german() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "> [!TIP]\n> Restart it.");
+        let german = PdfStyleValues { name: "Deutsch".into(), language: Language::German, ..standard_values(&core, &grace) };
+        let german = style(&core, &ada, german);
+
+        let pages = pages_of(&export_with(&core, &grace, &area_id, Some(&german)).unwrap());
+
+        assert_eq!(
+            pages,
+            ["Engineering STAND 14. November 2023", "ENGINEERING Inhalt Runbook 3 2", "ENGINEERING Runbook TIPP Restart it. 3"]
+                .map(squashed)
+        );
     }
 }
