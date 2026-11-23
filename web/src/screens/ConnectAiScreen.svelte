@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import { toast } from 'svelte-sonner'
   import type { Connecting } from '../lib/operations.gen'
   import { call } from '../lib/ops'
@@ -36,6 +37,14 @@
   }
 
   let addressField = $state<HTMLInputElement | null>(null)
+
+  /** Shows the Token way, under the Other tab, and scrolls to it. */
+  async function showTokenWay(event: MouseEvent) {
+    event.preventDefault()
+    chosen = 'other'
+    await tick()
+    document.getElementById('token-way')?.scrollIntoView({ block: 'center' })
+  }
 
   /**
    * The clipboard is missing outside secure origins, such as Turtle on an
@@ -76,6 +85,23 @@
         </p>
       {:else}
         <p>Ask a Workspace Admin to set Turtle’s public address.</p>
+      {/if}
+    </section>
+  {/if}
+
+  {#if connecting?.intranet_only}
+    <section class="notice">
+      <strong>claude.ai probably cannot reach this Turtle</strong>
+      <p>
+        Turtle looks like it runs only inside your network, and claude.ai connects from the internet. Claude Code, or a local bridge on
+        your computer, can still connect with a Token.
+      </p>
+      {#if connecting.mcp_address}
+        <p><a href="#token-way" onclick={showTokenWay}>Connect with a Token</a></p>
+      {:else}
+        <p>
+          <a href="/settings/tokens" onclick={event => router.follow(event, '/settings/tokens')}>Create a Token</a> for it under Tokens.
+        </p>
       {/if}
     </section>
   {/if}
@@ -140,7 +166,7 @@
             <li>Any AI client that speaks MCP and signs in with OAuth can connect. Add an MCP server in it and paste the address above.</li>
             <li>When it opens Turtle in your browser, sign in if it asks, then choose <strong>Allow</strong>.</li>
           </ol>
-          <p class="muted">
+          <p class="muted" id="token-way">
             A client that cannot sign in that way can use a Token instead. Create one under
             <a href="/settings/tokens" onclick={event => router.follow(event, '/settings/tokens')}>Tokens</a>, and give the client the
             address above with the Token as <code>Authorization: Bearer …</code>
