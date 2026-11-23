@@ -90,6 +90,11 @@ export type Comparison = {
 }
 
 export type Connecting = {
+  /** Whether Turtle looks reachable only from inside its network, judged
+from its public address alone, so that claude.ai, which reaches an
+AI client's connector from the internet, probably cannot reach it.
+A client on the caller's own machine can still connect with a Token. */
+  intranet_only: boolean
   /** The address to give an AI client. Missing where Turtle does not know
 its public address, since an AI client could not sign in through
 OAuth there; a Workspace Admin sets `TURTLE_PUBLIC_URL` to offer it. */
