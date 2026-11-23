@@ -275,6 +275,16 @@ const MIGRATIONS: &[&str] = &[
          used_at INTEGER
      );
      CREATE INDEX refresh_tokens_by_token ON refresh_tokens (token_id);",
+    // A Member may limit a connection on the consent page, to reading or to
+    // chosen Areas, as a Token is limited. The code remembers the limits
+    // until it is exchanged for the connection.
+    "ALTER TABLE authorization_codes ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE authorization_codes ADD COLUMN all_areas INTEGER NOT NULL DEFAULT 1;
+     CREATE TABLE authorization_code_areas (
+         code_digest TEXT NOT NULL REFERENCES authorization_codes (digest) ON DELETE CASCADE,
+         area_id TEXT NOT NULL REFERENCES areas (id) ON DELETE CASCADE,
+         PRIMARY KEY (code_digest, area_id)
+     );",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
