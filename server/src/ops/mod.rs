@@ -15,6 +15,7 @@ mod every_operation;
 pub mod grants;
 pub mod links;
 pub mod members;
+pub mod moves;
 pub mod permissions;
 pub mod quick_notes;
 pub mod search;
@@ -426,6 +427,7 @@ pub fn catalogue() -> Catalogue {
     search::register(&mut catalogue);
     tags::register(&mut catalogue);
     versions::register(&mut catalogue);
+    moves::register(&mut catalogue);
     content::register(&mut catalogue);
     links::register(&mut catalogue);
     tokens::register(&mut catalogue);
@@ -501,16 +503,12 @@ pub(crate) mod testing {
         permissions::grant(&db, &root, &permissions::Holder::Member(id.clone()), role).unwrap();
     }
 
-    /// Puts an Entry at the top of another Area, as a move will. Moving is
-    /// not an operation yet.
-    pub fn move_to_top_of(core: &Core, entry_id: &str, area_id: &str) {
+    /// Takes away the Grant a Member has on an Area.
+    pub fn take_role(core: &Core, area_id: &str, from: &Principal) {
+        let Principal::Member { id, .. } = from else { panic!("only Members get Grants") };
         let db = core.db();
         let root = tree::root_of(&db, area_id).unwrap();
-        db.execute(
-            "UPDATE nodes SET area_id = ?1, parent_id = ?2 WHERE id = ?3",
-            rusqlite::params![area_id, root, entry_id],
-        )
-        .unwrap();
+        permissions::revoke(&db, &root, &permissions::Holder::Member(id.clone())).unwrap();
     }
 
     pub fn fresh() -> TestCore {

@@ -3,14 +3,19 @@
    * The tree of one Area in the sidebar, drawn as one flat list of the rows
    * that are visible, each indented by how deep it sits. A Folder, and a
    * Page with something beneath it, folds and unfolds. Each row has the
-   * Entry menu behind its ⋯ button and a right click.
+   * Entry menu behind its ⋯ button and a right click. With Write, a row is
+   * dragged onto the upper or lower edge of another to go before or after
+   * it, or onto its middle to go beneath it.
    */
   import { untrack } from 'svelte'
   import { entryMenuItems } from '../lib/entryMenu'
+  import { dropPlace, moveEntry, type DropZone } from '../lib/move'
+  import { navigation } from '../lib/navigation.svelte'
   import type { Area, Entry } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
   import { above, visibleRows } from '../lib/tree'
+  import { reportFailure } from '../lib/toasts'
   import { collapsed } from '../lib/ui.svelte'
   import EntryMenu from './EntryMenu.svelte'
   import EntryMenuButton, { openFromRow } from './EntryMenuButton.svelte'
@@ -46,6 +51,57 @@
     await menu.open(entry, area, trigger)
   }
 
+  /* ---- Dragging rows ---------------------------------------------------- */
+
+  const draggable = $derived(area.role !== 'read')
+  /** The Entry being dragged, and the row and edge it would be dropped on. */
+  let dragged = $state.raw<Entry | null>(null)
+  let dropOn = $state.raw<{ id: string; zone: DropZone } | null>(null)
+
+  function dragStart(event: DragEvent, entry: Entry) {
+    dragged = entry
+    event.dataTransfer?.setData('text/plain', entry.title)
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  }
+
+  /** The upper and lower quarter of a row put the Entry before or after it; the middle, beneath it. */
+  function zoneAt(event: DragEvent): DropZone {
+    const row = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    const at = (event.clientY - row.top) / row.height
+    return at < 0.25 ? 'before' : at > 0.75 ? 'after' : 'inside'
+  }
+
+  function dragOver(event: DragEvent, target: Entry) {
+    if (!dragged) return
+    const zone = zoneAt(event)
+    if (!dropPlace(entries, dragged.id, target.id, zone)) {
+      dropOn = null
+      return
+    }
+    event.preventDefault()
+    dropOn = { id: target.id, zone }
+  }
+
+  async function drop(event: DragEvent, target: Entry) {
+    event.preventDefault()
+    const entry = dragged
+    const zone = zoneAt(event)
+    dragEnd()
+    const place = entry && dropPlace(entries, entry.id, target.id, zone)
+    if (!entry || !place) return
+    if (zone === 'inside') collapsed.delete(target.id)
+    try {
+      await moveEntry(entry, { area_id: area.id, ...place }, areaIds => navigation.reloadTrees(areaIds))
+    } catch (caught) {
+      reportFailure(caught, `${entry.title} could not be moved. Try again.`)
+    }
+  }
+
+  function dragEnd() {
+    dragged = null
+    dropOn = null
+  }
+
   function toggle(id: string) {
     if (collapsed.has(id)) collapsed.delete(id)
     else collapsed.add(id)
@@ -58,7 +114,17 @@
     <li
       class="row"
       class:current={entry.id === currentId}
+      class:dragged={entry.id === dragged?.id}
+      class:drop-before={dropOn?.id === entry.id && dropOn.zone === 'before'}
+      class:drop-after={dropOn?.id === entry.id && dropOn.zone === 'after'}
+      class:drop-inside={dropOn?.id === entry.id && dropOn.zone === 'inside'}
       style:--depth={depth}
+      {draggable}
+      ondragstart={event => dragStart(event, entry)}
+      ondragover={event => dragOver(event, entry)}
+      ondragleave={() => dropOn?.id === entry.id && (dropOn = null)}
+      ondrop={event => drop(event, entry)}
+      ondragend={dragEnd}
       oncontextmenu={event => openFromRow(event, trigger => showMenu(entry, trigger))}
     >
       {#if entry.children.length > 0}
@@ -84,6 +150,7 @@
       {:else}
         <a
           class="label"
+          draggable="false"
           href={address}
           aria-current={entry.id === currentId ? 'page' : undefined}
           onclick={event => router.follow(event, address)}
@@ -128,6 +195,23 @@
     background: var(--color-selected);
     color: var(--color-text);
     font-weight: var(--weight-medium);
+  }
+
+  .row.dragged {
+    opacity: 0.5;
+  }
+
+  .row.drop-before {
+    box-shadow: inset 0 var(--ring) 0 var(--color-focus);
+  }
+
+  .row.drop-after {
+    box-shadow: inset 0 calc(-1 * var(--ring)) 0 var(--color-focus);
+  }
+
+  .row.drop-inside {
+    background: var(--color-focus-soft);
+    color: var(--color-text);
   }
 
   .chevron {

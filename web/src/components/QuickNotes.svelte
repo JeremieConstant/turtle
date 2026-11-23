@@ -2,13 +2,15 @@
   /*
    * A box to write something down at once, and the Member's latest Quick
    * Notes beneath it. What is saved lands at the top of their Personal Area
-   * unless they choose another Area they may write in.
+   * unless they choose another Area they may write in; each Quick Note's
+   * menu moves it to the top of another Area where the Member holds Write.
    */
   import type { Editor as TipTap } from '@tiptap/core'
   import { toast } from 'svelte-sonner'
   import { Awareness } from 'y-protocols/awareness'
   import type * as Y from 'yjs'
   import { menuKeys, openMenu } from '../lib/menu'
+  import { moveEntry, writableAreas } from '../lib/move'
   import { navigation } from '../lib/navigation.svelte'
   import { call } from '../lib/ops'
   import type { Area, QuickNote } from '../lib/operations.gen'
@@ -20,6 +22,7 @@
   import { relativeTime } from '../lib/time'
   import { reportFailure } from '../lib/toasts'
   import Editor from './Editor.svelte'
+  import EntryMenuButton, { openFromRow } from './EntryMenuButton.svelte'
   import Icon from './Icon.svelte'
   import Toolbar from './Toolbar.svelte'
 
@@ -136,6 +139,35 @@
     }
   }
 
+  /* ---- Moving a Quick Note -------------------------------------------- */
+
+  let menu: HTMLDivElement
+  /** The Quick Note whose menu is open. */
+  let menuFor = $state.raw<QuickNote | null>(null)
+  const destinations = $derived(
+    menuFor ? writableAreas(navigation.areas ?? []).filter(area => area.id !== menuFor?.area.id) : [],
+  )
+
+  async function showMenu(quickNote: QuickNote, trigger: HTMLElement) {
+    menuFor = quickNote
+    if (!navigation.areas) await navigation.refreshAreas()
+    openMenu(menu, trigger)
+  }
+
+  async function moveTo(area: Area) {
+    menu.hidePopover()
+    const quickNote = menuFor
+    if (!quickNote) return
+    try {
+      await moveEntry(quickNote, { area_id: area.id }, async areaIds => {
+        await navigation.reloadTrees(areaIds)
+        await load()
+      })
+    } catch (caught) {
+      reportFailure(caught, `${quickNote.title} could not be moved. Try again.`)
+    }
+  }
+
   /* Caught on the way down, before the editor takes the same keys for a line break. */
   function onkeydowncapture(event: KeyboardEvent) {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -232,7 +264,10 @@
     <ul class="notes" aria-label="Recent Quick Notes">
       {#each quickNotes as quickNote (quickNote.id)}
         {@const address = pageAddress(quickNote.id, quickNote.title)}
-        <li class:fresh={quickNote.id === saved?.id}>
+        <li
+          class:fresh={quickNote.id === saved?.id}
+          oncontextmenu={event => openFromRow(event, trigger => showMenu(quickNote, trigger))}
+        >
           <a class="title" href={address} onclick={event => router.follow(event, address)}>
             {quickNote.title}
           </a>
@@ -242,11 +277,37 @@
             {/if}
             <time datetime={new Date(quickNote.created_at * 1000).toISOString()}>{relativeTime(quickNote.created_at, now)}</time>
           </span>
+          <!-- Only where the Member holds Write can it be moved away. -->
+          {#if quickNote.area.role !== 'read'}
+            <EntryMenuButton
+              title={quickNote.title}
+              open={menuFor?.id === quickNote.id}
+              onopen={trigger => showMenu(quickNote, trigger)}
+            />
+          {/if}
         </li>
       {/each}
     </ul>
   {/if}
 </section>
+
+<div
+  class="menu move-menu"
+  role="menu"
+  tabindex="-1"
+  aria-label={menuFor ? `Move ${menuFor.title}` : 'Move'}
+  popover
+  bind:this={menu}
+  onkeydown={menuKeys}
+  ontoggle={event => event.newState === 'closed' && (menuFor = null)}
+>
+  <p class="menu-heading">Move to the top of</p>
+  {#each destinations as area (area.id)}
+    <button type="button" class="menu-item" role="menuitem" onclick={() => moveTo(area)}>{area.name}</button>
+  {:else}
+    <p class="menu-empty">There is no other Area where you can write.</p>
+  {/each}
+</div>
 
 <style>
   .quick {
@@ -436,6 +497,20 @@
 
   .moved {
     color: var(--color-text-2);
+  }
+
+  .move-menu {
+    inset: auto;
+    z-index: var(--layer-menu);
+    min-width: var(--width-menu-s);
+  }
+
+  .menu-heading,
+  .menu-empty {
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    color: var(--color-muted);
+    font-size: var(--text-s);
   }
 
   @media (max-width: 800px) {

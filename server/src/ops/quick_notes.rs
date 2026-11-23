@@ -324,7 +324,9 @@ mod tests {
     #[test]
     fn a_quick_note_stays_its_members_wherever_it_sits_and_is_listed_only_where_they_read() {
         use crate::ops::areas::{create_area, NewArea};
-        use crate::ops::testing::move_to_top_of;
+        use crate::ops::moves::{move_entry, MoveEntry, Place};
+        use crate::ops::permissions::Role;
+        use crate::ops::testing::{give_role, take_role};
         use crate::ops::tree::{rename_page, RenameEntry};
         let core = fresh();
         let grace = member(&core, "Grace", false);
@@ -337,8 +339,15 @@ mod tests {
         core.advance(60);
         create_quick_note(&core, &grace, quick_note("Stayed")).unwrap();
 
-        move_to_top_of(&core, &moved.id, &engineering.id);
-        move_to_top_of(&core, &gone.id, &hidden.id);
+        let to_top_of = |id: &str, area_id: &str| MoveEntry {
+            id: id.into(),
+            to: Place { area_id: area_id.into(), parent_id: None, before_id: None },
+        };
+        move_entry(&core, &grace, to_top_of(&moved.id, &engineering.id)).unwrap();
+        // Moved where Grace could write for a while, then lost access to.
+        give_role(&core, &hidden.id, &grace, Role::Write);
+        move_entry(&core, &grace, to_top_of(&gone.id, &hidden.id)).unwrap();
+        take_role(&core, &hidden.id, &grace);
         rename_page(&core, &grace, RenameEntry { id: moved.id.clone(), title: "Moved and renamed".into() }).unwrap();
 
         let list = list_quick_notes(&core, &grace, RecentQuickNotes { limit: None }).unwrap().output;

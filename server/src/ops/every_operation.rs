@@ -70,6 +70,11 @@ fn table() -> Vec<Row> {
         ("create_folder", |f| json!({"area_id": f.area_id, "title": "New"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("rename_page", |f| json!({"id": f.page_id, "title": "Renamed"}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("rename_folder", |f| json!({"id": f.folder_id, "title": "Renamed"}), [OK, OK, REFUSED, HIDDEN, OK]),
+        (
+            "move_entry",
+            |f| json!({"id": f.page_id, "area_id": f.area_id, "before_id": f.folder_id}),
+            [OK, OK, REFUSED, HIDDEN, OK],
+        ),
         ("move_to_trash", |f| json!({"id": f.page_id}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("get_trash", |f| json!({"area_id": f.area_id}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("restore_from_trash", |f| json!({"id": f.trashed_id}), [OK, OK, REFUSED, HIDDEN, OK]),

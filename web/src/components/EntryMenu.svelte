@@ -1,8 +1,8 @@
 <script lang="ts">
   /*
    * The menu of an Entry, shared by the sidebar's tree and the Area screen:
-   * a new Page or Folder beneath it, renaming it, copying its link, and
-   * moving it to the Trash. What
+   * a new Page or Folder beneath it, renaming it, moving it elsewhere,
+   * copying its link, and moving it to the Trash. What
    * it offers depends on the Role held on the Area (entryMenuItems). Creating
    * and renaming ask for the name in a dialog, then load the Area's tree
    * again, which both the sidebar and the Area screen show.
@@ -18,12 +18,14 @@
   import { createEntry, findEntry, renameEntry } from '../lib/tree'
   import { moveToTrash } from '../lib/trash'
   import { collapsed } from '../lib/ui.svelte'
+  import MoveDialog from './MoveDialog.svelte'
   import NameDialog from './NameDialog.svelte'
 
   const LABELS: Record<EntryMenuItem, string> = {
     'new-page': 'New Page beneath…',
     'new-folder': 'New Folder beneath…',
     rename: 'Rename…',
+    move: 'Move…',
     'copy-link': 'Copy link',
     trash: 'Move to Trash',
   }
@@ -32,9 +34,10 @@
 
   let menu: HTMLDivElement
   let dialog: NameDialog
+  let moveDialog: MoveDialog
   /** The Entry the menu is open for, and the Area it is in. */
   let target = $state.raw<{ entry: Entry; area: Area } | null>(null)
-  type DialogPurpose = Exclude<EntryMenuItem, 'copy-link' | 'trash'>
+  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'copy-link' | 'trash'>
   /** What the dialog asks for, what its button says, and what it creates. */
   const DIALOGS: Record<DialogPurpose, { label: (title: string) => string; action: string; kind?: Kind }> = {
     'new-page': { label: title => `Title of the new Page beneath ${title}`, action: 'Create Page', kind: 'page' },
@@ -58,6 +61,10 @@
     if (!target) return
     if (item === 'copy-link') {
       void copyLink(target.entry)
+      return
+    }
+    if (item === 'move') {
+      moveDialog.open(target.entry, target.area)
       return
     }
     if (item === 'trash') {
@@ -122,6 +129,8 @@
     <button type="button" class="menu-item" role="menuitem" onclick={() => choose(item)}>{LABELS[item]}</button>
   {/each}
 </div>
+
+<MoveDialog bind:this={moveDialog} />
 
 <NameDialog bind:this={dialog} label={shownDialog.label(target?.entry.title ?? '')} action={shownDialog.action} onsubmit={submit} />
 

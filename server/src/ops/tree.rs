@@ -261,7 +261,7 @@ fn rename(core: &Core, principal: &Principal, input: RenameEntry, kind: Kind) ->
     let db = core.db();
     // Access is checked before the input, so an unreadable entry stays hidden
     // whatever title is sent.
-    let found = readable_entry(&db, principal, &input.id, kind)?;
+    let found = readable_entry(&db, principal, &input.id, Some(kind))?;
     if found.role < Role::Write {
         return Err(OpError::NotPermitted(
             "Only someone with the Write Role can rename this.".into(),
@@ -282,7 +282,7 @@ fn rename(core: &Core, principal: &Principal, input: RenameEntry, kind: Kind) ->
 pub fn get_page(core: &Core, principal: &Principal, input: PageId) -> OpResult<Page> {
     areas::signed_in(principal)?;
     let db = core.db();
-    let found = readable_entry(&db, principal, &input.id, Kind::Page)?;
+    let found = readable_entry(&db, principal, &input.id, Some(Kind::Page))?;
     let area = areas::readable_area(&db, principal, &found.area_id)?;
     let path = path_to(&db, principal, &input.id)?;
     let last_edited = versions::newest(&db, &input.id)?.map(|newest| LastEdited {
@@ -304,7 +304,7 @@ pub fn get_page(core: &Core, principal: &Principal, input: PageId) -> OpResult<P
 
 /// The Folders and Pages above an Entry that the principal can read, from
 /// the top of the Area down, without the Area's hidden root.
-fn path_to(db: &Connection, principal: &Principal, id: &str) -> Result<Vec<PathEntry>, OpError> {
+pub(super) fn path_to(db: &Connection, principal: &Principal, id: &str) -> Result<Vec<PathEntry>, OpError> {
     let mut statement = db.prepare(
         "WITH RECURSIVE upward (id, parent_id, kind, title, depth) AS (
              SELECT id, parent_id, kind, title, 0 FROM nodes WHERE id = ?1
@@ -356,31 +356,38 @@ pub fn get_tree(core: &Core, principal: &Principal, input: TreeOfArea) -> OpResu
 }
 
 /// A Page or Folder the principal can read, with the Role they hold on it.
-struct ReadableEntry {
-    area_id: String,
-    title: String,
-    role: Role,
+pub(super) struct ReadableEntry {
+    pub area_id: String,
+    pub kind: Kind,
+    pub title: String,
+    pub role: Role,
 }
 
-/// A Page or Folder of the given kind that the principal can read. One they
-/// cannot read is reported exactly like one that does not exist.
-fn readable_entry(db: &Connection, principal: &Principal, id: &str, kind: Kind) -> Result<ReadableEntry, OpError> {
+/// A Page or Folder that the principal can read, of the given kind or of
+/// either. One they cannot read, and an Area's hidden root, are reported
+/// exactly like one that does not exist.
+pub(super) fn readable_entry(db: &Connection, principal: &Principal, id: &str, kind: Option<Kind>) -> Result<ReadableEntry, OpError> {
     let not_found = || {
         OpError::NotFound(match kind {
-            Kind::Page => "There is no such Page.".into(),
-            Kind::Folder => "There is no such Folder.".into(),
+            Some(Kind::Page) => "There is no such Page.".into(),
+            Some(Kind::Folder) => "There is no such Folder.".into(),
+            None => "There is no such Page or Folder.".into(),
         })
     };
     let found = db
         .query_row(
-            "SELECT area_id, title FROM nodes WHERE id = ?1 AND kind = ?2",
-            rusqlite::params![id, kind.stored()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            "SELECT area_id, kind, title FROM nodes WHERE id = ?1 AND parent_id IS NOT NULL",
+            [id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
         )
         .optional()?;
-    let (area_id, title) = found.ok_or_else(not_found)?;
+    let (area_id, stored, title) = found.ok_or_else(not_found)?;
+    let found_kind = Kind::from_stored(&stored).ok_or_else(|| anyhow::anyhow!("node {id} has the unknown kind {stored}"))?;
+    if kind.is_some_and(|kind| kind != found_kind) {
+        return Err(not_found());
+    }
     let role = permissions::role_on(db, principal, id)?.ok_or_else(not_found)?;
-    Ok(ReadableEntry { area_id, title, role })
+    Ok(ReadableEntry { area_id, kind: found_kind, title, role })
 }
 
 /// Everything beneath a node, each level in the order of its siblings,

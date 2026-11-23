@@ -192,6 +192,18 @@ export type MemberList = {
   members: MemberEntry[]
 }
 
+export type MovedEntry = {
+  /** The Area it is in now. */
+  area: Area
+  id: string
+  kind: Kind
+  /** The Folders and Pages it is beneath now, from the top of the Area down. */
+  path: PathEntry[]
+  title: string
+  /** Where it was: moving it there puts it back. */
+  was: Place
+}
+
 export type Page = {
   /** The Area the Page is in. */
   area: Area
@@ -237,6 +249,14 @@ export type PathEntry = {
   /** Whether it is a Folder or a Page. */
   kind: Kind
   title: string
+}
+
+export type Place = {
+  area_id: string
+  /** The sibling it comes before; last among its siblings if absent. */
+  before_id?: string | null
+  /** The Page or Folder it is beneath; the top of the Area if absent. */
+  parent_id?: string | null
 }
 
 export type QuickNote = {
@@ -814,6 +834,19 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
       page_id: string
     }
     output: Restored
+  }
+  /** Moves a Page or Folder with everything beneath it to a place: beneath a Page or Folder or at the top of an Area, before a given sibling or last. The Area may be another one. Its address and its open editors keep working, and access to it follows the Area it is in. Needs the Write Role on it and on the place it goes to. Returns where it was, which moves it back. */
+  move_entry: {
+    input: {
+      area_id: string
+      /** The sibling it comes before; last among its siblings if absent. */
+      before_id?: string | null
+      /** The Page or Folder to move. */
+      id: string
+      /** The Page or Folder it is beneath; the top of the Area if absent. */
+      parent_id?: string | null
+    }
+    output: MovedEntry
   }
   /** Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. Needs the Read Role. */
   get_page_markdown: {

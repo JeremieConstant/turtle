@@ -6,9 +6,9 @@ vi.mock('svelte-sonner', () => ({ toast }))
 
 beforeEach(() => toast.mockClear())
 
-test('with Write or Admin, a Page offers creating beneath it, renaming, copying its link and moving it to the Trash', () => {
-  expect(entryMenuItems('page', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'copy-link', 'trash'])
-  expect(entryMenuItems('page', 'admin')).toEqual(['new-page', 'new-folder', 'rename', 'copy-link', 'trash'])
+test('with Write or Admin, a Page offers creating beneath it, renaming, moving, copying its link and moving it to the Trash', () => {
+  expect(entryMenuItems('page', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'move', 'copy-link', 'trash'])
+  expect(entryMenuItems('page', 'admin')).toEqual(['new-page', 'new-folder', 'rename', 'move', 'copy-link', 'trash'])
 })
 
 test('with only Read, a Page offers only copying its link', () => {
@@ -16,7 +16,7 @@ test('with only Read, a Page offers only copying its link', () => {
 })
 
 test('a Folder has no address of its own, so it offers no link', () => {
-  expect(entryMenuItems('folder', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'trash'])
+  expect(entryMenuItems('folder', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'move', 'trash'])
   expect(entryMenuItems('folder', 'read')).toEqual([])
 })
 

@@ -72,6 +72,14 @@ export const navigation = {
       if (asked === shownTo) fetching.delete(areaId)
     }
   },
+  /** Loads again the trees of those Areas whose tree is shown, after something moved between them. A failure is said in a toast. */
+  async reloadTrees(areaIds: string[]) {
+    try {
+      await Promise.all(areaIds.filter(id => trees.has(id)).map(id => this.loadTree(id)))
+    } catch (caught) {
+      reportFailure(caught, 'The tree could not be loaded again. Reload the page to see the change.')
+    }
+  },
   /** Loads the tree of an Area unless it is here or on its way. A failure is said in a toast. */
   async showTree(areaId: string) {
     if (trees.has(areaId) || fetching.has(areaId)) return

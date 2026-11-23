@@ -7,7 +7,7 @@
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
-  import { findEntry } from '../lib/tree'
+  import { above, findEntry } from '../lib/tree'
   import { ui } from '../lib/ui.svelte'
   import NotFoundScreen from './NotFoundScreen.svelte'
 
@@ -90,6 +90,25 @@
         page = { ...page, title }
       }
       titleInTree = title
+    })
+  })
+
+  /**
+   * Where the sidebar's tree last showed this Page: what it is beneath, or
+   * nothing once it left the tree. When that changes, the Page was moved,
+   * and it is read again for its new Area and path.
+   */
+  let placeInTree: { areaId: string; place: string | null } | undefined
+  $effect(() => {
+    if (!page) return
+    const areaId = page.area.id
+    const tree = navigation.tree(areaId)
+    if (!tree) return
+    const place = findEntry(tree, page.id) ? above(tree, page.id).join('/') : null
+    untrack(() => {
+      // In the Area it was just found in, the place is taken as it is.
+      if (placeInTree?.areaId === areaId && place !== placeInTree.place) refresh()
+      placeInTree = { areaId, place }
     })
   })
 
