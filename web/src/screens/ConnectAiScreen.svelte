@@ -100,7 +100,9 @@
         <p><a href="#token-way" onclick={showTokenWay}>Connect with a Token</a></p>
       {:else}
         <p>
-          <a href="/settings/tokens" onclick={event => router.follow(event, '/settings/tokens')}>Create a Token</a> for it under Tokens.
+          <a href="/settings/connected-apps#for-developers" onclick={event => router.follow(event, '/settings/connected-apps#for-developers')}
+            >Create a Token</a
+          > for it under Connected apps.
         </p>
       {/if}
     </section>
