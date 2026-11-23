@@ -37,7 +37,9 @@ const SAVE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// How often an open editing connection checks that its session is still
 /// valid and the Page still readable, even when nothing is sent. Changes are
-/// checked each time they arrive.
+/// checked each time they arrive, and a session that is ended or a Grant that
+/// changes is noticed at once; this catches what nobody announces, such as a
+/// session expiring.
 const ACCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(15);
 
 /// How often the search index takes in what changed. With `SAVE_INTERVAL`
@@ -452,6 +454,15 @@ async fn serve_connection(
 ) -> anyhow::Result<()> {
     let (mut outgoing, mut incoming) = socket.split();
 
+    // A session that ended, or a Grant that changed, since access was checked
+    // gets nothing of the Page, not even its content as it is.
+    if access.changes.has_changed().unwrap_or(true) {
+        access.changes.mark_unchanged();
+        if !access.still_holds_role().await {
+            return Ok(());
+        }
+    }
+
     // Subscribe before reading the state, so no update can fall in between.
     // An update that arrives twice is harmless.
     let mut frames = page.frames.subscribe();
@@ -484,13 +495,16 @@ async fn serve_connection(
     );
     let result = loop {
         tokio::select! {
-            _ = recheck.tick() => {
-                if !access.still_holds_role().await {
+            // In this order: once a session ended or a Role changed, no frame
+            // that arrives meanwhile is passed on before the change is checked.
+            biased;
+            changed = access.changes.changed() => {
+                if changed.is_err() || !access.still_holds_role().await {
                     break Ok(());
                 }
             }
-            changed = access.changes.changed() => {
-                if changed.is_err() || !access.still_holds_role().await {
+            _ = recheck.tick() => {
+                if !access.still_holds_role().await {
                     break Ok(());
                 }
             }
