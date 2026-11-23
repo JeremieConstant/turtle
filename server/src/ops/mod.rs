@@ -55,6 +55,8 @@ pub struct Core {
     live: crate::live::Pages,
     /// Where Attachment files are kept, each under the hash of its content.
     attachments: std::path::PathBuf,
+    /// Where the files of PDF Styles' logos are kept, each under the hash of
+    /// its content.
     pdf_logos: std::path::PathBuf,
     /// Where uploaded font files are kept, each under the hash of its
     /// content. Apart from the Attachments, whose clean-up would remove them.

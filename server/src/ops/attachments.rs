@@ -96,9 +96,7 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
     // whatever is sent.
     tree::page_to_change(core, principal, &input.page_id)?;
     let name = valid_name(&input.name)?;
-    let content = base64::engine::general_purpose::STANDARD
-        .decode(input.content.trim())
-        .map_err(|_| OpError::InvalidInput("Send the file's content in base64.".into()))?;
+    let content = decode_content(&input.content)?;
     let limit = core.attachment_limit();
     if content.len() as u64 > limit {
         return Err(OpError::InvalidInput(format!(
@@ -216,14 +214,7 @@ pub(super) fn remove_unattached_files(core: &Core, db: &Connection, hashes: &[St
         if still_attached.query_row([hash], |row| row.get::<_, bool>(0))? {
             continue;
         }
-        let path = core.attachments_dir().join(hash);
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            // What it belonged to is gone already; a file left behind only
-            // takes up space, so this is no reason to fail the removal.
-            Err(error) => eprintln!("removing {} failed: {error}", path.display()),
-        }
+        remove_stored_file(core.attachments_dir(), hash);
     }
     Ok(())
 }
@@ -271,6 +262,25 @@ pub(super) fn store_file(dir: &Path, content: &[u8]) -> Result<String, OpError> 
     std::fs::write(&partial, content).with_context(|| format!("writing {}", partial.display()))?;
     std::fs::rename(&partial, &path).with_context(|| format!("moving {} into place", partial.display()))?;
     Ok(hash)
+}
+
+/// Removes the file stored under the hash, if it is there. What it belonged
+/// to is gone already, and a file left behind only takes up space, so a
+/// failure is logged rather than returned.
+pub(super) fn remove_stored_file(dir: &Path, hash: &str) {
+    let path = dir.join(hash);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => eprintln!("removing {} failed: {error}", path.display()),
+    }
+}
+
+/// An uploaded file's content, sent in base64.
+pub(super) fn decode_content(content: &str) -> Result<Vec<u8>, OpError> {
+    base64::engine::general_purpose::STANDARD
+        .decode(content.trim())
+        .map_err(|_| OpError::InvalidInput("Send the file's content in base64.".into()))
 }
 
 /// The name without any folders a browser or Agent put before it.

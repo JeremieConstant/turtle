@@ -2,10 +2,9 @@
 //! Workspace Admins manage them; whoever exports picks one or gets the default.
 
 use super::accounts::{random_hex, Nothing};
-use super::attachments::{size_in_words, store_file, valid_name};
+use super::attachments::{decode_content, remove_stored_file, size_in_words, store_file, valid_name};
 use super::{areas, Catalogue, Core, OpError, OpResult, Principal};
 use crate::pdf::{Language, Logo, LogoFormat, Look};
-use base64::Engine;
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -143,8 +142,45 @@ pub struct PdfStyleList {
     pub font_families: Vec<String>,
 }
 
-const COLUMNS: &str = "id, is_default, name, text_color, heading_color, accent_color, body_font, heading_font, \
-     code_font, body_size, h1_size, h2_size, h3_size, cover, toc, toc_depth, footer_text, language, logo_name, logo_hash";
+/// The columns holding a PDF Style's values, in the order of `value_params`.
+macro_rules! value_columns {
+    () => {
+        "name, text_color, heading_color, accent_color, body_font, heading_font, code_font, \
+         body_size, h1_size, h2_size, h3_size, cover, toc, toc_depth, footer_text, language"
+    };
+}
+
+/// What `read_style` reads.
+const COLUMNS: &str = concat!("id, is_default, ", value_columns!(), ", logo_name, logo_hash");
+
+/// The values, in the order of `value_columns!`.
+fn value_params(values: &PdfStyleValues) -> [&dyn rusqlite::ToSql; 16] {
+    [
+        &values.name,
+        &values.text_color,
+        &values.heading_color,
+        &values.accent_color,
+        &values.body_font,
+        &values.heading_font,
+        &values.code_font,
+        &values.body_size,
+        &values.h1_size,
+        &values.h2_size,
+        &values.h3_size,
+        &values.cover,
+        &values.toc,
+        &values.toc_depth,
+        &values.footer_text,
+        &values.language,
+    ]
+}
+
+/// A language is stored as its code.
+impl rusqlite::ToSql for Language {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.code().into())
+    }
+}
 
 pub fn list_pdf_styles(core: &Core, principal: &Principal, _: Nothing) -> OpResult<PdfStyleList> {
     areas::signed_in(principal)?;
@@ -160,30 +196,16 @@ pub fn create_pdf_style(core: &Core, principal: &Principal, input: PdfStyleValue
     let db = core.db();
     let values = valid(&db, input, None)?;
     let style = PdfStyle { id: random_hex(16)?, is_default: false, logo: None, values };
+    let now = core.now();
+    let mut params: Vec<&dyn rusqlite::ToSql> = vec![&style.id, &now];
+    params.extend(value_params(&style.values));
     db.execute(
-        "INSERT INTO pdf_styles (id, name, text_color, heading_color, accent_color, body_font, heading_font, code_font,
-             body_size, h1_size, h2_size, h3_size, cover, toc, toc_depth, footer_text, language, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-        rusqlite::params![
-            style.id,
-            style.values.name,
-            style.values.text_color,
-            style.values.heading_color,
-            style.values.accent_color,
-            style.values.body_font,
-            style.values.heading_font,
-            style.values.code_font,
-            style.values.body_size,
-            style.values.h1_size,
-            style.values.h2_size,
-            style.values.h3_size,
-            style.values.cover,
-            style.values.toc,
-            style.values.toc_depth,
-            style.values.footer_text,
-            style.values.language.code(),
-            core.now(),
-        ],
+        concat!(
+            "INSERT INTO pdf_styles (id, created_at, ",
+            value_columns!(),
+            ") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"
+        ),
+        params.as_slice(),
     )?;
     Ok(style.into())
 }
@@ -193,30 +215,15 @@ pub fn update_pdf_style(core: &Core, principal: &Principal, input: ChangedPdfSty
     let db = core.db();
     let style = pdf_style(&db, Some(&input.id))?;
     let values = valid(&db, input.values, Some(&style.id))?;
+    let mut params: Vec<&dyn rusqlite::ToSql> = vec![&style.id];
+    params.extend(value_params(&values));
     db.execute(
-        "UPDATE pdf_styles SET name = ?2, text_color = ?3, heading_color = ?4, accent_color = ?5, body_font = ?6,
-             heading_font = ?7, code_font = ?8, body_size = ?9, h1_size = ?10, h2_size = ?11, h3_size = ?12,
-             cover = ?13, toc = ?14, toc_depth = ?15, footer_text = ?16, language = ?17
-         WHERE id = ?1",
-        rusqlite::params![
-            style.id,
-            values.name,
-            values.text_color,
-            values.heading_color,
-            values.accent_color,
-            values.body_font,
-            values.heading_font,
-            values.code_font,
-            values.body_size,
-            values.h1_size,
-            values.h2_size,
-            values.h3_size,
-            values.cover,
-            values.toc,
-            values.toc_depth,
-            values.footer_text,
-            values.language.code(),
-        ],
+        concat!(
+            "UPDATE pdf_styles SET (",
+            value_columns!(),
+            ") = (?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) WHERE id = ?1"
+        ),
+        params.as_slice(),
     )?;
     Ok(PdfStyle { values, ..style }.into())
 }
@@ -252,9 +259,7 @@ pub fn set_pdf_style_logo(core: &Core, principal: &Principal, input: NewPdfStyle
     require_workspace_admin(principal)?;
     pdf_style(&core.db(), Some(&input.pdf_style_id))?;
     let file_name = valid_name(&input.file_name)?;
-    let content = base64::engine::general_purpose::STANDARD
-        .decode(input.content.trim())
-        .map_err(|_| OpError::InvalidInput("Send the file's content in base64.".into()))?;
+    let content = decode_content(&input.content)?;
     if content.len() > MAX_LOGO_SIZE {
         return Err(OpError::InvalidInput(format!(
             "This file is larger than {}, the most a logo may be. Choose a smaller file.",
@@ -358,14 +363,7 @@ fn remove_unheld_logo(core: &Core, db: &Connection, hash: Option<String>) -> Res
     if held {
         return Ok(());
     }
-    let path = core.pdf_logos_dir().join(&hash);
-    match std::fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        // What held it has let go already; a file left behind only takes up
-        // space, so this is no reason to fail.
-        Err(error) => eprintln!("removing {} failed: {error}", path.display()),
-    }
+    remove_stored_file(core.pdf_logos_dir(), &hash);
     Ok(())
 }
 
@@ -538,6 +536,7 @@ fn read_style(row: &rusqlite::Row) -> rusqlite::Result<PdfStyle> {
 mod tests {
     use super::*;
     use crate::ops::testing::{fresh, member};
+    use base64::Engine;
 
     fn standard() -> PdfStyleValues {
         PdfStyleValues {

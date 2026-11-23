@@ -1,7 +1,7 @@
 //! PDF Export: an Area or a Subtree as one PDF for reading and handing on,
 //! typeset inside Turtle (ADR-0012).
 
-use super::export::{file_name_of, readable_subtree};
+use super::export::{attachment_id, file_name_of, readable_subtree};
 use super::tree::{Entry, Kind};
 use super::{areas, attachments, fonts, links, pdf_styles};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
@@ -200,13 +200,6 @@ fn find_attachments(core: &Core, principal: &Principal, blocks: &[Block], found:
     }
     Ok(())
 }
-
-fn attachment_id(address: &str) -> Option<&str> {
-    address.strip_prefix(ATTACHMENT_ADDRESS).filter(|id| !id.is_empty())
-}
-
-/// How content refers to an Attachment, followed by its ID.
-const ATTACHMENT_ADDRESS: &str = "/api/attachments/";
 
 /// From this depth on, lists, quotes and Callouts are shown as their
 /// content: the typesetter refuses to nest without end.

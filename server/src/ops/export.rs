@@ -252,12 +252,17 @@ impl Addresses {
     /// Where an Attachment address of Turtle's points in the export, if it
     /// is to one of the export's Attachments.
     fn attachment(&self, address: &str) -> Option<&Vec<String>> {
-        self.attachments.get(address.strip_prefix(ATTACHMENT_ADDRESS)?)
+        self.attachments.get(attachment_id(address)?)
     }
 }
 
 /// How content refers to an Attachment, followed by its ID.
 const ATTACHMENT_ADDRESS: &str = "/api/attachments/";
+
+/// The ID of the Attachment an address of Turtle's points to, if it points to one.
+pub(super) fn attachment_id(address: &str) -> Option<&str> {
+    address.strip_prefix(ATTACHMENT_ADDRESS).filter(|id| !id.is_empty())
+}
 
 /// The path from a file in the directory `from` to `to`, as a link writes
 /// it. `#` and `%` would be read as part of an address, so they are encoded.

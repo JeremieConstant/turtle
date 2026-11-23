@@ -4,7 +4,6 @@
 use super::accounts::{random_hex, Nothing};
 use super::{areas, attachments, Catalogue, Core, OpError, OpResult, Principal};
 use crate::pdf;
-use base64::Engine;
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -113,9 +112,7 @@ pub fn list_fonts(core: &Core, principal: &Principal, _: Nothing) -> OpResult<Fo
 pub fn upload_font(core: &Core, principal: &Principal, input: NewFont) -> OpResult<UploadedFont> {
     require_workspace_admin(principal)?;
     let file_name = attachments::valid_name(&input.file_name)?;
-    let content = base64::engine::general_purpose::STANDARD
-        .decode(input.content.trim())
-        .map_err(|_| OpError::InvalidInput("Send the file's content in base64.".into()))?;
+    let content = attachments::decode_content(&input.content)?;
     let face = valid_font(&content)?;
     // The file is written before the database is taken, so a large upload
     // holds up nobody else.
@@ -142,6 +139,17 @@ pub fn upload_font(core: &Core, principal: &Principal, input: NewFont) -> OpResu
         |row| row.get(0),
     )?;
     if taken {
+        // Its file is no other font's, unless it is the very file of the
+        // style uploaded already. Deleting a font removes files under the
+        // same lock, so nothing comes to rely on it meanwhile.
+        let held: bool = db.query_row(
+            "SELECT EXISTS (SELECT 1 FROM fonts WHERE content_hash = ?1)",
+            [&content_hash],
+            |row| row.get(0),
+        )?;
+        if !held {
+            attachments::remove_stored_file(core.fonts_dir(), &content_hash);
+        }
         return Err(OpError::Conflict(format!(
             "{} {} is uploaded already. Delete it first to replace it.",
             font.family, font.style.style
@@ -191,13 +199,7 @@ pub fn delete_font(core: &Core, principal: &Principal, input: FontId) -> OpResul
     }
     db.execute("DELETE FROM fonts WHERE id = ?1", [&input.font_id])?;
     // Another font cannot hold the same file: it would be the same style of the same family.
-    let path = core.fonts_dir().join(&content_hash);
-    match std::fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        // The font is gone already; a file left behind only takes up space.
-        Err(error) => eprintln!("removing {} failed: {error}", path.display()),
-    }
+    attachments::remove_stored_file(core.fonts_dir(), &content_hash);
     Ok(().into())
 }
 
@@ -366,8 +368,7 @@ mod tests {
             [
                 ("Inter".into(), true, strings(&["Regular", "Italic", "Medium", "SemiBold", "SemiBold Italic", "Bold", "Bold Italic"])),
                 ("Source Serif 4".into(), true, strings(&["Regular", "Italic", "SemiBold", "Bold", "Bold Italic"])),
-                // The files of JetBrains Mono's bold give their weight as 558.
-                ("JetBrains Mono".into(), true, strings(&["Regular", "Italic", "Weight 558", "Weight 558 Italic"])),
+                ("JetBrains Mono".into(), true, strings(&["Regular", "Italic", "Bold", "Bold Italic"])),
                 ("Acme Serif".into(), false, strings(&["Regular"])),
                 ("Corporate Sans".into(), false, strings(&["Regular", "Italic", "Bold"])),
             ]
@@ -405,6 +406,18 @@ mod tests {
             assert_eq!((refused.kind(), refused.message()), (kind, message), "{file_name}");
         }
         assert_eq!(families(&core, &ada)[3..], [("Corporate Sans".into(), false, strings(&["Bold"]))]);
+    }
+
+    #[test]
+    fn a_refused_style_uploaded_already_leaves_no_file_behind() {
+        let core = fresh();
+        let ada = member(&core, "Ada", true);
+        upload(&core, &ada, "Corporate-Bold.ttf", &font_file("Corporate Sans", TestStyle::Bold)).unwrap();
+
+        // Named in other letters, so the file differs.
+        upload(&core, &ada, "Bold-again.ttf", &font_file("CORPORATE SANS", TestStyle::Bold)).unwrap_err();
+
+        assert_eq!(std::fs::read_dir(core.fonts_dir()).unwrap().count(), 1);
     }
 
     #[test]

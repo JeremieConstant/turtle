@@ -70,7 +70,16 @@ pub fn font_faces(bytes: &[u8]) -> Vec<FontFace> {
 
 /// The fonts built into Turtle.
 pub fn bundled_faces() -> Vec<FontFace> {
-    FONTS.iter().flat_map(|data| font_faces(data)).collect()
+    FONTS
+        .iter()
+        .flat_map(|data| font_faces(data))
+        .map(|face| match (face.family.as_str(), face.weight) {
+            // JetBrains Mono's bold files give their weight as 558, though
+            // their glyphs are bold; they are named for the Bold they are.
+            ("JetBrains Mono", 558) => FontFace { weight: 700, ..face },
+            _ => face,
+        })
+        .collect()
 }
 
 /// How a PDF looks: the values the fixed layout reads.
