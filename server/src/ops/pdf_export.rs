@@ -1,0 +1,742 @@
+//! PDF Export: an Area or a Subtree as one PDF for reading and handing on,
+//! typeset inside Turtle (ADR-0012).
+
+use super::export::{file_name_of, readable_subtree};
+use super::tree::{Entry, Kind};
+use super::{areas, attachments, links};
+use super::{Catalogue, Core, OpError, OpResult, Principal};
+use crate::model::{Block, Inline, Marks};
+use crate::pdf;
+use base64::Engine;
+use schemars::JsonSchema;
+use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+
+pub(super) fn register(catalogue: &mut Catalogue) {
+    catalogue
+        .add(
+            "export_pdf",
+            "Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. Needs the Read Role.",
+            export_pdf,
+        )
+        .changes = false;
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ToExportPdf {
+    pub area_id: String,
+    /// The Page or Folder whose Subtree to export; the whole Area if absent.
+    #[serde(default)]
+    pub entry_id: Option<String>,
+    /// Shown on the cover, beneath the title.
+    #[serde(default)]
+    pub subtitle: Option<String>,
+}
+
+/// A PDF.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PdfExport {
+    /// A name to save it under, after the Area or the top of the Subtree,
+    /// such as "Engineering.pdf".
+    pub file_name: String,
+    /// The PDF, in base64.
+    pub content: String,
+}
+
+pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpResult<PdfExport> {
+    areas::signed_in(principal)?;
+    // What is in the PDF is decided under one lock, so the tree is seen as
+    // it was at one moment; the content is read afterwards, as each Page is now.
+    let (name, entries) = readable_subtree(&core.db(), principal, &input.area_id, input.entry_id.as_deref())?;
+    let mut flat = Vec::new();
+    flatten(&entries, 0, &mut flat);
+    let mut contents = HashMap::new();
+    for (entry, _) in flat.iter().filter(|(entry, _)| entry.kind == Kind::Page) {
+        contents.insert(entry.id.clone(), core.live().content(&entry.id)?);
+    }
+    let all_blocks: Vec<Block> = contents.values().flatten().cloned().collect();
+
+    let in_pdf = flat
+        .iter()
+        .filter(|(entry, _)| entry.kind == Kind::Page)
+        .map(|(entry, _)| (entry.id.clone(), entry.title.clone()))
+        .collect();
+    let mut found = Found {
+        in_pdf,
+        outside: links::linked_titles(core, principal, &all_blocks)?,
+        public_url: core.public_url().map(|url| url.as_str().to_string()),
+        attachment_names: HashMap::new(),
+        images: HashMap::new(),
+    };
+    find_attachments(core, principal, &all_blocks, &mut found)?;
+
+    let parts = flat
+        .iter()
+        .map(|(entry, depth)| match entry.kind {
+            Kind::Folder => pdf::Part {
+                kind: pdf::PartKind::Folder,
+                label: folder_label(&entry.id),
+                title: entry.title.clone(),
+                depth: *depth,
+                sections: Vec::new(),
+                blocks: Vec::new(),
+            },
+            Kind::Page => {
+                let mut chapter = Chapter { page_id: &entry.id, found: &found, sections: Vec::new() };
+                let blocks = chapter.blocks(&contents[&entry.id], 0);
+                pdf::Part {
+                    kind: pdf::PartKind::Page,
+                    label: page_label(&entry.id),
+                    title: entry.title.clone(),
+                    depth: *depth,
+                    sections: chapter.sections,
+                    blocks,
+                }
+            }
+        })
+        .collect();
+    let document = pdf::Document {
+        title: name.clone(),
+        subtitle: input.subtitle.map(|subtitle| subtitle.trim().to_string()).filter(|subtitle| !subtitle.is_empty()),
+        as_of: pdf::Date::of(core.now()),
+        parts,
+        images: found.images,
+    };
+    let pdf = pdf::typeset(document, &pdf::Look::built_in())?;
+    Ok(PdfExport {
+        file_name: format!("{}.pdf", file_name_of(&name)),
+        content: base64::engine::general_purpose::STANDARD.encode(pdf),
+    }
+    .into())
+}
+
+/// The entries in tree order, each with how many Folders above it are in the PDF.
+fn flatten<'a>(entries: &'a [Entry], depth: usize, out: &mut Vec<(&'a Entry, usize)>) {
+    for entry in entries {
+        out.push((entry, depth));
+        let beneath = if entry.kind == Kind::Folder { depth + 1 } else { depth };
+        flatten(&entry.children, beneath, out);
+    }
+}
+
+fn page_label(page_id: &str) -> String {
+    format!("p-{page_id}")
+}
+
+fn folder_label(folder_id: &str) -> String {
+    format!("f-{folder_id}")
+}
+
+/// What the content refers to, as the exporter may see it.
+struct Found {
+    /// The Pages in the PDF, with their titles.
+    in_pdf: HashMap<String, String>,
+    /// The titles of other Pages the content links to that the exporter can read.
+    outside: HashMap<String, String>,
+    public_url: Option<String>,
+    /// The names of the Attachments the content refers to that the exporter can read.
+    attachment_names: HashMap<String, String>,
+    /// Of those, the images the PDF can show, by their path in the document.
+    images: HashMap<String, Vec<u8>>,
+}
+
+fn image_path(attachment_id: &str) -> String {
+    format!("/images/{attachment_id}")
+}
+
+/// Reads the Attachments the content shows as images, keeping those the
+/// exporter can read and the PDF can show, and the names of all it refers to.
+fn find_attachments(core: &Core, principal: &Principal, blocks: &[Block], found: &mut Found) -> Result<(), OpError> {
+    let mut referred = Vec::new();
+    let mut shown = Vec::new();
+    for_each_inline(blocks, &mut |inline| match inline {
+        Inline::Image { src, .. } => shown.extend(attachment_id(src).map(String::from)),
+        Inline::Text { marks: Marks { link: Some(href), .. }, .. } => {
+            referred.extend(attachment_id(href).map(String::from))
+        }
+        Inline::Text { .. } | Inline::HardBreak | Inline::PageLink { .. } => {}
+    });
+    let mut files = Vec::new();
+    {
+        let db = core.db();
+        for id in referred.iter().chain(&shown) {
+            if found.attachment_names.contains_key(id) {
+                continue;
+            }
+            if let Some((attachment, content_hash)) = attachments::readable_stored(&db, principal, id)? {
+                found.attachment_names.insert(id.clone(), attachment.name);
+                if shown.contains(id) {
+                    files.push((id.clone(), content_hash));
+                }
+            }
+        }
+    }
+    for (id, content_hash) in files {
+        let stored = core.attachments_dir().join(&content_hash);
+        // A file gone since, or one the PDF cannot show, is shown by name.
+        match std::fs::read(&stored) {
+            Ok(content) if pdf::is_image(&content) => {
+                found.images.insert(image_path(&id), content);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(anyhow::Error::from(error).context(format!("reading {}", stored.display())).into()),
+        }
+    }
+    Ok(())
+}
+
+fn attachment_id(address: &str) -> Option<&str> {
+    address.strip_prefix(ATTACHMENT_ADDRESS).filter(|id| !id.is_empty())
+}
+
+/// How content refers to an Attachment, followed by its ID.
+const ATTACHMENT_ADDRESS: &str = "/api/attachments/";
+
+/// From this depth on, lists, quotes and Callouts are shown as their
+/// content: the typesetter refuses to nest without end.
+const DEEPEST: usize = 8;
+
+/// One Page's content, made into a chapter.
+struct Chapter<'a> {
+    page_id: &'a str,
+    found: &'a Found,
+    sections: Vec<pdf::Section>,
+}
+
+impl Chapter<'_> {
+    fn blocks(&mut self, blocks: &[Block], depth: usize) -> Vec<pdf::Block> {
+        let mut out = Vec::new();
+        for block in blocks {
+            self.block(block, depth, &mut out);
+        }
+        out
+    }
+
+    /// The content of a quote or Callout `depth` deep; from `DEEPEST` on,
+    /// it is put in the quote's place, in `out`.
+    fn nested(&mut self, children: &[Block], depth: usize, out: &mut Vec<pdf::Block>) -> Option<Vec<pdf::Block>> {
+        if depth >= DEEPEST {
+            children.iter().for_each(|child| self.block(child, depth, out));
+            None
+        } else {
+            Some(self.blocks(children, depth + 1))
+        }
+    }
+
+    /// The items of a list `depth` deep, as `nested`.
+    fn items(&mut self, items: &[Vec<Block>], depth: usize, out: &mut Vec<pdf::Block>) -> Option<Vec<Vec<pdf::Block>>> {
+        if depth >= DEEPEST {
+            items.iter().flatten().for_each(|child| self.block(child, depth, out));
+            None
+        } else {
+            Some(items.iter().map(|item| self.blocks(item, depth + 1)).collect())
+        }
+    }
+
+    fn block(&mut self, block: &Block, depth: usize, out: &mut Vec<pdf::Block>) {
+        let shown = match block {
+            Block::Paragraph(content) => pdf::Block::Paragraph { inlines: self.inlines(content) },
+            Block::Heading { level, content } => {
+                // The chapter's title is the one heading above a Page's own.
+                let rank = (*level).clamp(2, 6);
+                let inlines = self.inlines(content);
+                let title = plain_text(&inlines);
+                let label = (!title.is_empty()).then(|| format!("s-{}-{}", self.page_id, self.sections.len() + 1));
+                if let Some(label) = &label {
+                    self.sections.push(pdf::Section { title, label: label.clone(), rank });
+                }
+                pdf::Block::Heading { rank, label, inlines }
+            }
+            Block::CodeBlock { language, text } => pdf::Block::Code {
+                language: language.clone().filter(|language| !language.trim().is_empty()),
+                text: text.clone(),
+            },
+            Block::Blockquote(children) => match self.nested(children, depth, out) {
+                Some(blocks) => pdf::Block::Quote { blocks },
+                None => return,
+            },
+            Block::Callout { kind, content } => match self.nested(content, depth, out) {
+                Some(blocks) => pdf::Block::Callout { kind: kind.name(), blocks },
+                None => return,
+            },
+            Block::BulletList(items) => match self.items(items, depth, out) {
+                Some(items) => pdf::Block::Bullets { items },
+                None => return,
+            },
+            Block::OrderedList { start, items } => match self.items(items, depth, out) {
+                Some(items) => pdf::Block::Numbered { start: u32::try_from(*start).unwrap_or(u32::MAX), items },
+                None => return,
+            },
+            Block::TaskList(tasks) => {
+                if depth >= DEEPEST {
+                    tasks.iter().flat_map(|task| &task.content).for_each(|child| self.block(child, depth, out));
+                    return;
+                }
+                let items = tasks
+                    .iter()
+                    .map(|task| pdf::Task { checked: task.checked, blocks: self.blocks(&task.content, depth + 1) })
+                    .collect();
+                pdf::Block::Tasks { items }
+            }
+            Block::Table(rows) => {
+                let width = rows.first().map_or(0, Vec::len);
+                if width == 0 {
+                    return;
+                }
+                let rows = rows
+                    .iter()
+                    .map(|row| {
+                        let mut cells: Vec<_> = row.iter().take(width).map(|cell| self.inlines(cell)).collect();
+                        cells.resize_with(width, Vec::new);
+                        cells
+                    })
+                    .collect();
+                pdf::Block::Table { rows }
+            }
+            Block::HorizontalRule => pdf::Block::Rule,
+        };
+        out.push(shown);
+    }
+
+    fn inlines(&self, inlines: &[Inline]) -> Vec<pdf::Inline> {
+        inlines.iter().filter_map(|inline| self.inline(inline)).collect()
+    }
+
+    fn inline(&self, inline: &Inline) -> Option<pdf::Inline> {
+        let found = self.found;
+        match inline {
+            Inline::Text { text, marks } => {
+                // An Attachment that is not shown is named only: the PDF does not carry it.
+                let link = marks.link.as_deref().filter(|href| attachment_id(href).is_none()).and_then(outside_link);
+                Some(pdf::Inline::Text {
+                    text: text.clone(),
+                    bold: marks.bold,
+                    italic: marks.italic,
+                    strike: marks.strike,
+                    code: marks.code,
+                    link,
+                })
+            }
+            Inline::HardBreak => Some(pdf::Inline::Break),
+            Inline::Image { src, alt } => match attachment_id(src) {
+                Some(id) => {
+                    let path = image_path(id);
+                    if found.images.contains_key(&path) {
+                        Some(pdf::Inline::Image { path, alt: alt.clone() })
+                    } else {
+                        let name = found.attachment_names.get(id).unwrap_or(alt);
+                        (!name.is_empty()).then(|| plain(name, None))
+                    }
+                }
+                // The PDF holds no images from elsewhere, only a link to them.
+                None => {
+                    let shown = if alt.is_empty() { src } else { alt };
+                    (!shown.is_empty()).then(|| plain(shown, outside_link(src)))
+                }
+            },
+            Inline::PageLink { page_id } => {
+                if let Some(title) = found.in_pdf.get(page_id) {
+                    return Some(plain(title, Some(pdf::Link::Part(page_label(page_id)))));
+                }
+                // Nothing to someone who cannot read the Page, as everywhere.
+                let title = found.outside.get(page_id)?;
+                // Without its public URL, Turtle cannot say where the Page is.
+                let link = found.public_url.as_ref().map(|base| pdf::Link::Url(format!("{base}/p/{page_id}")));
+                Some(plain(title, link))
+            }
+        }
+    }
+}
+
+fn plain(text: &str, link: Option<pdf::Link>) -> pdf::Inline {
+    pdf::Inline::Text { text: text.to_string(), bold: false, italic: false, strike: false, code: false, link }
+}
+
+/// A link out of the PDF, for an address its reader can follow.
+fn outside_link(href: &str) -> Option<pdf::Link> {
+    let lower = href.to_ascii_lowercase();
+    ["https://", "http://", "mailto:"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme))
+        .then(|| pdf::Link::Url(href.to_string()))
+}
+
+fn plain_text(inlines: &[pdf::Inline]) -> String {
+    let text: String = inlines
+        .iter()
+        .map(|inline| match inline {
+            pdf::Inline::Text { text, .. } => text.as_str(),
+            pdf::Inline::Break => " ",
+            pdf::Inline::Image { .. } => "",
+        })
+        .collect();
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn for_each_inline(blocks: &[Block], visit: &mut impl FnMut(&Inline)) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(content) | Block::Heading { content, .. } => content.iter().for_each(&mut *visit),
+            Block::Blockquote(children) | Block::Callout { content: children, .. } => for_each_inline(children, visit),
+            Block::BulletList(items) | Block::OrderedList { items, .. } => {
+                items.iter().for_each(|item| for_each_inline(item, visit))
+            }
+            Block::TaskList(items) => items.iter().for_each(|item| for_each_inline(&item.content, visit)),
+            Block::Table(rows) => rows.iter().flatten().flatten().for_each(&mut *visit),
+            Block::CodeBlock { .. } | Block::HorizontalRule => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops::areas::{create_area, NewArea};
+    use crate::ops::attachments::{attach_file, NewAttachment};
+    use crate::ops::content::{replace_page, NewContent};
+    use crate::ops::permissions::{self, Holder, Role};
+    use crate::ops::testing::{fresh, give_role, member};
+    use crate::ops::tree::{create_folder, create_page, NewEntry, NewPage};
+    use base64::Engine;
+
+    fn area(core: &Core, admin: &Principal, name: &str) -> String {
+        create_area(core, admin, NewArea { name: name.into() }).unwrap().output.id
+    }
+
+    /// Creates a Page with content, beneath `parent` or at the top of the Area.
+    fn page(core: &Core, writer: &Principal, area_id: &str, parent: Option<&str>, title: &str, markdown: &str) -> String {
+        let entry = NewEntry { area_id: area_id.into(), parent_id: parent.map(Into::into), title: title.into() };
+        let markdown = (!markdown.is_empty()).then(|| markdown.to_string());
+        create_page(core, writer, NewPage { entry, markdown }).unwrap().output.id
+    }
+
+    fn pdf_of(export: &PdfExport) -> pdf_extract::Document {
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&export.content).unwrap();
+        pdf_extract::Document::load_mem(&bytes).unwrap()
+    }
+
+    /// A PDF's pages, each as the text it shows, as `squashed` gives it.
+    fn pages_of(export: &PdfExport) -> Vec<String> {
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&export.content).unwrap();
+        pdf_extract::extract_text_from_mem_by_pages(&bytes).unwrap().iter().map(|text| squashed(text)).collect()
+    }
+
+    /// Text without its spaces and line breaks, which reading a PDF puts
+    /// where the letters stand apart rather than where words end, and
+    /// without the dots that lead to a page number.
+    fn squashed(text: &str) -> String {
+        let mut text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        while let Some(at) = text.find("...") {
+            let end = text[at..].find(|c| c != '.').map_or(text.len(), |length| at + length);
+            text.replace_range(at..end, "");
+        }
+        text
+    }
+
+    fn export_area(core: &Core, reader: &Principal, area_id: &str) -> PdfExport {
+        let input = ToExportPdf { area_id: area_id.into(), entry_id: None, subtitle: None };
+        export_pdf(core, reader, input).unwrap().output
+    }
+
+    #[test]
+    fn an_area_is_exported_as_a_pdf_with_a_cover_contents_and_a_chapter_per_page() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
+        page(&core, &grace, &area_id, None, "Deploy", "Ship it.");
+
+        let exported = export_area(&core, &grace, &area_id);
+        let pages = pages_of(&exported);
+
+        assert_eq!(exported.file_name, "Engineering.pdf");
+        assert_eq!(pages.len(), 4, "{pages:#?}");
+        // The cover has no running header and no page number.
+        assert_eq!(pages[0], squashed("Engineering AS OF 14 November 2023"));
+        // Every other page has the title above and its number below.
+        assert_eq!(pages[1], squashed("ENGINEERING Contents Runbook 3 Deploy 4 2"));
+        assert_eq!(pages[2], squashed("ENGINEERING Runbook Restart the server. 3"));
+        assert_eq!(pages[3], squashed("ENGINEERING Deploy Ship it. 4"));
+    }
+
+    fn folder(core: &Core, writer: &Principal, area_id: &str, parent: Option<&str>, title: &str) -> String {
+        let entry = NewEntry { area_id: area_id.into(), parent_id: parent.map(Into::into), title: title.into() };
+        create_folder(core, writer, entry).unwrap().output.id
+    }
+
+    #[test]
+    fn folders_are_groups_and_the_contents_list_each_pages_sections() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let guides = folder(&core, &grace, &area_id, None, "Guides");
+        page(&core, &grace, &area_id, Some(&guides), "Set up", "## Install\n\nRun it.\n\n### Details\n\nMore.\n\n## Check");
+        page(&core, &grace, &area_id, None, "Runbook", "# Restart\n\nRestart the server.");
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        // `###` Sections are left out of the contents, at depth 2.
+        assert_eq!(pages[1], squashed("ENGINEERING Contents GUIDES Set up 3 Install 3 Check 3 Runbook 4 Restart 4 2"));
+        // A Folder's heading starts the page of what is beneath it.
+        assert_eq!(pages[2], squashed("ENGINEERING GUIDES Set up Install Run it. Details More. Check 3"));
+        assert_eq!(pages[3], squashed("ENGINEERING Runbook Restart Restart the server. 4"));
+    }
+
+    #[test]
+    fn a_subtree_is_exported_alone_with_its_subtitle_on_the_cover() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Overview", "Elsewhere.");
+        let runbook = page(&core, &grace, &area_id, None, "Runbook", "Restart the server.");
+        page(&core, &grace, &area_id, Some(&runbook), "Deploy", "Ship it.");
+
+        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: Some("For whoever is on call".into()) };
+        let exported = export_pdf(&core, &grace, input).unwrap().output;
+        let pages = pages_of(&exported);
+
+        assert_eq!(exported.file_name, "Runbook.pdf");
+        assert_eq!(
+            pages,
+            [
+                "Runbook For whoever is on call AS OF 14 November 2023",
+                "RUNBOOK Contents Runbook 3 Deploy 4 2",
+                "RUNBOOK Runbook Restart the server. 3",
+                "RUNBOOK Deploy Ship it. 4",
+            ]
+            .map(squashed)
+        );
+    }
+
+    #[test]
+    fn typst_syntax_in_titles_and_content_comes_out_as_written() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let written = r#"#panic("no") $x$ [a] \ @ref <label> *b* _i_ #set page(fill: red)"#;
+        let area_id = area(&core, &grace, written);
+        let markdown = r#"`#panic("no")` \#panic("no") $x$ \[a\] \\ @ref \<label\> \*b\* \_i\_"#;
+        page(&core, &grace, &area_id, None, written, markdown);
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        assert_eq!(pages[0], squashed(&format!("{written} AS OF 14 November 2023")));
+        let content = r#"#panic("no") #panic("no") $x$ [a] \ @ref <label> *b* _i_"#;
+        assert_eq!(pages[2], squashed(&format!("{} {written} {content} 3", written.to_uppercase())));
+    }
+
+    #[test]
+    fn every_block_and_inline_the_editor_holds_is_shown() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let markdown = "Some **bold**, *italic*, ~~struck~~ and `code`,  \nthen a [link](https://example.org).\n\n\
+            - one\n  - nested\n\n3. third\n4. fourth\n\n- [x] done\n- [ ] open\n\n> quoted\n\n> [!WARNING]\n> Careful.\n\n\
+            | Name | Role |\n| --- | --- |\n| Grace | Admin |\n\n```rust\nfn main() {}\n```\n\n---\n\nThe end.";
+        page(&core, &grace, &area_id, None, "Everything", markdown);
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        assert_eq!(
+            pages[2],
+            squashed(
+                "ENGINEERING Everything Some bold, italic, struck and code, then a link. – one – nested 3. third 4. fourth \
+                 done open quoted WARNING Careful. NAME ROLE Grace Admin fn main() {} The end. 3"
+            )
+        );
+    }
+
+    /// A PNG of one pixel.
+    const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+    fn attach(core: &Core, writer: &Principal, page_id: &str, name: &str, content: &str) -> String {
+        let input = NewAttachment { page_id: page_id.into(), name: name.into(), content: content.into() };
+        attach_file(core, writer, input).unwrap().output.id
+    }
+
+    /// How many images the PDF shows. An image's transparency is an image
+    /// of its own, which is not counted.
+    fn images_in(export: &PdfExport) -> usize {
+        let document = pdf_of(export);
+        let images: Vec<&pdf_extract::Stream> = document
+            .objects
+            .values()
+            .filter_map(|object| object.as_stream().ok())
+            .filter(|stream| stream.dict.get(b"Subtype").and_then(|subtype| subtype.as_name()).ok() == Some(b"Image"))
+            .collect();
+        let masks = images.iter().filter(|image| image.dict.has(b"SMask")).count();
+        images.len() - masks
+    }
+
+    #[test]
+    fn image_attachments_are_embedded_and_others_named() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let runbook = page(&core, &grace, &area_id, None, "Runbook", "");
+        let pixel = attach(&core, &grace, &runbook, "pixel.png", PIXEL);
+        let broken = base64::engine::general_purpose::STANDARD.encode("not an image");
+        let broken = attach(&core, &grace, &runbook, "broken.png", &broken);
+        let log = attach(&core, &grace, &runbook, "deploy.log", &base64::engine::general_purpose::STANDARD.encode("a log"));
+        let markdown = format!(
+            "![A pixel](/api/attachments/{pixel})\n\n![Broken](/api/attachments/{broken})\n\nSee [the log](/api/attachments/{log})."
+        );
+        write(&core, &grace, &runbook, &markdown);
+
+        let exported = export_area(&core, &grace, &area_id);
+
+        assert_eq!(images_in(&exported), 1);
+        assert_eq!(pages_of(&exported)[2], squashed("ENGINEERING Runbook broken.png See the log. 3"));
+        // Only the contents link, to the chapter.
+        assert_eq!(link_targets(&exported), ["page 3"]);
+    }
+
+    fn write(core: &Core, writer: &Principal, page_id: &str, markdown: &str) {
+        replace_page(core, writer, NewContent { page_id: page_id.into(), markdown: markdown.into() }).unwrap();
+    }
+
+    /// Where the PDF's links lead, each once: an address, or "page N" for a page of the PDF.
+    fn link_targets(export: &PdfExport) -> Vec<String> {
+        let document = pdf_of(export);
+        let pages: HashMap<pdf_extract::ObjectId, u32> = document.get_pages().into_iter().map(|(number, id)| (id, number)).collect();
+        let named = named_destinations(&document);
+        let mut targets = Vec::new();
+        for page_id in pages.keys() {
+            for annotation in document.get_page_annotations(*page_id).unwrap() {
+                if annotation.get(b"Subtype").and_then(|subtype| subtype.as_name()).ok() != Some(b"Link") {
+                    continue;
+                }
+                let action = annotation.get(b"A").and_then(|action| document.dereference(action)).map(|(_, action)| action);
+                let uri = action.ok().and_then(|action| action.as_dict().ok()).and_then(|action| action.get(b"URI").ok());
+                let destination = annotation.get(b"Dest").ok();
+                if let Some(uri) = uri {
+                    targets.push(String::from_utf8(uri.as_str().unwrap().to_vec()).unwrap());
+                } else if let Some(destination) = destination {
+                    let (_, mut destination) = document.dereference(destination).unwrap();
+                    if let Ok(name) = destination.as_str() {
+                        destination = named[name];
+                    }
+                    let page = destination.as_array().unwrap()[0].as_reference().unwrap();
+                    targets.push(format!("page {}", pages[&page]));
+                }
+            }
+        }
+        targets.sort();
+        // A link that breaks across pieces of text is one annotation per piece.
+        targets.dedup();
+        targets
+    }
+
+    /// The destinations the PDF names, by name.
+    fn named_destinations(document: &pdf_extract::Document) -> HashMap<Vec<u8>, &pdf_extract::Object> {
+        let mut named = HashMap::new();
+        let catalog = document.catalog().unwrap();
+        let Ok(names) = catalog.get(b"Names").and_then(|names| document.dereference(names)) else { return named };
+        let dests = names.1.as_dict().unwrap().get(b"Dests").and_then(|dests| document.dereference(dests)).unwrap().1;
+        let mut nodes = vec![dests.as_dict().unwrap()];
+        while let Some(node) = nodes.pop() {
+            if let Ok(kids) = node.get(b"Kids").and_then(|kids| kids.as_array()) {
+                for kid in kids {
+                    nodes.push(document.dereference(kid).unwrap().1.as_dict().unwrap());
+                }
+            }
+            if let Ok(pairs) = node.get(b"Names").and_then(|pairs| pairs.as_array()) {
+                for pair in pairs.chunks(2) {
+                    let destination = document.dereference(&pair[1]).unwrap().1;
+                    named.insert(pair[0].as_str().unwrap().to_vec(), destination);
+                }
+            }
+        }
+        named
+    }
+
+    #[test]
+    fn page_links_into_the_pdf_lead_to_their_chapter_and_others_to_the_page_in_turtle() {
+        let mut core = fresh();
+        core.core.set_public_url(Some(crate::public_url::PublicUrl::parse("https://turtle.example.org").unwrap()));
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let overview = page(&core, &grace, &area_id, None, "Overview", "");
+        let runbook = page(&core, &grace, &area_id, None, "Runbook", "");
+        let deploy = page(&core, &grace, &area_id, Some(&runbook), "Deploy", "");
+        write(&core, &grace, &runbook, &format!("See [](turtle:{overview}) and [](turtle:{deploy})."));
+
+        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: None };
+        let exported = export_pdf(&core, &grace, input).unwrap().output;
+
+        assert_eq!(pages_of(&exported)[2], squashed("RUNBOOK Runbook See Overview and Deploy. 3"));
+        // The contents lead to the chapter too.
+        assert_eq!(
+            link_targets(&exported),
+            [format!("https://turtle.example.org/p/{overview}").as_str(), "page 3", "page 4"]
+        );
+    }
+
+    #[test]
+    fn without_a_public_url_a_link_to_a_page_outside_the_pdf_is_its_title_alone() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let overview = page(&core, &grace, &area_id, None, "Overview", "");
+        let runbook = page(&core, &grace, &area_id, None, "Runbook", &format!("See [](turtle:{overview})."));
+
+        let input = ToExportPdf { area_id, entry_id: Some(runbook), subtitle: None };
+        let exported = export_pdf(&core, &grace, input).unwrap().output;
+
+        assert_eq!(pages_of(&exported)[2], squashed("RUNBOOK Runbook See Overview. 3"));
+        assert_eq!(link_targets(&exported), ["page 3"]);
+    }
+
+    #[test]
+    fn pages_the_exporter_cannot_read_are_left_out_and_what_they_can_read_beneath_takes_their_place() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let ken = member(&core, "Ken", false);
+        let area_id = area(&core, &grace, "Engineering");
+        give_role(&core, &area_id, &ken, Role::Read);
+        let runbook = page(&core, &grace, &area_id, None, "Runbook", "");
+        let secrets = page(&core, &grace, &area_id, Some(&runbook), "Secrets", "The password.");
+        page(&core, &grace, &area_id, Some(&secrets), "Rotation", "Rotate monthly.");
+        write(&core, &grace, &runbook, &format!("Keep [](turtle:{secrets}) safe."));
+        // Secrets has Grants of its own, which leave Ken out; Rotation, beneath it, lets him read again.
+        let Principal::Member { id: grace_id, .. } = &grace else { unreachable!() };
+        let db = core.db();
+        permissions::grant(&db, &secrets, &Holder::Member(grace_id.clone()), Role::Admin).unwrap();
+        drop(db);
+        let rotation = core.db().query_row("SELECT id FROM nodes WHERE title = 'Rotation'", [], |row| row.get::<_, String>(0)).unwrap();
+        let Principal::Member { id: ken_id, .. } = &ken else { unreachable!() };
+        permissions::grant(&core.db(), &rotation, &Holder::Member(ken_id.clone()), Role::Read).unwrap();
+
+        let pages = pages_of(&export_area(&core, &ken, &area_id));
+
+        assert_eq!(
+            pages[1..],
+            ["ENGINEERING Contents Runbook 3 Rotation 4 2", "ENGINEERING Runbook Keep safe. 3", "ENGINEERING Rotation Rotate monthly. 4"]
+                .map(squashed)
+        );
+        let hidden = ToExportPdf { area_id: area_id.clone(), entry_id: Some(secrets), subtitle: None };
+        let hidden = export_pdf(&core, &ken, hidden).unwrap_err();
+        let made_up = ToExportPdf { area_id, entry_id: Some("made-up".into()), subtitle: None };
+        let made_up = export_pdf(&core, &ken, made_up).unwrap_err();
+        assert_eq!((hidden.kind(), hidden.message()), (made_up.kind(), made_up.message()));
+        assert_eq!(hidden.kind(), "not_found");
+    }
+
+    #[test]
+    fn content_nested_deeper_than_the_typesetter_goes_is_still_shown() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let mut markdown = String::new();
+        for depth in 0..60 {
+            markdown.push_str(&format!("{}- level {depth}\n", "  ".repeat(depth)));
+        }
+        markdown.push_str(&format!("\n{}deep quote", "> ".repeat(60)));
+        page(&core, &grace, &area_id, None, "Deep", &markdown);
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        let text = pages[2..].join("");
+        assert!(text.contains("level0") && text.contains("level59") && text.contains("deepquote"), "{text}");
+    }
+}

@@ -8,6 +8,7 @@ mod mcp;
 mod model;
 mod oauth;
 mod ops;
+mod pdf;
 mod public_url;
 mod search;
 mod store;

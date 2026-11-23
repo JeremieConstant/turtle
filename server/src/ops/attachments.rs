@@ -184,6 +184,13 @@ pub fn open_attachment(core: &Core, principal: &Principal, id: &str) -> Result<(
     Ok((attachment, content))
 }
 
+/// An Attachment the principal may read, with the hash its file is stored
+/// under, or None as for one that does not exist.
+pub(super) fn readable_stored(db: &Connection, principal: &Principal, id: &str) -> rusqlite::Result<Option<(Attachment, String)>> {
+    let Some((attachment, content_hash)) = find(db, id)? else { return Ok(None) };
+    Ok(super::permissions::role_on(db, principal, &attachment.page_id)?.map(|_| (attachment, content_hash)))
+}
+
 /// The files the Attachments of these Pages hold, to give to
 /// `remove_unattached_files` once the Pages are gone.
 pub(super) fn files_of(db: &Connection, pages: &[String]) -> rusqlite::Result<Vec<String>> {

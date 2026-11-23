@@ -298,6 +298,14 @@ export type PathEntry = {
   title: string
 }
 
+export type PdfExport = {
+  /** The PDF, in base64. */
+  content: string
+  /** A name to save it under, after the Area or the top of the Subtree,
+such as "Engineering.pdf". */
+  file_name: string
+}
+
 export type Place = {
   area_id: string
   /** The sibling it comes before; last among its siblings if absent. */
@@ -950,6 +958,17 @@ of the Page. Needed only when several Sections have this heading. */
       entry_id?: string | null
     }
     output: Export
+  }
+  /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. Needs the Read Role. */
+  export_pdf: {
+    input: {
+      area_id: string
+      /** The Page or Folder whose Subtree to export; the whole Area if absent. */
+      entry_id?: string | null
+      /** Shown on the cover, beneath the title. */
+      subtitle?: string | null
+    }
+    output: PdfExport
   }
   /** Gets the current titles of the given Pages, as Page links show them. A Page the caller cannot read, or that is in the Trash, is left out, so its link shows no title. */
   get_page_titles: {

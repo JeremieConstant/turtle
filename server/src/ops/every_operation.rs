@@ -128,6 +128,7 @@ fn table() -> Vec<Row> {
         ("get_page_titles", |_| json!({"page_ids": ["made-up"]}), [OK; 5]),
         ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("export", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
+        ("export_pdf", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         ("replace_page", |f| json!({"page_id": f.page_id, "markdown": "New."}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("append_to_page", |f| json!({"page_id": f.page_id, "markdown": "More."}), [OK, OK, REFUSED, HIDDEN, OK]),
         // The Page has no headings, so those who may change it learn that.

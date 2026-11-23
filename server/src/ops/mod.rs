@@ -19,6 +19,7 @@ pub mod intranet;
 pub mod links;
 pub mod members;
 pub mod moves;
+pub mod pdf_export;
 pub mod permissions;
 pub mod quick_notes;
 pub mod search;
@@ -473,6 +474,7 @@ pub fn catalogue() -> Catalogue {
     moves::register(&mut catalogue);
     content::register(&mut catalogue);
     export::register(&mut catalogue);
+    pdf_export::register(&mut catalogue);
     links::register(&mut catalogue);
     tokens::register(&mut catalogue);
     connections::register(&mut catalogue);

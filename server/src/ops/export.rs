@@ -48,20 +48,7 @@ pub fn export(core: &Core, principal: &Principal, input: ToExport) -> OpResult<E
     // was at one moment; the content is read afterwards, as each Page is now.
     let (name, placed) = {
         let db = core.db();
-        let area = areas::readable_area(&db, principal, &input.area_id)?;
-        let (name, top) = match &input.entry_id {
-            None => (area.name.clone(), tree::beneath(&db, &area.id, &tree::root_of(&db, &area.id)?)?),
-            Some(id) => {
-                let found = tree::readable_entry(&db, principal, id, None)?;
-                if found.area_id != area.id {
-                    return Err(OpError::NotFound("There is no such Page or Folder.".into()));
-                }
-                let children = tree::beneath(&db, &area.id, id)?;
-                let top = Entry { id: id.clone(), kind: found.kind, title: found.title.clone(), children };
-                (found.title, vec![top])
-            }
-        };
-        let readable = readable_tree(&db, principal, top)?;
+        let (name, readable) = readable_subtree(&db, principal, &input.area_id, input.entry_id.as_deref())?;
         let mut placed = Vec::new();
         place(&db, &readable, &[], &mut Names::default(), &mut placed)?;
         (name, placed)
@@ -99,6 +86,31 @@ pub fn export(core: &Core, principal: &Principal, input: ToExport) -> OpResult<E
         content: base64::engine::general_purpose::STANDARD.encode(zip),
     }
     .into())
+}
+
+/// What an Export of the Area, or of the Subtree of `entry_id` in it, holds:
+/// its name, after the Area or the top of the Subtree, and the Pages and
+/// Folders the principal can read, in tree order.
+pub(super) fn readable_subtree(
+    db: &Connection,
+    principal: &Principal,
+    area_id: &str,
+    entry_id: Option<&str>,
+) -> Result<(String, Vec<Entry>), OpError> {
+    let area = areas::readable_area(db, principal, area_id)?;
+    let (name, top) = match entry_id {
+        None => (area.name.clone(), tree::beneath(db, &area.id, &tree::root_of(db, &area.id)?)?),
+        Some(id) => {
+            let found = tree::readable_entry(db, principal, id, None)?;
+            if found.area_id != area.id {
+                return Err(OpError::NotFound("There is no such Page or Folder.".into()));
+            }
+            let children = tree::beneath(db, &area.id, id)?;
+            let top = Entry { id: id.to_string(), kind: found.kind, title: found.title.clone(), children };
+            (found.title, vec![top])
+        }
+    };
+    Ok((name, readable_tree(db, principal, top)?))
 }
 
 /// The entries the principal can read. One they cannot read is left out,
@@ -322,7 +334,7 @@ impl Names {
 
 /// A name for a file that any common file system accepts and that shows the
 /// title: characters some refuse become `-`, and it is never hidden or empty.
-fn file_name_of(title: &str) -> String {
+pub(super) fn file_name_of(title: &str) -> String {
     let replaced: String = title
         .chars()
         .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c })

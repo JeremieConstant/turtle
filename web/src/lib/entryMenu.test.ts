@@ -6,19 +6,19 @@ vi.mock('svelte-sonner', () => ({ toast }))
 
 beforeEach(() => toast.mockClear())
 
-test('with Write or Admin, a Page offers creating beneath it, renaming, moving, copying its link, exporting and moving it to the Trash', () => {
-  const all = ['new-page', 'new-folder', 'rename', 'move', 'copy-link', 'export', 'trash']
+test('with Write or Admin, a Page offers creating beneath it, renaming, moving, copying its link, exporting it as a PDF or as Markdown and moving it to the Trash', () => {
+  const all = ['new-page', 'new-folder', 'rename', 'move', 'copy-link', 'export-pdf', 'export-markdown', 'trash']
   expect(entryMenuItems('page', 'write')).toEqual(all)
   expect(entryMenuItems('page', 'admin')).toEqual(all)
 })
 
 test('with only Read, a Page offers copying its link and exporting', () => {
-  expect(entryMenuItems('page', 'read')).toEqual(['copy-link', 'export'])
+  expect(entryMenuItems('page', 'read')).toEqual(['copy-link', 'export-pdf', 'export-markdown'])
 })
 
 test('a Folder has no address of its own, so it offers no link', () => {
-  expect(entryMenuItems('folder', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'move', 'export', 'trash'])
-  expect(entryMenuItems('folder', 'read')).toEqual(['export'])
+  expect(entryMenuItems('folder', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'move', 'export-pdf', 'export-markdown', 'trash'])
+  expect(entryMenuItems('folder', 'read')).toEqual(['export-pdf', 'export-markdown'])
 })
 
 const page = { id: 'p1', title: 'Deploying to production' }
