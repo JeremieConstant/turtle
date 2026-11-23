@@ -10,6 +10,8 @@ export type Route =
   /** Every result for a query. The query is part of the address, so a search can be shared. */
   | { screen: 'search'; query: string }
   | { screen: 'members' }
+  /** How to connect an AI client to Turtle. */
+  | { screen: 'connect-ai' }
   | { screen: 'tokens' }
   | { screen: 'agents' }
   /** The deleted Areas, for a Workspace Admin to restore. */
@@ -29,6 +31,7 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/setup') return { screen: 'setup' }
   if (pathname === '/sign-in') return { screen: 'sign-in' }
   if (pathname === '/authorize') return { screen: 'authorize', query }
+  if (pathname === '/connect-ai') return { screen: 'connect-ai' }
   if (pathname === '/settings/members') return { screen: 'members' }
   if (pathname === '/settings/tokens') return { screen: 'tokens' }
   if (pathname === '/settings/agents') return { screen: 'agents' }
