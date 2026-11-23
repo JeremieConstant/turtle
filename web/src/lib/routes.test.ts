@@ -92,8 +92,12 @@ test('the Agents screen has its own address under settings', () => {
   expect(parseAddress('/settings/agents')).toEqual({ screen: 'agents' })
 })
 
+test('the Connect AI page has its own address', () => {
+  expect(parseAddress('/connect-ai')).toEqual({ screen: 'connect-ai' })
+})
+
 test('the screens of a signed-in person sit in the shell', () => {
-  for (const address of ['/', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/tokens', '/settings/agents', '/nowhere']) {
+  for (const address of ['/', '/connect-ai', '/a/abc/platform', '/p/abc/notes', '/settings/members', '/settings/tokens', '/settings/agents', '/nowhere']) {
     expect(inShell(parseAddress(address)), address).toBe(true)
   }
 })

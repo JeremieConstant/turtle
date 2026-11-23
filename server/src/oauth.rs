@@ -10,7 +10,7 @@
 //! of its own, which carries the session cookie even though the browser came
 //! from the client's site, where a `SameSite=Strict` cookie stays behind.
 
-use crate::ops::connections::{self, with_query, CodeExchange, GrantRefusal, NewClient};
+use crate::ops::connections::{self, with_query, CodeExchange, GrantRefusal, NewClient, RefreshExchange};
 use crate::ops::{Core, OpError};
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, Query, State};
@@ -94,7 +94,7 @@ async fn server_metadata(State(core): State<Arc<Core>>) -> Response {
         "token_endpoint": format!("{base}/oauth/token"),
         "registration_endpoint": format!("{base}/oauth/register"),
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": connections::SCOPES,
@@ -160,7 +160,7 @@ async fn register(State(core): State<Arc<Core>>, body: String) -> Response {
                 "client_id_issued_at": client.created_at,
                 "client_name": client.name,
                 "redirect_uris": client.redirect_uris,
-                "grant_types": ["authorization_code"],
+                "grant_types": ["authorization_code", "refresh_token"],
                 "response_types": ["code"],
                 "token_endpoint_auth_method": "none",
             })),
@@ -212,23 +212,37 @@ async fn authorize(State(core): State<Arc<Core>>, Query(query): Query<HashMap<St
     Redirect::to(&with_query(CONSENT_SCREEN, &forwarded)).into_response()
 }
 
-/// The token endpoint: exchanges an authorization code, form-encoded as
-/// OAuth sends it, for an access token.
+/// The token endpoint: exchanges an authorization code or a refresh token,
+/// form-encoded as OAuth sends it, for an access token and a refresh token.
 async fn token(State(core): State<Arc<Core>>, form: Result<Form<HashMap<String, String>>, FormRejection>) -> Response {
     let Ok(Form(form)) = form else {
         return oauth_error(StatusCode::BAD_REQUEST, "invalid_request", "Send the request form-encoded.");
     };
-    match form.get("grant_type").map(String::as_str) {
-        Some("authorization_code") => {}
-        Some(_) => return oauth_error(StatusCode::BAD_REQUEST, "unsupported_grant_type", "Only authorization codes are exchanged."),
-        None => return oauth_error(StatusCode::BAD_REQUEST, "invalid_request", "Send a grant_type."),
-    }
     let field = |name: &str| form.get(name).filter(|value| !value.is_empty()).cloned();
-    let (Some(code), Some(client_id), Some(code_verifier)) = (field("code"), field("client_id"), field("code_verifier")) else {
-        return oauth_error(StatusCode::BAD_REQUEST, "invalid_request", "Send the code, client_id and code_verifier.");
+    let exchanged = match form.get("grant_type").map(String::as_str) {
+        Some("authorization_code") => {
+            let (Some(code), Some(client_id), Some(code_verifier)) = (field("code"), field("client_id"), field("code_verifier")) else {
+                return oauth_error(StatusCode::BAD_REQUEST, "invalid_request", "Send the code, client_id and code_verifier.");
+            };
+            let input = CodeExchange { code, client_id, redirect_uri: field("redirect_uri"), code_verifier };
+            tokio::task::spawn_blocking(move || connections::exchange_code(&core, input)).await
+        }
+        Some("refresh_token") => {
+            let (Some(refresh_token), Some(client_id)) = (field("refresh_token"), field("client_id")) else {
+                return oauth_error(StatusCode::BAD_REQUEST, "invalid_request", "Send the refresh_token and client_id.");
+            };
+            let input = RefreshExchange { refresh_token, client_id };
+            tokio::task::spawn_blocking(move || connections::refresh_connection(&core, input)).await
+        }
+        Some(_) => {
+            return oauth_error(
+                StatusCode::BAD_REQUEST,
+                "unsupported_grant_type",
+                "Only authorization codes and refresh tokens are exchanged.",
+            )
+        }
+        None => return oauth_error(StatusCode::BAD_REQUEST, "invalid_request", "Send a grant_type."),
     };
-    let input = CodeExchange { code, client_id, redirect_uri: field("redirect_uri"), code_verifier };
-    let exchanged = tokio::task::spawn_blocking(move || connections::exchange_code(&core, input)).await;
     match exchanged {
         Ok(Ok(issued)) => {
             let body: Value = json!({
@@ -236,6 +250,7 @@ async fn token(State(core): State<Arc<Core>>, form: Result<Form<HashMap<String, 
                 "token_type": "Bearer",
                 "expires_in": issued.expires_in,
                 "scope": issued.scope,
+                "refresh_token": issued.refresh_token,
             });
             let mut response = open_to_any_site(Json(body));
             response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -244,7 +259,7 @@ async fn token(State(core): State<Arc<Core>>, form: Result<Form<HashMap<String, 
         Ok(Err(GrantRefusal::InvalidGrant)) => oauth_error(
             StatusCode::BAD_REQUEST,
             "invalid_grant",
-            "The code is unknown, used or expired, or the code_verifier does not match it.",
+            "The code or refresh token is unknown, used or expired, or the code_verifier does not match the code. Connect again.",
         ),
         Ok(Err(GrantRefusal::Failed(error))) => server_error(error),
         Err(error) => server_error(OpError::Internal(error.into())),
