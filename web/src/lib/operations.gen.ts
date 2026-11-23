@@ -942,7 +942,7 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: Written
   }
-  /** Exports an Area, or the Subtree of one of its Pages or Folders, as a ZIP of Markdown files, returned in base64. Directories mirror the tree: a Page is a file named after its title, and a Page with Pages or Attachments beneath it also has a directory of the same name, which holds them. Each file starts with frontmatter holding the Page's ID, title, position among its siblings and Tags. Links to Pages in the export are relative paths; links to other Pages keep their `turtle:` address. Pages the caller cannot read are left out. Needs the Read Role. */
+  /** Exports an Area, or the Subtree of one of its Pages or Folders, as a ZIP of Markdown files, returned in base64. Directories mirror the tree: every Page and Folder is a Markdown file named after its title, and a directory of the same name holds what is beneath it, a Page's Attachments in `_attachments`. Each file starts with frontmatter holding the ID, whether it is a page or a folder, the title, the position among its siblings, and a Page's Tags. Links to Pages in the export are relative paths; links to other Pages keep their `turtle:` address. Pages the caller cannot read are left out. Needs the Read Role. */
   export: {
     input: {
       area_id: string

@@ -28,6 +28,10 @@ People's edits arrive at an open Page at any moment. Code that reads a Page's co
 
 A comment explains a reason, a constraint or a decision the code cannot show. Doc comments on operations and their input and output say what a caller needs to know, because they become the API and MCP descriptions.
 
+## A finding shows its evidence
+
+A review finding that says the code does something wrong names where it happens, as a file and line, or the test that fails. A suspicion the reviewer could not trace to a line is reported as a question, not a finding.
+
 ## Tests go through the public seam
 
 Tests exercise an operation, an HTTP or WebSocket endpoint, or a module's exports. Expected values come from the spec or a worked example, never recomputed the way the code computes them.

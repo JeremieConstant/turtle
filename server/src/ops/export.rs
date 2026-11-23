@@ -18,7 +18,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "export",
-            "Exports an Area, or the Subtree of one of its Pages or Folders, as a ZIP of Markdown files, returned in base64. Directories mirror the tree: a Page is a file named after its title, and a Page with Pages or Attachments beneath it also has a directory of the same name, which holds them. Each file starts with frontmatter holding the Page's ID, title, position among its siblings and Tags. Links to Pages in the export are relative paths; links to other Pages keep their `turtle:` address. Pages the caller cannot read are left out. Needs the Read Role.",
+            "Exports an Area, or the Subtree of one of its Pages or Folders, as a ZIP of Markdown files, returned in base64. Directories mirror the tree: every Page and Folder is a Markdown file named after its title, and a directory of the same name holds what is beneath it, a Page's Attachments in `_attachments`. Each file starts with frontmatter holding the ID, whether it is a page or a folder, the title, the position among its siblings, and a Page's Tags. Links to Pages in the export are relative paths; links to other Pages keep their `turtle:` address. Pages the caller cannot read are left out. Needs the Read Role.",
             export,
         )
         .changes = false;
@@ -71,28 +71,26 @@ pub fn export(core: &Core, principal: &Principal, input: ToExport) -> OpResult<E
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for entry in &placed {
-        match entry.kind {
-            Kind::Folder => zip.add_directory(entry.directory(), options).context("adding a directory")?,
-            Kind::Page => {
-                zip.start_file(entry.file(), options).context("adding a file")?;
-                zip.write_all(page_file(core, principal, entry, &addresses)?.as_bytes()).context("writing a file")?;
-                if entry.has_directory {
-                    zip.add_directory(entry.directory(), options).context("adding a directory")?;
-                }
-                for attachment in &entry.attachments {
-                    let stored = core.attachments_dir().join(&attachment.content_hash);
-                    let content = match std::fs::read(&stored) {
-                        Ok(content) => content,
-                        // Its Page was removed for good since the tree was
-                        // read, taking the file along: it is left out, as the
-                        // Page would have been a moment later.
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                        Err(error) => return Err(anyhow::Error::from(error).context(format!("reading {}", stored.display())).into()),
-                    };
-                    zip.start_file(attachment.path.join("/"), options).context("adding a file")?;
-                    zip.write_all(&content).context("writing a file")?;
-                }
-            }
+        zip.start_file(entry.file(), options).context("adding a file")?;
+        zip.write_all(entry_file(core, principal, entry, &addresses)?.as_bytes()).context("writing a file")?;
+        if entry.has_directory {
+            zip.add_directory(entry.directory(), options).context("adding a directory")?;
+        }
+        if !entry.attachments.is_empty() {
+            zip.add_directory(format!("{}{ATTACHMENTS}/", entry.directory()), options).context("adding a directory")?;
+        }
+        for attachment in &entry.attachments {
+            let stored = core.attachments_dir().join(&attachment.content_hash);
+            let content = match std::fs::read(&stored) {
+                Ok(content) => content,
+                // Its Page was removed for good since the tree was read,
+                // taking the file along: it is left out, as the Page would
+                // have been a moment later.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(anyhow::Error::from(error).context(format!("reading {}", stored.display())).into()),
+            };
+            zip.start_file(attachment.path.join("/"), options).context("adding a file")?;
+            zip.write_all(&content).context("writing a file")?;
         }
     }
     let zip = zip.finish().context("finishing the ZIP")?.into_inner();
@@ -130,7 +128,7 @@ struct Placed {
     /// Counted from 1 among its siblings in the export.
     position: usize,
     tags: Vec<String>,
-    /// Whether a Page has a directory of its own, for what is beneath it.
+    /// Whether it has a directory, for what is beneath it: a Folder always does.
     has_directory: bool,
     /// A Page's Attachments, which are in its directory.
     attachments: Vec<PlacedAttachment>,
@@ -152,7 +150,7 @@ impl Placed {
         self.file_path().join("/")
     }
 
-    /// A Page's file, from the top of the export down.
+    /// Its file, from the top of the export down.
     fn file_path(&self) -> Vec<String> {
         let mut path = self.within.clone();
         path.push(format!("{}.md", self.name));
@@ -168,11 +166,8 @@ fn path(within: &[String], name: &str) -> String {
 /// the directory `within`, in which `names` are taken.
 fn place(db: &Connection, entries: &[Entry], within: &[String], names: &mut Names, out: &mut Vec<Placed>) -> Result<(), OpError> {
     for (index, entry) in entries.iter().enumerate() {
-        let suffixes: &[&str] = match entry.kind {
-            Kind::Page => &["", ".md"],
-            Kind::Folder => &[""],
-        };
-        let name = names.claim(&file_name_of(&entry.title), suffixes);
+        // Every Entry is a file, and a directory of the same name holds what is beneath it.
+        let name = names.claim(&file_name_of(&entry.title), &["", ".md"]);
         let attachments = match entry.kind {
             Kind::Page => attachments::stored_of(db, &entry.id)?,
             Kind::Folder => Vec::new(),
@@ -191,11 +186,14 @@ fn place(db: &Connection, entries: &[Entry], within: &[String], names: &mut Name
             has_directory: entry.kind == Kind::Folder || !entry.children.is_empty() || !attachments.is_empty(),
             attachments: Vec::new(),
         });
-        // What is beneath a Page gets the first pick of names in its
-        // directory, so it is named the same whether or not there are
-        // Attachments beside it.
         let mut names_beneath = Names::default();
+        // Attachments have a directory of their own, so an import tells
+        // them from Pages; a Page beneath named like it makes way.
+        if entry.kind == Kind::Page {
+            names_beneath.claim(ATTACHMENTS, &[""]);
+        }
         place(db, &entry.children, &beneath, &mut names_beneath, out)?;
+        let mut attachment_names = Names::default();
         out[at].attachments = attachments
             .into_iter()
             .map(|(attachment, content_hash)| {
@@ -204,15 +202,18 @@ fn place(db: &Connection, entries: &[Entry], within: &[String], names: &mut Name
                     Some((stem, extension)) if !stem.is_empty() => (stem.to_string(), format!(".{extension}")),
                     _ => (whole, String::new()),
                 };
-                let name = names_beneath.claim(&stem, &[&extension]);
+                let name = attachment_names.claim(&stem, &[&extension]);
                 let mut path = beneath.clone();
-                path.push(format!("{name}{extension}"));
+                path.extend([ATTACHMENTS.to_string(), format!("{name}{extension}")]);
                 PlacedAttachment { id: attachment.id, content_hash, path }
             })
             .collect();
     }
     Ok(())
 }
+
+/// The directory in a Page's directory that holds its Attachments.
+const ATTACHMENTS: &str = "_attachments";
 
 /// Where each Page and Attachment of the export is, from its top down, by
 /// ID, and each Page's title.
@@ -350,17 +351,23 @@ fn file_name_of(title: &str) -> String {
     }
 }
 
-/// A Page's file: frontmatter, then its content in Markdown.
-fn page_file(core: &Core, principal: &Principal, page: &Placed, addresses: &Addresses) -> Result<String, OpError> {
+/// An Entry's file: frontmatter, then a Page's content in Markdown.
+fn entry_file(core: &Core, principal: &Principal, entry: &Placed, addresses: &Addresses) -> Result<String, OpError> {
     let quoted = |text: &str| serde_json::to_string(text).expect("a string serialises");
-    let tags: Vec<String> = page.tags.iter().map(|tag| quoted(tag)).collect();
     let mut file = format!(
-        "---\nid: {}\ntitle: {}\nposition: {}\ntags: [{}]\n---\n",
-        quoted(&page.id),
-        quoted(&page.title),
-        page.position,
-        tags.join(", ")
+        "---\nid: {}\nkind: {}\ntitle: {}\nposition: {}\n",
+        quoted(&entry.id),
+        entry.kind.stored(),
+        quoted(&entry.title),
+        entry.position,
     );
+    if entry.kind == Kind::Folder {
+        file.push_str("---\n");
+        return Ok(file);
+    }
+    let page = entry;
+    let tags: Vec<String> = page.tags.iter().map(|tag| quoted(tag)).collect();
+    file.push_str(&format!("tags: [{}]\n---\n", tags.join(", ")));
     let mut blocks = core.live().content(&page.id)?;
     point_into_export(&mut blocks, &page.within, addresses);
     // A link to a Page outside the export stays a Page link, shown as
@@ -430,11 +437,11 @@ mod tests {
         assert_eq!(files.keys().collect::<Vec<_>>(), ["Runbook.md", "Runbook/", "Runbook/Deploy.md"]);
         assert_eq!(
             files["Runbook.md"],
-            format!("---\nid: \"{runbook}\"\ntitle: \"Runbook\"\nposition: 1\ntags: []\n---\n\nRestart the *server*.\n")
+            format!("---\nid: \"{runbook}\"\nkind: page\ntitle: \"Runbook\"\nposition: 1\ntags: []\n---\n\nRestart the *server*.\n")
         );
         assert_eq!(
             files["Runbook/Deploy.md"],
-            format!("---\nid: \"{deploy}\"\ntitle: \"Deploy\"\nposition: 1\ntags: []\n---\n")
+            format!("---\nid: \"{deploy}\"\nkind: page\ntitle: \"Deploy\"\nposition: 1\ntags: []\n---\n")
         );
     }
 
@@ -449,7 +456,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Engineering");
         let folder = NewEntry { area_id: area_id.clone(), parent_id: None, title: "Notes".into() };
-        create_folder(&core, &grace, folder).unwrap();
+        let notes = create_folder(&core, &grace, folder).unwrap().output.id;
         page(&core, &grace, &area_id, None, "notes", "");
         page(&core, &grace, &area_id, None, "Notes", "");
         page(&core, &grace, &area_id, None, "CI/CD: \"why?\"", "");
@@ -460,8 +467,10 @@ mod tests {
 
         assert_eq!(
             files.keys().collect::<Vec<_>>(),
-            ["CI-CD- -why--.md", "Notes (3).md", "Notes/", "con.txt-.md", "env.md", "notes (2).md"]
+            ["CI-CD- -why--.md", "Notes (3).md", "Notes.md", "Notes/", "con.txt-.md", "env.md", "notes (2).md"]
         );
+        // A Folder's file holds only what an import needs to make it again.
+        assert_eq!(files["Notes.md"], format!("---\nid: \"{notes}\"\nkind: folder\ntitle: \"Notes\"\nposition: 1\n---\n"));
         assert_eq!(frontmatter(&files["notes (2).md"], "position"), "position: 2");
         assert_eq!(frontmatter(&files["Notes (3).md"], "title"), "title: \"Notes\"");
         assert_eq!(frontmatter(&files["Notes (3).md"], "position"), "position: 3");
@@ -494,12 +503,13 @@ mod tests {
     }
 
     #[test]
-    fn attachments_sit_in_their_pages_directory_and_are_referenced_by_relative_path() {
+    fn attachments_sit_apart_in_their_pages_directory_and_are_referenced_by_relative_path() {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Engineering");
         let runbook = page(&core, &grace, &area_id, None, "Runbook", "");
         page(&core, &grace, &area_id, Some(&runbook), "Deploy", "");
+        page(&core, &grace, &area_id, Some(&runbook), "_attachments", "");
         let diagram = attach(&core, &grace, &runbook, "diagram.png", "first diagram");
         let second = attach(&core, &grace, &runbook, "Diagram.png", "second diagram");
         let log = attach(&core, &grace, &runbook, "Deploy.md", "a log");
@@ -512,13 +522,22 @@ mod tests {
 
         assert_eq!(
             files.keys().collect::<Vec<_>>(),
-            ["Runbook.md", "Runbook/", "Runbook/Deploy (2).md", "Runbook/Deploy.md", "Runbook/Diagram (2).png", "Runbook/diagram.png"]
+            [
+                "Runbook.md",
+                "Runbook/",
+                "Runbook/Deploy.md",
+                "Runbook/_attachments (2).md",
+                "Runbook/_attachments/",
+                "Runbook/_attachments/Deploy.md",
+                "Runbook/_attachments/Diagram (2).png",
+                "Runbook/_attachments/diagram.png",
+            ]
         );
-        assert_eq!(files["Runbook/diagram.png"], "first diagram");
-        assert_eq!(files["Runbook/Diagram (2).png"], "second diagram");
-        assert_eq!(files["Runbook/Deploy (2).md"], "a log");
+        assert_eq!(files["Runbook/_attachments/diagram.png"], "first diagram");
+        assert_eq!(files["Runbook/_attachments/Diagram (2).png"], "second diagram");
+        assert_eq!(files["Runbook/_attachments/Deploy.md"], "a log");
         assert!(files["Runbook.md"].ends_with(
-            "\n![Flow](<Runbook/diagram.png>) ![Flow](<Runbook/Diagram (2).png>)\n\nSee [the log](<Runbook/Deploy (2).md>).\n"
+            "\n![Flow](<Runbook/_attachments/diagram.png>) ![Flow](<Runbook/_attachments/Diagram (2).png>)\n\nSee [the log](<Runbook/_attachments/Deploy.md>).\n"
         ));
     }
 
