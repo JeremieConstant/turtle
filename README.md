@@ -45,16 +45,20 @@ Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you t
 Settings are environment variables:
 
 ```bash
-TURTLE_DATA=/var/lib/turtle TURTLE_PORT=8080 ./server/target/release/turtle
+TURTLE_DATA=/var/lib/turtle TURTLE_PORT=8080 TURTLE_PUBLIC_URL=https://turtle.example.org ./server/target/release/turtle
 ```
+
+Behind a reverse proxy, set `TURTLE_PUBLIC_URL` to the address people open in the browser. Turtle cannot work it out by itself, and without it AI clients cannot sign in; the **Connect AI** page then tells the Workspace Admin what is missing.
 
 When a newer Turtle starts on an existing data directory, it brings the database up to date by itself. To back up Turtle, stop it and copy the data directory.
 
-## Connect an Agent
+## Connect AI
 
-Every Member sees what can act as them under **Connected apps** in the account menu: the apps they connected and the Tokens they created by hand, each with a **Disconnect** button. Tokens are created by hand there, under **For developers**. A Token can be limited to reading, to chosen Areas and to an expiry date, and never has more access than its owner. Its value is shown once.
+With `TURTLE_PUBLIC_URL` set, a Member connects Claude or another MCP client by pasting `<address>/mcp` into it, signing in and clicking **Allow**. **Connect AI** in the account menu shows the address and the steps for Claude, Claude Code and other clients. Before clicking **Allow**, they can limit the connection to reading and to chosen Areas under **Limit access**. A connection never has more access than its Member, and what it changes shows as "<Member> via <app>".
 
-An Agent connects to Turtle's built-in MCP endpoint, `/mcp` on the address Turtle is reached at (Streamable HTTP), and sends the Token as `Authorization: Bearer <token>`. It finds one tool for every operation except the few that only make sense in a browser, such as signing in and managing Tokens. The same header works for the HTTP API, `POST /api/<operation>`.
+Every Member sees what can act as them under **Connected apps** in the account menu: the apps they connected and the Tokens they created by hand, each with a **Disconnect** button. A Workspace Admin sees those of every Member under **All connected apps**, and can turn connecting AI off for the whole Workspace on the Connect AI page; Tokens created by hand keep working then.
+
+For scripts and clients without OAuth, a Token is created by hand under **For developers** on Connected apps. It can be limited to reading, to chosen Areas and to an expiry date, and its value is shown once. The client sends it to the MCP endpoint, `/mcp` (Streamable HTTP), as `Authorization: Bearer <token>`. It finds one tool for every operation except the few that only make sense in a browser, such as signing in and managing Tokens. The same header works for the HTTP API, `POST /api/<operation>`.
 
 ## Develop
 
