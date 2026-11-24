@@ -11,6 +11,9 @@ base64 = "0.22.1"
 axum = { version = "0.8.9", features = ["ws"] }
 futures-util = "0.3.34"
 getrandom = "0.4.3"
+# Profile pictures are decoded, cropped and scaled down. The formats a Page
+# shows as images, nothing more.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 pulldown-cmark = "0.13.6"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 schemars = "1.2.3"

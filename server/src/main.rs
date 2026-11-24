@@ -178,6 +178,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/attachments/{id}", get(download_attachment))
         .route("/api/pdf_style_logos/{id}", get(show_pdf_style_logo))
+        .route("/api/profile_pictures/{id}", get(show_profile_picture))
         .with_state(app.clone())
         .merge(http_api::router(core.clone()))
         .merge(oauth::router(core.clone()))
@@ -366,6 +367,28 @@ async fn show_pdf_style_logo(State(app): State<Arc<App>>, Path(id): Path<String>
         logo.content,
     )
         .into_response()
+}
+
+/// A Profile picture, as `open_profile_picture` gives it to whoever sees the
+/// Profile, for an `<img>`. Turtle made the PNG itself, so it is shown.
+async fn show_profile_picture(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+    let opened = as_caller(&app.core, headers, move |core, principal| {
+        ops::profiles::open_profile_picture(core, principal, &id)
+    })
+    .await;
+    match opened {
+        Ok(png) => (
+            [
+                (header::CONTENT_TYPE, "image/png"),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                // Someone who loses sight of the Profile must not find it in a shared cache.
+                (header::CACHE_CONTROL, "private"),
+            ],
+            png,
+        )
+            .into_response(),
+        Err(refused) => refused,
+    }
 }
 
 /// A file name as a header may carry it (RFC 8187): every byte but letters,

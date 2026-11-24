@@ -1,15 +1,33 @@
 <script lang="ts">
   /*
-   * A person's mark: their initials in a circle. A Profile picture, once
-   * people can have one, takes the place of the initials here, so every
-   * place that shows a person gets it at once.
+   * A person's mark: their Profile picture in a circle, or their initials
+   * without one. A picture that fails to load gives way to the initials too,
+   * so every place that shows a person shows something.
    */
   import { initials } from '../lib/profile'
 
-  const { name, size = 32 }: { name: string; size?: number } = $props()
+  const {
+    name,
+    size = 32,
+    picture = null,
+  }: {
+    name: string
+    size?: number
+    /** The address of their Profile picture, if they have one. */
+    picture?: string | null
+  } = $props()
+
+  // The address that failed, so a new picture is tried again.
+  let failed = $state<string | null>(null)
 </script>
 
-<span class="avatar" style:--size="{size}px" aria-hidden="true">{initials(name)}</span>
+<span class="avatar" style:--size="{size}px" aria-hidden="true">
+  {#if picture && failed !== picture}
+    <img src={picture} alt="" onerror={() => (failed = picture)} />
+  {:else}
+    {initials(name)}
+  {/if}
+</span>
 
 <style>
   .avatar {
@@ -18,6 +36,7 @@
     flex: none;
     width: var(--size);
     height: var(--size);
+    overflow: hidden;
     border-radius: var(--radius-round);
     background: var(--color-sunken);
     color: var(--color-muted);
@@ -25,5 +44,11 @@
     font-weight: 600;
     line-height: 1;
     user-select: none;
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 </style>

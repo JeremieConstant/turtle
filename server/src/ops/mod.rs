@@ -62,6 +62,7 @@ pub struct Core {
     /// Where uploaded font files are kept, each under the hash of its
     /// content. Apart from the Attachments, whose clean-up would remove them.
     fonts: std::path::PathBuf,
+    profile_pictures: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
     /// The address Turtle is reached at from outside. OAuth is offered only
@@ -99,6 +100,7 @@ impl Core {
             attachments: db_path.with_file_name("attachments"),
             pdf_logos: db_path.with_file_name("pdf-logos"),
             fonts: db_path.with_file_name("fonts"),
+            profile_pictures: db_path.with_file_name("profile-pictures"),
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             public_url: None,
             resolve: intranet::system_resolver(),
@@ -151,6 +153,11 @@ impl Core {
     /// Where the files of PDF Styles' logos are kept.
     pub fn pdf_logos_dir(&self) -> &Path {
         &self.pdf_logos
+    }
+
+    /// Where the files of Profile pictures are kept.
+    pub fn profile_pictures_dir(&self) -> &Path {
+        &self.profile_pictures
     }
 
     /// Where uploaded font files are kept.

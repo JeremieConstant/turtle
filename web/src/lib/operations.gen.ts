@@ -250,6 +250,8 @@ export type MemberEntry = {
   email: string
   id: string
   name: string
+  /** The address their Profile picture is shown from; absent without one. */
+  picture?: string | null
   workspace_admin: boolean
 }
 
@@ -404,12 +406,22 @@ export type Profile = {
   guest: boolean
   id: string
   name: string
+  /** The address their picture is shown from, which changes whenever the
+picture does; absent without one, when their initials stand in. */
+  picture?: string | null
   workspace_admin: boolean
 }
 
 export type ProfileList = {
   /** By name, deactivated people included. */
   profiles: Profile[]
+}
+
+export type ProfilePicture = {
+  /** The image, in base64. */
+  content: string
+  /** Always "image/png": Turtle stores the picture it made from the upload. */
+  content_type: string
 }
 
 export type QuickNote = {
@@ -766,6 +778,30 @@ export type Operations = {
   list_profiles: {
     input: Record<string, never>
     output: ProfileList
+  }
+  /** Sets the caller's own Profile picture, replacing any they had: a PNG, JPEG, GIF or WebP of at most 10 MB, its content in base64. Turtle keeps its middle square, scaled down. Nobody can set another person's picture; Agents have no Profile. */
+  set_profile_picture: {
+    input: {
+      /** A PNG, JPEG, GIF or WebP image, in base64. */
+      content: string
+    }
+    output: Profile
+  }
+  /** Removes the picture from a Profile, so their initials stand in again. For the person themselves, and for a Workspace Admin on anyone's Profile. */
+  remove_profile_picture: {
+    input: {
+      /** The Member's or Guest's ID. */
+      id: string
+    }
+    output: Profile
+  }
+  /** Returns the picture of a Member or Guest whose Profile the caller sees, as a PNG in base64. */
+  read_profile_picture: {
+    input: {
+      /** The Member's or Guest's ID. */
+      id: string
+    }
+    output: ProfilePicture
   }
   /** Creates an Area. The caller becomes its Admin and is the only one with access. A standalone Agent, and a Token limited to chosen Areas, cannot. */
   create_area: {
