@@ -1,8 +1,26 @@
-# Turtle
+# Turtle Wiki
 
-Turtle is an open-source, self-hosted knowledge base where humans and agents write documentation together in real time. It runs as a single binary with one data directory: the web app is built into the binary and the database lives in the data directory, so nothing else is needed on disk.
+A self-hosted wiki where people and AI agents write documentation together.
+
+![A runbook being edited in Turtle, last changed by "Ada Example via Claude"](docs/screenshot.png)
+
+**No feature behind a paywall.** Turtle is licensed under [AGPL-3.0](LICENSE), with no enterprise edition and no CLA: every feature is in this repository, and contributions stay AGPL.
+
+- **One binary, nothing else to run.** The web app is built into the binary, and the SQLite database and the Attachments live in one data directory. No database server, no outside services.
+- **An Agent never has more access than its person.** Agents work through MCP with almost every operation people have. An Agent a Member connects is limited to what that Member may do, and what it changes shows under their name, as "Ada Example via Claude" in the screenshot above.
+- **Your writing stays Markdown.** Every Page can be read and written as Markdown, and an Area or Subtree exports as a ZIP of Markdown files with its Attachments, or as a PDF.
 
 Turtle is at an early stage. [docs/mvp.md](docs/mvp.md) describes where it is heading, [GLOSSARY.md](GLOSSARY.md) defines its terms, and [docs/adr/](docs/adr/) records the decisions behind it.
+
+## Run it
+
+Turtle is not yet released as a download or an image, so for now it is built from source. Once built, it is one file:
+
+```bash
+./server/target/release/turtle
+```
+
+Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you to create the first account, which becomes the Workspace Admin. [Build](#build) says how to get the binary, [Start](#start) how to configure it, and [Connect AI](#connect-ai) how to let Claude or another MCP client in.
 
 ## Build
 
@@ -28,11 +46,7 @@ The result is `server/target/release/turtle`. It can be copied anywhere and star
 
 ## Start
 
-```bash
-./server/target/release/turtle
-```
-
-Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you to create the first account, which becomes the Workspace Admin.
+Turtle is configured with environment variables:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -42,7 +56,7 @@ Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you t
 | `TURTLE_PUBLIC_URL` | unset | The address people and AI clients reach Turtle at, such as `https://turtle.example.org`, at the root of its host. When set, Claude and other MCP clients can connect with OAuth: a Member pastes `<address>/mcp` into the client and clicks **Allow**. Without it, only Tokens created by hand work at the MCP endpoint. |
 | `TURTLE_LOG_SAVES` | unset | When set, Turtle prints a line for each save of changed Pages and how long it took, to see whether saving keeps up. |
 
-Settings are environment variables:
+For example:
 
 ```bash
 TURTLE_DATA=/var/lib/turtle TURTLE_PORT=8080 TURTLE_PUBLIC_URL=https://turtle.example.org ./server/target/release/turtle
@@ -54,7 +68,7 @@ When a newer Turtle starts on an existing data directory, it brings the database
 
 ## Connect AI
 
-With `TURTLE_PUBLIC_URL` set, a Member connects Claude or another MCP client by pasting `<address>/mcp` into it, signing in and clicking **Allow**. **Connect AI** in the account menu shows the address and the steps for Claude, Claude Code and other clients. Before clicking **Allow**, they can limit the connection to reading and to chosen Areas under **Limit access**. A connection never has more access than its Member, and what it changes shows as "<Member> via <app>".
+With `TURTLE_PUBLIC_URL` set, a Member connects Claude or another MCP client by pasting `<address>/mcp` into it, signing in and clicking **Allow**. **Connect AI** in the account menu shows the address and the steps for Claude, Claude Code and other clients. Before clicking **Allow**, they can limit the connection to reading and to chosen Areas under **Limit access**. A connection never has more access than its Member, and what it changes shows as "`<Member>` via `<app>`".
 
 Every Member sees what can act as them under **Connected apps** in the account menu: the apps they connected and the Tokens they created by hand, each with a **Disconnect** button. A Workspace Admin sees those of every Member under **All connected apps**, and can turn connecting AI off for the whole Workspace on the Connect AI page; Tokens created by hand keep working then.
 
@@ -81,5 +95,3 @@ git config core.hooksPath .githooks
 ```
 
 `scripts/load-test.sh` runs the load test on demand: 500 people editing at the same time against a release build, with a report on how fast changes reach the others, memory and saving. The last recorded run is in [docs/load-test.md](docs/load-test.md).
-
-Licensed under [AGPL-3.0](LICENSE).
