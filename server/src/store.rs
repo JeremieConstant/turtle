@@ -353,6 +353,9 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE pdf_styles ADD COLUMN logo_name TEXT;
      ALTER TABLE pdf_styles ADD COLUMN logo_format TEXT;
      ALTER TABLE pdf_styles ADD COLUMN logo_hash TEXT;",
+    // A Guest is an outside person with an account, invited to chosen Areas
+    // or Subtrees; a Grant to all Members does not reach them.
+    "ALTER TABLE members ADD COLUMN guest INTEGER NOT NULL DEFAULT 0;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

@@ -5,6 +5,8 @@ export type Route =
   | { screen: 'sign-in' }
   | { screen: 'area'; id: string }
   | { screen: 'page'; id: string }
+  /** The Profile of a Member or Guest. */
+  | { screen: 'profile'; id: string }
   /** The Trash of an Area. */
   | { screen: 'trash'; areaId: string }
   /** Every result for a query. The query is part of the address, so a search can be shared. */
@@ -56,17 +58,20 @@ export function parseAddress(pathname: string, query = ''): Route {
       return { screen: 'not-found' }
     }
   }
-  const addressed = pathname.match(/^\/([ap])\/([^/]+)(?:\/[^/]*)?\/?$/)
+  const addressed = pathname.match(/^\/([apu])\/([^/]+)(?:\/[^/]*)?\/?$/)
   if (addressed) {
     try {
       const id = decodeURIComponent(addressed[2])
-      return addressed[1] === 'a' ? { screen: 'area', id } : { screen: 'page', id }
+      return { screen: ADDRESSED[addressed[1] as keyof typeof ADDRESSED], id }
     } catch {
       // A broken percent-encoding names nothing.
     }
   }
   return { screen: 'not-found' }
 }
+
+/** The screens addressed by an ID and a readable part, by the letter their address starts with. */
+const ADDRESSED = { a: 'area', p: 'page', u: 'profile' } as const
 
 /** The address of an Area: its ID, then its name in a readable form. */
 export function areaAddress(id: string, name: string): string {
@@ -84,6 +89,11 @@ export function pageAddress(id: string, title: string): string {
   return address('p', id, title)
 }
 
+/** The address of a Member's or Guest's Profile: their ID, then their name in a readable form. */
+export function profileAddress(id: string, name: string): string {
+  return address('u', id, name)
+}
+
 /** The address that shows every result for a query. */
 export function searchAddress(query: string): string {
   return query ? `/search?q=${encodeURIComponent(query)}` : '/search'
@@ -94,7 +104,7 @@ export function tagSearchAddress(tag: string): string {
   return searchAddress(`#${tag}`)
 }
 
-function address(prefix: 'a' | 'p', id: string, label: string): string {
+function address(prefix: keyof typeof ADDRESSED, id: string, label: string): string {
   const readable = label
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '-')

@@ -1,5 +1,21 @@
 import { expect, test } from 'vitest'
-import { areaAddress, inShell, pageAddress, parseAddress, searchAddress, tagSearchAddress, trashAddress } from './routes'
+import {
+  areaAddress,
+  inShell,
+  pageAddress,
+  parseAddress,
+  profileAddress,
+  searchAddress,
+  tagSearchAddress,
+  trashAddress,
+} from './routes'
+
+test('a Profile has an address of its own: the ID, then the name made readable', () => {
+  expect(profileAddress('m1', 'Ada Lovelace')).toBe('/u/m1/ada-lovelace')
+  expect(parseAddress('/u/m1/ada-lovelace')).toEqual({ screen: 'profile', id: 'm1' })
+  expect(parseAddress('/u/m1')).toEqual({ screen: 'profile', id: 'm1' })
+  expect(inShell({ screen: 'profile', id: 'm1' })).toBe(true)
+})
 
 test('a Page address carries the ID and a readable title', () => {
   expect(parseAddress('/p/abc123/release-notes')).toEqual({ screen: 'page', id: 'abc123' })

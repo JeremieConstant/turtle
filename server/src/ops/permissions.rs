@@ -151,7 +151,7 @@ pub fn in_trash(db: &Connection, node_id: &str) -> rusqlite::Result<bool> {
 /// The Role the Member or Agent behind a principal holds on a node, whatever
 /// Token they act through.
 fn owners_role_on(db: &Connection, principal: &Principal, node_id: &str) -> rusqlite::Result<Option<Role>> {
-    let holders = holders_of(principal);
+    let holders = holders_of(db, principal)?;
     if holders.is_empty() {
         return Ok(None);
     }
@@ -267,8 +267,8 @@ fn owner_reads_through(db: &Connection, principal: &Principal) -> rusqlite::Resu
             )?;
             return statement.query_map([id], |row| row.get(0))?.collect();
         }
-        Principal::Member { id, .. } => (holders_of(principal), Some(id)),
-        Principal::Agent { .. } => (holders_of(principal), None),
+        Principal::Member { id, .. } => (holders_of(db, principal)?, Some(id)),
+        Principal::Agent { .. } => (holders_of(db, principal)?, None),
     };
     // Every Role includes Read, so any Grant that applies to them will do.
     let mut statement = db.prepare(
@@ -282,12 +282,22 @@ fn owner_reads_through(db: &Connection, principal: &Principal) -> rusqlite::Resu
     nodes.collect()
 }
 
+/// Whether the principal is a Guest: a Member account of an outside person.
+pub fn is_guest(db: &Connection, principal: &Principal) -> rusqlite::Result<bool> {
+    let Principal::Member { id, .. } = principal else { return Ok(false) };
+    let guest = db
+        .query_row("SELECT guest FROM members WHERE id = ?1", [id], |row| row.get(0))
+        .optional()?;
+    Ok(guest.unwrap_or(false))
+}
+
 /// The stored holders whose Grants apply to a principal: a Member's own and
-/// those to all Members, or a standalone Agent's own alone.
-fn holders_of(principal: &Principal) -> Vec<String> {
-    match principal {
+/// those to all Members, a Guest's own alone, or a standalone Agent's own alone.
+fn holders_of(db: &Connection, principal: &Principal) -> rusqlite::Result<Vec<String>> {
+    Ok(match principal {
         Principal::Anonymous => Vec::new(),
+        Principal::Member { id, .. } if is_guest(db, principal)? => vec![Holder::Member(id.clone()).stored()],
         Principal::Member { id, .. } => vec![Holder::Member(id.clone()).stored(), Holder::AllMembers.stored()],
         Principal::Agent { id, .. } => vec![Holder::Agent(id.clone()).stored()],
-    }
+    })
 }
