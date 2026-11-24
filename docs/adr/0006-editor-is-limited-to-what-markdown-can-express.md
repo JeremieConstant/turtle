@@ -10,3 +10,5 @@ People edit in a rich-text editor and never see Markdown unless they ask for it,
 ## Consequences
 
 Agents read and write Markdown. The server converts what they send and applies only the difference to the stored document, so edits a person is making at the same moment survive.
+
+ADR-0013 extends this: elements Markdown has no syntax for are written as generic directives.
