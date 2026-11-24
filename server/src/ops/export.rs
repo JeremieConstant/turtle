@@ -297,7 +297,12 @@ fn point_into_export(blocks: &mut [Block], from: &[String], addresses: &Addresse
                 *inline = Inline::Text { text: title.clone(), marks };
             }
         }
-        Inline::Text { .. } | Inline::HardBreak | Inline::UnknownDirective { .. } | Inline::Status { .. } => {}
+        // A Mention stays one, as `[@Name](turtle:member/<ID>)`, for the import to read back.
+        Inline::Text { .. }
+        | Inline::HardBreak
+        | Inline::Mention { .. }
+        | Inline::UnknownDirective { .. }
+        | Inline::Status { .. } => {}
     });
 }
 
@@ -600,6 +605,21 @@ mod tests {
 
         assert!(files["Runbook.md"].ends_with("\nStart with [Set up](<Guides %231/Set up.md>).\n"));
         assert!(files["Guides #1/Set up.md"].ends_with("\nThen read [Runbook](<../Runbook.md>).\n"));
+    }
+
+    #[test]
+    fn a_mention_is_exported_with_the_current_name_and_reads_back_as_one() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        member(&core, "Ken", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Ask [@Kenny](turtle:member/member-ken).");
+
+        let files = export_area(&core, &grace, &area_id);
+
+        let written = "Ask [@Ken](turtle:member/member-ken).\n";
+        assert!(files["Runbook.md"].ends_with(&format!("\n{written}")));
+        assert_eq!(crate::markdown::to_markdown(&crate::markdown::from_markdown(written)), "Ask [@](turtle:member/member-ken).\n");
     }
 
     #[test]

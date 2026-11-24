@@ -1,4 +1,5 @@
 import { Node } from '@tiptap/core'
+import { Lookup } from './lookup'
 import { call } from './ops'
 import { router } from './router.svelte'
 import { pageAddress } from './routes'
@@ -15,79 +16,15 @@ export function pageIdOf(address: string): string | null {
 /** What a Page link says when it may not show its Page's title. */
 export const UNAVAILABLE = 'Page not available'
 
-/** What a Page link learns about its Page: its title, `null` for no title to show, or `undefined` when asking failed. */
-type Shown = (title: string | null | undefined) => void
-
 /**
- * The current titles of the linked Pages on screen, asked for together. A
- * Page the person cannot read, or that is in the Trash, has no title: `null`.
- * They are asked for again whenever the window comes back into view, so a
- * rename, a move to the Trash or lost access shows without reopening the Page.
+ * The current titles of the linked Pages on screen. A Page the person cannot
+ * read, or that is in the Trash, has no title: `null`.
  */
-class Titles {
-  private shown = new Map<string, Set<Shown>>()
-  private known = new Map<string, string | null>()
-  private unasked = new Set<string>()
-  private asking: ReturnType<typeof setTimeout> | undefined
-  private listening = false
-
-  /** Shows the title through `show` now and whenever it changes, until the returned function is called. */
-  watch(pageId: string, show: Shown): () => void {
-    // Only once a link is shown, so building the editor's schema alone needs no window.
-    if (!this.listening) {
-      document.addEventListener('visibilitychange', this.refresh)
-      window.addEventListener('focus', this.refresh)
-      this.listening = true
-    }
-    const watchers = this.shown.get(pageId) ?? new Set()
-    watchers.add(show)
-    this.shown.set(pageId, watchers)
-    if (this.known.has(pageId)) show(this.known.get(pageId))
-    else this.ask([pageId])
-    return () => {
-      watchers.delete(show)
-      if (watchers.size === 0) this.shown.delete(pageId)
-    }
-  }
-
-  stop() {
-    if (this.listening) {
-      document.removeEventListener('visibilitychange', this.refresh)
-      window.removeEventListener('focus', this.refresh)
-      this.listening = false
-    }
-    clearTimeout(this.asking)
-  }
-
-  private refresh = () => {
-    if (document.visibilityState === 'visible') this.ask([...this.shown.keys()])
-  }
-
-  /** The links of a Page appear together, so they are asked for in one call. */
-  private ask(ids: string[]) {
-    ids.forEach(id => this.unasked.add(id))
-    clearTimeout(this.asking)
-    this.asking = setTimeout(() => void this.send(), 0)
-  }
-
-  private async send() {
-    const ids = [...this.unasked]
-    this.unasked.clear()
-    if (ids.length === 0) return
-    let titles: Map<string, string> | undefined
-    try {
-      const answer = await call('get_page_titles', { page_ids: ids })
-      titles = new Map(answer.pages.map(page => [page.id, page.title]))
-    } catch {
-      titles = undefined
-    }
-    for (const id of ids) {
-      // A failure is not remembered: what was known stays, and the next refresh asks again.
-      const title = titles ? (titles.get(id) ?? null) : this.known.has(id) ? this.known.get(id) : undefined
-      if (titles) this.known.set(id, title ?? null)
-      this.shown.get(id)?.forEach(show => show(title))
-    }
-  }
+function titles(): Lookup<string> {
+  return new Lookup(async ids => {
+    const answer = await call('get_page_titles', { page_ids: ids })
+    return new Map(answer.pages.map(page => [page.id, page.title]))
+  })
 }
 
 /**
@@ -106,7 +43,7 @@ export const PageLink = Node.create({
 
   addStorage() {
     // One per editor, so opening a Page asks for its titles afresh.
-    return { titles: new Titles() }
+    return { titles: titles() }
   },
 
   onDestroy() {

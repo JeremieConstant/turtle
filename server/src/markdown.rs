@@ -9,8 +9,8 @@
 
 use crate::directive;
 use crate::model::{
-    inline_directive, normalize, page_id_of, status_directive, Block, CalloutKind, Cell, Inline, Marks, Row,
-    TaskItem, PAGE_ADDRESS_SCHEME,
+    inline_directive, normalize, status_directive, turtle_link_of, Block, CalloutKind, Cell, Inline, Marks, Row,
+    TaskItem, MEMBER_ADDRESS_SCHEME, PAGE_ADDRESS_SCHEME,
 };
 use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 
@@ -18,17 +18,26 @@ use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEn
 // Content -> Markdown
 // ---------------------------------------------------------------------------
 
-/// The title a Page link shows for the Page with the given ID, or None when
-/// it shows none, because the reader may not read that Page.
-pub type Titles<'a> = &'a dyn Fn(&str) -> Option<String>;
+/// What a Page link or Mention points at, by ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Linked<'a> {
+    Page(&'a str),
+    Person(&'a str),
+}
 
-/// The Markdown of some content, with Page links shown without titles.
+/// The text a Page link or Mention shows: a Page's title, or None when the
+/// reader may not read that Page; a person's current name, or None when
+/// there is no such Member or Guest.
+pub type Titles<'a> = &'a dyn Fn(Linked) -> Option<String>;
+
+/// The Markdown of some content, with Page links and Mentions shown without
+/// titles or names.
 pub fn to_markdown(blocks: &[Block]) -> String {
     to_markdown_with_titles(blocks, &|_| None)
 }
 
-/// The Markdown of some content, with each Page link shown with the title
-/// `titles` gives it. Reading it back ignores those titles.
+/// The Markdown of some content, with each Page link and Mention shown with
+/// the text `titles` gives it. Reading it back ignores that text.
 pub fn to_markdown_with_titles(blocks: &[Block], titles: Titles) -> String {
     let mut out = render_blocks(blocks, "\n\n", None, titles);
     if !out.is_empty() {
@@ -355,14 +364,23 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
                 out.push_str(&status_directive(text, *color).to_inline_markdown());
                 at_line_start = false;
             }
-            Inline::PageLink { page_id } => {
-                // A Page link carries no formatting of its own.
+            Inline::PageLink { .. } | Inline::Mention { .. } => {
+                // A Page link or Mention carries no formatting of its own.
                 while let Some(mark) = open.pop() {
                     out.push_str(&close_mark(&mark, html));
                 }
-                let title = titles(page_id).unwrap_or_default().replace(['\n', '\r'], " ");
-                let title = escape_text(&title, false, false, place);
-                out.push_str(&format!("[{title}]({PAGE_ADDRESS_SCHEME}{page_id})"));
+                let (shown, address) = match inline {
+                    Inline::PageLink { page_id } => {
+                        (titles(Linked::Page(page_id)).unwrap_or_default(), format!("{PAGE_ADDRESS_SCHEME}{page_id}"))
+                    }
+                    Inline::Mention { person_id } => {
+                        let name = titles(Linked::Person(person_id)).unwrap_or_default();
+                        (format!("@{name}"), format!("{MEMBER_ADDRESS_SCHEME}{person_id}"))
+                    }
+                    _ => unreachable!("matched above"),
+                };
+                let shown = escape_text(&shown.replace(['\n', '\r'], " "), false, false, place);
+                out.push_str(&format!("[{shown}]({address})"));
                 at_line_start = false;
             }
             Inline::Text { text, marks } => {
@@ -599,9 +617,9 @@ struct Builder {
     marks: ActiveMarks,
     /// The image being read, if any: where it points and its text so far.
     image: Option<(String, String)>,
-    /// The Page whose link is being read. What the link says is left out,
-    /// because a Page link shows the Page's current title instead.
-    page_link: Option<String>,
+    /// The Page link or Mention being read. What the link says is left out,
+    /// because it shows the Page's current title or the person's name instead.
+    turtle_link: Option<Inline>,
     /// Where the line that made a quote a callout ends. Its marker is not text.
     callout_marker_end: Option<usize>,
     /// The directives in running text, which the Markdown being read holds
@@ -664,7 +682,7 @@ impl Builder {
             pieces.iter().for_each(|(piece, _)| body.push_str(piece));
             return;
         }
-        if self.page_link.is_some() {
+        if self.turtle_link.is_some() {
             return;
         }
         let marks = self.marks.current(code);
@@ -676,7 +694,7 @@ impl Builder {
     }
 
     fn hard_break(&mut self) {
-        if self.page_link.is_none() {
+        if self.turtle_link.is_none() {
             self.inline_target().push(Inline::HardBreak);
         }
     }
@@ -850,7 +868,7 @@ fn read_markdown(markdown: &str) -> Vec<Block> {
         stack: vec![Frame::Root(Vec::new())],
         marks: ActiveMarks::default(),
         image: None,
-        page_link: None,
+        turtle_link: None,
         callout_marker_end: None,
         directives,
         stand_in,
@@ -928,8 +946,8 @@ fn read_markdown(markdown: &str) -> Vec<Block> {
                 Tag::Emphasis => b.marks.italic += 1,
                 Tag::Strong => b.marks.bold += 1,
                 Tag::Strikethrough => b.marks.strike += 1,
-                Tag::Link { dest_url, .. } => match page_id_of(&dest_url) {
-                    Some(page_id) => b.page_link = Some(page_id.to_string()),
+                Tag::Link { dest_url, .. } => match turtle_link_of(&dest_url) {
+                    Some(link) => b.turtle_link = Some(link),
                     None => b.marks.links.push(dest_url.to_string()),
                 },
                 Tag::Image { dest_url, .. } => b.image = Some((dest_url.to_string(), String::new())),
@@ -991,9 +1009,9 @@ fn read_markdown(markdown: &str) -> Vec<Block> {
                 TagEnd::Emphasis => b.marks.italic = b.marks.italic.saturating_sub(1),
                 TagEnd::Strong => b.marks.bold = b.marks.bold.saturating_sub(1),
                 TagEnd::Strikethrough => b.marks.strike = b.marks.strike.saturating_sub(1),
-                // Links do not nest, so a link that ends inside a Page link is that one.
-                TagEnd::Link => match b.page_link.take() {
-                    Some(page_id) => b.inline_target().push(Inline::PageLink { page_id }),
+                // Links do not nest, so a link that ends inside a Page link or Mention is that one.
+                TagEnd::Link => match b.turtle_link.take() {
+                    Some(link) => b.inline_target().push(link),
                     None => {
                         b.marks.links.pop();
                     }
@@ -1001,7 +1019,7 @@ fn read_markdown(markdown: &str) -> Vec<Block> {
                 TagEnd::Image => {
                     if let Some((src, alt)) = b.image.take() {
                         // Like the rest of what a Page link says, an image inside one is left out.
-                        if b.page_link.is_none() {
+                        if b.turtle_link.is_none() {
                             b.inline_target().push(Inline::Image { src, alt });
                         }
                     }
@@ -1093,7 +1111,11 @@ pub(crate) mod testing {
                             let source = INLINE_DIRECTIVES[self.next(INLINE_DIRECTIVES.len())].to_string();
                             return Inline::UnknownDirective { source };
                         }
-                        3 if self.next(3) == 0 => {
+                        3 => {
+                            let person_id = ["m1", "m2"][self.next(2)].to_string();
+                            return Inline::Mention { person_id };
+                        }
+                        4 if self.next(3) == 0 => {
                             let color = StatusColor::ALL[self.next(StatusColor::ALL.len())];
                             let text = if self.next(4) == 0 { String::new() } else { self.text() };
                             return Inline::Status { text, color };
@@ -1419,7 +1441,7 @@ mod tests {
     #[test]
     fn a_page_link_is_a_turtle_address_shown_with_the_current_title() {
         let blocks = vec![para(vec![text("See "), page_link("a1b2"), text(" first.")])];
-        let titles = |id: &str| (id == "a1b2").then(|| "Setup [draft] *v2*".to_string());
+        let titles = |linked: Linked| (linked == Linked::Page("a1b2")).then(|| "Setup [draft] *v2*".to_string());
 
         let markdown = to_markdown_with_titles(&blocks, &titles);
 
@@ -1461,6 +1483,50 @@ mod tests {
             normalize(vec![para(vec![text("x"), linked("Set", true), linked("up", false), text("y")])]),
             vec![para(vec![text("x"), page_link("a1b2"), text("y")])]
         );
+    }
+
+    fn mention(id: &str) -> Inline {
+        Inline::Mention { person_id: id.into() }
+    }
+
+    #[test]
+    fn a_mention_is_a_member_address_shown_with_the_current_name() {
+        let blocks = vec![para(vec![text("Ask "), mention("m1"), text(".")])];
+        let names = |linked: Linked| (linked == Linked::Person("m1")).then(|| "Ada [the] *first*".to_string());
+
+        let markdown = to_markdown_with_titles(&blocks, &names);
+
+        assert_eq!(markdown, "Ask [@Ada \\[the\\] \\*first\\*](turtle:member/m1).\n");
+        assert_eq!(from_markdown(&markdown), blocks);
+    }
+
+    #[test]
+    fn reading_a_member_address_makes_a_mention_whatever_its_text_says() {
+        assert_eq!(
+            from_markdown("**[@Old *name*](turtle:member/m1)** and [](turtle:member/m2)"),
+            vec![para(vec![mention("m1"), text(" and "), mention("m2")])]
+        );
+        // An address that names nobody stays an ordinary link.
+        assert_eq!(
+            from_markdown("[odd](turtle:member/a/b)"),
+            vec![para(vec![marked("odd", |m| m.link = Some("turtle:member/a/b".into()))])]
+        );
+    }
+
+    #[test]
+    fn a_mention_of_nobody_known_is_an_at_sign() {
+        let blocks = vec![para(vec![mention("m1")])];
+        assert_eq!(to_markdown(&blocks), "[@](turtle:member/m1)\n");
+        assert_eq!(from_markdown("[@](turtle:member/m1)"), blocks);
+    }
+
+    #[test]
+    fn mentions_beside_formatting_and_in_table_cells_round_trip() {
+        assert_round_trip(vec![
+            para(vec![marked("bold", |m| m.bold = true), mention("m1"), marked("bold!", |m| m.bold = true)]),
+            Block::Heading { level: 2, content: vec![mention("m1"), mention("m1"), page_link("m1")] },
+            Block::Table(vec![vec![vec![text("Owner")]], vec![vec![mention("m1"), text(" and "), mention("m2")]]]),
+        ]);
     }
 
     #[test]

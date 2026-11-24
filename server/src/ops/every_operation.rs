@@ -72,6 +72,16 @@ fn table() -> Vec<Row> {
         ("reset_password", |_| json!({"secret": "made-up", "password": "long enough password"}), [REFUSED; 5]),
         ("get_profile", |f| json!({"id": f.ken_id}), [OK; 5]),
         ("list_profiles", |_| json!({}), [OK; 5]),
+        ("get_mentioned_people", |f| json!({"person_ids": [f.ken_id]}), [OK; 5]),
+        // A PNG of one green pixel.
+        (
+            "set_profile_picture",
+            |_| json!({"content": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}),
+            [OK; 5],
+        ),
+        ("remove_profile_picture", |f| json!({"id": f.ken_id}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        // Ken has no picture.
+        ("read_profile_picture", |f| json!({"id": f.ken_id}), [HIDDEN; 5]),
         ("create_agent", |_| json!({"name": "Reviewer"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("list_agents", |_| json!({}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
         ("rename_agent", |f| json!({"id": f.agent_id, "name": "Proofreader"}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),

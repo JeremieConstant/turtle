@@ -7,22 +7,23 @@ use super::tree::{get_page, page_to_change, PageId};
 use super::versions::{version, VersionSummary};
 use super::tokens::author_of;
 use super::{Catalogue, Core, OpError, OpResult, Principal};
+use super::links::Shown;
+use crate::markdown::Linked;
 use crate::model::{Block, Inline};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "get_page_markdown",
-            "Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. Needs the Read Role.",
+            "Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. A Mention of a Member or Guest is written as [@Name](turtle:member/ID), with their current name. Needs the Read Role.",
             get_page_markdown,
         )
         .changes = false;
     catalogue.add(
         "replace_page",
-        "Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. A Status, a short coloured marker, is written `:status[ON TRACK]{color=green}`, in grey, blue, green, yellow, red or purple, and grey without a color. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role.",
+        "Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Likewise [@Name](turtle:member/ID) mentions the Member or Guest with that ID, as list_profiles gives it, and always shows their current name. A Status, a short coloured marker, is written `:status[ON TRACK]{color=green}`, in grey, blue, green, yellow, red or purple, and grey without a color. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role.",
         replace_page,
     );
     catalogue.add(
@@ -102,9 +103,9 @@ pub fn replace_section(core: &Core, principal: &Principal, input: NewSection) ->
     // while the Page is locked; a link added in between counts as untitled.
     page_to_change(core, principal, &input.page_id)?;
     let current = crate::ydoc::read(&core.live().open(&input.page_id)?.doc);
-    let titles = super::links::linked_titles(core, principal, &current)?;
+    let shown = super::links::Shown::of(core, principal, &current)?;
     write(core, principal, &input.page_id, |blocks| {
-        let range = section(&blocks, &input.heading, input.occurrence, &titles)?;
+        let range = section(&blocks, &input.heading, input.occurrence, &shown)?;
         let mut blocks = blocks;
         blocks.splice(range, replacement);
         Ok(blocks)
@@ -125,14 +126,14 @@ fn section(
     blocks: &[Block],
     heading: &str,
     occurrence: Option<u32>,
-    titles: &HashMap<String, String>,
+    shown: &Shown,
 ) -> Result<std::ops::Range<usize>, OpError> {
     let heading = heading.trim();
     let headings: Vec<(usize, u8, String)> = blocks
         .iter()
         .enumerate()
         .filter_map(|(index, block)| match block {
-            Block::Heading { level, content } => Some((index, *level, text_of(content, titles))),
+            Block::Heading { level, content } => Some((index, *level, text_of(content, shown))),
             _ => None,
         })
         .collect();
@@ -167,17 +168,19 @@ fn section(
     Ok(start..end)
 }
 
-/// A heading's words without formatting, each Page link as its title.
-fn text_of(content: &[Inline], titles: &HashMap<String, String>) -> String {
+/// A heading's words without formatting, each Page link as its title and
+/// each Mention as `@` and the person's name.
+fn text_of(content: &[Inline], shown: &Shown) -> String {
     let text: String = content
         .iter()
         .map(|inline| match inline {
-            Inline::Text { text, .. } => text.as_str(),
-            Inline::HardBreak => " ",
-            Inline::Image { alt, .. } => alt.as_str(),
-            Inline::PageLink { page_id } => titles.get(page_id).map_or("", String::as_str),
-            Inline::UnknownDirective { .. } => "",
-            Inline::Status { text, .. } => text.as_str(),
+            Inline::Text { text, .. } => text.clone(),
+            Inline::HardBreak => " ".into(),
+            Inline::Image { alt, .. } => alt.clone(),
+            Inline::PageLink { page_id } => shown.text(Linked::Page(page_id)).unwrap_or_default(),
+            Inline::Mention { person_id } => format!("@{}", shown.text(Linked::Person(person_id)).unwrap_or_default()),
+            Inline::UnknownDirective { .. } => String::new(),
+            Inline::Status { text, .. } => text.clone(),
         })
         .collect();
     text.trim().to_string()

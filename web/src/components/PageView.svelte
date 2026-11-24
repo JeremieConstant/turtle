@@ -88,7 +88,7 @@
   })
 
   // The app shows Pages only to a signed-in Member.
-  const person = currentPerson(session.member?.name ?? 'Unknown')
+  const person = currentPerson(session.member?.name ?? 'Unknown', session.member?.id)
   const doc = new Y.Doc()
   const connection = new Connection(
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${encodeURIComponent(id)}`,

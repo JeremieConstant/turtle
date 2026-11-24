@@ -1,12 +1,15 @@
 <script lang="ts">
   /*
-   * Who else is on the Page. A person is a round mark with their initials in
-   * the colour of their cursor. An Agent is square, carries the Agent mark and
-   * its name, so it never reads as a person; it lights up while its change is
-   * marked in the text.
+   * Who else is on the Page. A person is a round mark with their Profile
+   * picture, or without one their initials in the colour of their cursor. An
+   * Agent is square, carries the Agent mark and its name, so it never reads as
+   * a person; it lights up while its change is marked in the text.
    */
   import type { Awareness } from 'y-protocols/awareness'
-  import { personColor, presenceLabel, type Present } from '../lib/person'
+  import { call } from '../lib/ops'
+  import type { Profile } from '../lib/operations.gen'
+  import { personColor, pictureOf, presenceLabel, type Present } from '../lib/person'
+  import { initials } from '../lib/profile'
   import Icon from './Icon.svelte'
 
   const {
@@ -19,6 +22,13 @@
   } = $props()
 
   let people = $state.raw<[number, Present][]>([])
+  // The Profiles the viewer sees, for the pictures; initials stand in until
+  // they are loaded, or if they cannot be.
+  let profiles = $state.raw<Profile[]>([])
+  call('list_profiles', {}).then(
+    listed => (profiles = listed.profiles),
+    () => {},
+  )
 
   $effect(() => {
     let shown = true
@@ -39,14 +49,6 @@
     }
   })
 
-  const initials = (name: string) =>
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .map(part => part[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase()
 </script>
 
 <ul class="people" aria-label="On this Page now">
@@ -59,8 +61,13 @@
         <span class="visually-hidden">{label}</span>
       </li>
     {:else}
+      {@const picture = pictureOf(present, profiles)}
       <li class="person" style:--person={personColor(present)} title={present.name}>
-        <span aria-hidden="true">{initials(present.name)}</span>
+        {#if picture}
+          <img src={picture} alt="" />
+        {:else}
+          <span aria-hidden="true">{initials(present.name)}</span>
+        {/if}
         <span class="visually-hidden">{present.name}</span>
       </li>
     {/if}
@@ -82,12 +89,19 @@
     place-items: center;
     width: var(--size-avatar);
     height: var(--size-avatar);
+    overflow: hidden;
     border-radius: var(--radius-round);
     background: var(--person);
     color: var(--color-on-color);
     font-size: var(--size-avatar-text);
     font-weight: var(--weight-strong);
     letter-spacing: var(--tracking-small);
+  }
+
+  .person img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   /* People overlap a little, each set apart by a ring in the page's colour. */

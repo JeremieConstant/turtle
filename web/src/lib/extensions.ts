@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { Callout } from './callout'
 import { TOP_BLOCK, UnknownDirective, UnknownDirectiveBlock } from './directive'
 import { Image, type ImageOptions } from './image'
+import { Mention } from './mention'
 import { PageLink } from './pageLink'
 import { Status } from './status'
 import { TABLE_EXTENSIONS } from './table'
@@ -29,6 +30,7 @@ export function contentExtensions(image: Partial<ImageOptions> = {}): Extensions
     StarterKit.configure({ document: false, undoRedo: false, underline: false, trailingNode: false }),
     Document,
     PageLink,
+    Mention,
     TaskList,
     // A task may hold more than a line, as it can in Markdown.
     TaskItem.configure({ nested: true }),

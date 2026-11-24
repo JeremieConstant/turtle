@@ -147,6 +147,43 @@
   }
 
   /* A Page link reads as a link, with a small page in front of its title. */
+  /* A Mention is a badge: the person's mark and name. */
+  .editor :global(.tiptap .mention) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-2) 0 var(--space-half);
+    border: var(--line) solid var(--color-line);
+    border-radius: var(--radius-round);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+    text-decoration: none;
+    vertical-align: baseline;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .editor :global(.tiptap .mention.name),
+  .editor :global(.tiptap .mention.unknown),
+  .editor :global(.tiptap .mention.failed),
+  .editor :global(.tiptap .mention.loading) {
+    padding-left: var(--space-2);
+    cursor: default;
+  }
+
+  .editor :global(.tiptap .mention:is(.unknown, .failed, .loading, .deactivated)) {
+    color: var(--color-muted);
+  }
+
+  .editor :global(.tiptap .mention-mark:empty) {
+    display: none;
+  }
+
+  .editor :global(.tiptap .mention.ProseMirror-selectednode) {
+    background: var(--color-selected);
+  }
+
   .editor :global(.tiptap .page-link) {
     cursor: pointer;
   }
