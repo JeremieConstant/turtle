@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Runs cargo even where it is not on PATH, as in agents' shells and git hooks,
+# which may not load the login profile. Use it like cargo: `scripts/cargo test`.
+set -euo pipefail
+source "$(dirname "$0")/lib/find-cargo.sh"
+exec cargo "$@"

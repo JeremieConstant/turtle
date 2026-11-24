@@ -2,7 +2,7 @@
 
 `scripts/check.sh` is the definition of done: it runs everything CI runs. The pre-commit hook runs it, so commit to run it. Coding standards for review are in `CODING_STANDARDS.md`.
 
-The server is a binary crate: run some of its unit tests with `cargo test --bin turtle <name>` from `server/`. The scripts find cargo themselves; for a direct `cargo` or `npm --prefix web run generate` call where `cargo` is not on PATH, `source scripts/lib/find-cargo.sh` first.
+Run cargo as `scripts/cargo`, which finds it off PATH. The server is a binary crate: run some of its unit tests with `../scripts/cargo test --bin turtle <name>` from `server/`.
 
 ## Trying it by hand
 

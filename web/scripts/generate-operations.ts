@@ -2,8 +2,8 @@
 // so a changed operation breaks the web app's type check instead of drifting.
 //
 // Reads the catalogue as printed by `turtle catalogue` and writes
-// src/lib/operations.gen.ts. Run through `npm run generate`; set CARGO to
-// the cargo binary if it is not on the PATH.
+// src/lib/operations.gen.ts. Run through `npm run generate`. Cargo comes
+// through scripts/cargo, which finds it off the PATH; set CARGO to use another.
 
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -144,9 +144,9 @@ export function generate(operations: Operation[]): string {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const manifest = fileURLToPath(new URL('../../server/Cargo.toml', import.meta.url))
-  // CARGO names the cargo binary when it is not on the PATH.
+  const cargo = process.env.CARGO ?? fileURLToPath(new URL('../../scripts/cargo', import.meta.url))
   const printed = execFileSync(
-    process.env.CARGO ?? 'cargo',
+    cargo,
     ['run', '--quiet', '--manifest-path', manifest, '--', 'catalogue'],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   )
