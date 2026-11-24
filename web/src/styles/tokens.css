@@ -192,6 +192,8 @@
   /* A person on a Page, as a round mark with their initials. */
   --size-avatar: 26px;
   --size-avatar-text: 0.6875rem;
+  /* A Mention's Profile picture; mention.ts draws it at this size too. */
+  --size-mention-picture: 20px;
   /* The formatting toolbar: its buttons, separators and the text style menu. */
   --size-tool: 30px;
   --height-tool-separator: 18px;

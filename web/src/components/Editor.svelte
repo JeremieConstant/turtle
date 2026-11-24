@@ -155,7 +155,9 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: 0 var(--space-2) 0 var(--space-half);
+    /* As tall as the mark plus the same inset all round, so the mark sits centred and the pill stays within the line. */
+    padding: var(--space-half) var(--space-2) var(--space-half) var(--space-half);
+    line-height: var(--size-mention-picture);
     border: var(--line) solid var(--color-line);
     border-radius: var(--radius-round);
     background: var(--color-surface);
@@ -177,6 +179,11 @@
 
   .editor :global(.tiptap .mention:is(.unknown, .failed, .loading, .deactivated)) {
     color: var(--color-muted);
+  }
+
+  /* A flex box, not a line of text, so the mark is exactly its own height. */
+  .editor :global(.tiptap .mention-mark) {
+    display: inline-flex;
   }
 
   .editor :global(.tiptap .mention-mark:empty) {
