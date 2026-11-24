@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Avatar from '../components/Avatar.svelte'
   import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { MemberEntry, SingleUseLink } from '../lib/operations.gen'
@@ -74,6 +75,20 @@
     return attempt(async () => changed(await call('deactivate_member', { id: member.id })))
   }
 
+  async function removePicture(member: MemberEntry) {
+    const sure = await ask({
+      title: `Remove ${member.name}’s picture?`,
+      message: 'Their initials are shown instead. Only they can choose a new picture.',
+      action: 'Remove',
+      destructive: true,
+    })
+    if (!sure) return
+    return attempt(async () => {
+      await call('remove_profile_picture', { id: member.id })
+      await changed({ ...member, picture: null })
+    })
+  }
+
   function resetPassword(member: MemberEntry) {
     return attempt(async () => show(`Password reset for ${member.name}`, await call('create_password_reset', { id: member.id })))
   }
@@ -119,9 +134,12 @@
     <ul class="list section">
       {#each members as member (member.id)}
         <li class:inactive={!member.active}>
-          <div class="item">
-            <span class="item-name">{member.name}</span>
-            <small class="hint">{[member.email, member.workspace_admin && 'Workspace Admin', !member.active && 'Deactivated'].filter(Boolean).join(' · ')}</small>
+          <div class="item-person">
+            <Avatar name={member.name} picture={member.picture} />
+            <div class="item">
+              <span class="item-name">{member.name}</span>
+              <small class="hint">{[member.email, member.workspace_admin && 'Workspace Admin', !member.active && 'Deactivated'].filter(Boolean).join(' · ')}</small>
+            </div>
           </div>
           {#if member.active}
             <div class="controls">
@@ -129,6 +147,9 @@
                 <button type="button" class="btn" disabled={busy} onclick={() => setAdmin(member, false)}>Remove Workspace Admin</button>
               {:else}
                 <button type="button" class="btn" disabled={busy} onclick={() => setAdmin(member, true)}>Make Workspace Admin</button>
+              {/if}
+              {#if member.picture}
+                <button type="button" class="btn" disabled={busy} onclick={() => removePicture(member)}>Remove picture</button>
               {/if}
               <button type="button" class="btn" disabled={busy} onclick={() => resetPassword(member)}>Password reset link</button>
               <button type="button" class="btn" disabled={busy} onclick={() => deactivate(member)}>Deactivate</button>

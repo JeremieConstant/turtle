@@ -216,6 +216,25 @@
     background: var(--color-selected);
   }
 
+  /* A directive Turtle does not know: a locked grey placeholder naming it. */
+  .editor :global(.tiptap .unknown-directive) {
+    padding: var(--space-hair) var(--space-1);
+    border-radius: var(--radius-s);
+    background: var(--color-sunken);
+    color: var(--color-muted);
+    font-size: var(--text-code-inline);
+    cursor: default;
+    user-select: none;
+  }
+
+  .editor :global(.tiptap div.unknown-directive) {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .editor :global(.tiptap .unknown-directive.ProseMirror-selectednode) {
+    background: var(--color-selected);
+  }
+
   .editor :global(.tiptap code) {
     padding: var(--space-hair) var(--space-1);
     border-radius: var(--radius-s);

@@ -11,6 +11,18 @@ export function initials(name: string): string {
   return (first + last).toLocaleUpperCase()
 }
 
+/**
+ * What the signed-in Member may do to the picture on a Profile: only its
+ * owner chooses one, and a Workspace Admin may also remove anyone's.
+ */
+export function pictureChanges(
+  profile: { id: string; picture?: string | null },
+  viewer: { id: string; workspace_admin: boolean } | null,
+): { choose: boolean; remove: boolean } {
+  const own = viewer?.id === profile.id
+  return { choose: own, remove: !!profile.picture && (own || !!viewer?.workspace_admin) }
+}
+
 /** What a Profile says about someone's standing: Guest, Workspace Admin, or nothing for a plain Member. */
 export function standing(profile: { guest: boolean; workspace_admin: boolean }): 'Guest' | 'Workspace Admin' | null {
   if (profile.guest) return 'Guest'

@@ -356,6 +356,10 @@ const MIGRATIONS: &[&str] = &[
     // A Guest is an outside person with an account, invited to chosen Areas
     // or Subtrees; a Grant to all Members does not reach them.
     "ALTER TABLE members ADD COLUMN guest INTEGER NOT NULL DEFAULT 0;",
+    // A Member's or Guest's Profile picture: a square PNG Turtle made from
+    // what they uploaded, its file in profile-pictures beside the database
+    // under the SHA-256 of its content (ADR-0009).
+    "ALTER TABLE members ADD COLUMN picture_hash TEXT;",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

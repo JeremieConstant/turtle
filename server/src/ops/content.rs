@@ -179,6 +179,7 @@ fn text_of(content: &[Inline], shown: &Shown) -> String {
             Inline::Image { alt, .. } => alt.clone(),
             Inline::PageLink { page_id } => shown.text(Linked::Page(page_id)).unwrap_or_default(),
             Inline::Mention { person_id } => format!("@{}", shown.text(Linked::Person(person_id)).unwrap_or_default()),
+            Inline::UnknownDirective { .. } => String::new(),
         })
         .collect();
     text.trim().to_string()

@@ -99,9 +99,14 @@
   )
 }
 
+// A directive Turtle does not know, shown as a grey placeholder naming it.
+#let unknown(name) = text(size: 0.86em, fill: muted, data.labels.unknown_element + ": " + name)
+
 #let inline-of(x) = {
   if x.type == "break" {
     linebreak()
+  } else if x.type == "unknown" {
+    box(fill: wash, stroke: 0.5pt + rule, radius: 3pt, inset: (x: 3pt), outset: (y: 2pt), unknown(x.name))
   } else if x.type == "image" {
     fitted-image(x.path, x.alt)
   } else if x.type == "mention" {
@@ -224,6 +229,8 @@
     )))
   } else if b.type == "rule" {
     block(above: 8mm, below: 8mm, line(length: 100%, stroke: 0.6pt + rule))
+  } else if b.type == "unknown" {
+    block(width: 100%, above: 4mm, below: 4mm, fill: wash, stroke: 0.5pt + rule, radius: 4pt, inset: (x: 5mm, y: 3mm), unknown(b.name))
   }
 }
 

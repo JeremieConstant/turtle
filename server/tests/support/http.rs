@@ -46,7 +46,8 @@ pub async fn request(
         stream.write_all(body.as_bytes()).await.unwrap();
         let mut raw = Vec::new();
         stream.read_to_end(&mut raw).await.expect("reading the response");
-        parse(&String::from_utf8(raw).expect("the response is not UTF-8"))
+        // An image's bytes that are not UTF-8 become U+FFFD; text is read as sent.
+        parse(&String::from_utf8_lossy(&raw))
     })
     .await
     .unwrap_or_else(|_| panic!("{method} {path} timed out"))

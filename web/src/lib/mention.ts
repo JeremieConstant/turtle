@@ -19,8 +19,8 @@ export function personIdOf(address: string): string | null {
 
 /** How a Mention is drawn. */
 export type Badge =
-  /** Someone whose Profile the reader sees: their mark and name, leading to the Profile. */
-  | { state: 'profile'; name: string; address: string; active: boolean }
+  /** Someone whose Profile the reader sees: their picture or initials and name, leading to the Profile. */
+  | { state: 'profile'; name: string; address: string; picture: string | null; active: boolean }
   /** Someone whose Profile the reader may not see: the name alone, leading nowhere. */
   | { state: 'name'; name: string }
   /** An ID that names no Member or Guest. */
@@ -34,7 +34,13 @@ export function badgeOf(person: MentionedPerson | null | undefined): Badge {
   if (person === null) return { state: 'unknown' }
   const { profile } = person
   if (!profile) return { state: 'name', name: person.name }
-  return { state: 'profile', name: profile.name, address: profileAddress(profile.id, profile.name), active: profile.active }
+  return {
+    state: 'profile',
+    name: profile.name,
+    address: profileAddress(profile.id, profile.name),
+    picture: profile.picture ?? null,
+    active: profile.active,
+  }
 }
 
 /** The most people the picker offers at once. */
@@ -155,9 +161,9 @@ export const Mention = Node.create<Record<string, never>, MentionStorage>({
         if (address) router.follow(event, address)
         else event.preventDefault()
       })
-      const showMark = (person: string | null) => {
+      const showMark = (person: { name: string; picture: string | null } | null) => {
         if (avatar) void unmount(avatar)
-        avatar = person === null ? null : mount(Avatar, { target: mark, props: { name: person, size: 20 } })
+        avatar = person === null ? null : mount(Avatar, { target: mark, props: { ...person, size: 20 } })
       }
       const stop = this.storage.people.watch(personId, person => {
         const badge = badgeOf(person)
@@ -166,7 +172,7 @@ export const Mention = Node.create<Record<string, never>, MentionStorage>({
         if (address) element.href = address
         else element.removeAttribute('href')
         element.classList.toggle('deactivated', badge.state === 'profile' && !badge.active)
-        showMark(badge.state === 'profile' ? badge.name : null)
+        showMark(badge.state === 'profile' ? { name: badge.name, picture: badge.picture } : null)
         name.textContent = badge.state === 'profile' || badge.state === 'name' ? badge.name : '@?'
         if (badge.state === 'unknown') element.title = 'This person is not known in this Workspace.'
         else if (badge.state === 'failed')

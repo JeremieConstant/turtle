@@ -8,7 +8,7 @@ const { badgeOf, choices, personIdOf } = await import('./mention')
 
 function person(name: string, changes: Partial<Profile> = {}): Profile {
   const id = name.toLowerCase().replace(/\s+/g, '-')
-  return { id, name, email: `${id}@example.org`, guest: false, workspace_admin: false, active: true, ...changes }
+  return { id, name, email: `${id}@example.org`, guest: false, workspace_admin: false, active: true, picture: null, ...changes }
 }
 
 test('a Mention is written as turtle:member/ and the ID, as the server reads it', () => {
@@ -18,12 +18,13 @@ test('a Mention is written as turtle:member/ and the ID, as the server reads it'
   expect(personIdOf('turtle:member/')).toBeNull()
 })
 
-test('someone whose Profile the reader sees is shown with their mark and name, leading to the Profile', () => {
-  const ada = person('Ada Lovelace')
+test('someone whose Profile the reader sees is shown with their picture and name, leading to the Profile', () => {
+  const ada = person('Ada Lovelace', { picture: '/api/profile_pictures/ada-lovelace?v=1' })
   expect(badgeOf({ id: ada.id, name: ada.name, profile: ada })).toEqual({
     state: 'profile',
     name: 'Ada Lovelace',
     address: '/u/ada-lovelace/ada-lovelace',
+    picture: '/api/profile_pictures/ada-lovelace?v=1',
     active: true,
   })
 })

@@ -2,12 +2,17 @@
 //!
 //! The contract: for any normalised content `c`,
 //! `from_markdown(&to_markdown(&c)) == c`.
+//!
+//! Beyond CommonMark and GitHub's tables, task lists and strikethrough, it
+//! reads and writes directives (ADR-0013), see `directive`. A directive
+//! Turtle does not know is read as its source and written back unchanged.
 
+use crate::directive;
 use crate::model::{
-    normalize, turtle_link_of, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem, MEMBER_ADDRESS_SCHEME,
-    PAGE_ADDRESS_SCHEME,
+    inline_directive, normalize, turtle_link_of, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem,
+    MEMBER_ADDRESS_SCHEME, PAGE_ADDRESS_SCHEME,
 };
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 
 // ---------------------------------------------------------------------------
 // Content -> Markdown
@@ -93,6 +98,7 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
             }
             Block::Table(rows) => render_table(rows, titles),
             Block::HorizontalRule => "***".to_string(),
+            Block::UnknownDirective { source } => source.clone(),
         };
         previous_bullet = bullet;
         previous_delimiter = delimiter;
@@ -349,6 +355,11 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
                 out.push_str(&format!("![{alt}](<{}>)", escape_url(src)));
                 at_line_start = false;
             }
+            // Like an image, it takes no formatting and leaves the marks around it open.
+            Inline::UnknownDirective { source } => {
+                out.push_str(source);
+                at_line_start = false;
+            }
             Inline::PageLink { .. } | Inline::Mention { .. } => {
                 // A Page link or Mention carries no formatting of its own.
                 while let Some(mark) = open.pop() {
@@ -470,6 +481,9 @@ fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, place: Inline
             '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '&' | '~' => true,
             '#' => in_heading || first_visible,
             '-' | '+' | '=' => first_visible,
+            // A `:` would start a directive where a name follows it, and a
+            // block directive at the start of a line.
+            ':' => first_visible || starts_directive_name(&chars[i + 1..]),
             '.' | ')' => list_delimiter_at == Some(i),
             // A `!` directly before a link would turn it into an image.
             '!' => i + 1 == chars.len(),
@@ -484,6 +498,20 @@ fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, place: Inline
         out.push(c);
     }
     out
+}
+
+/// Whether text after a `:` might be read as a directive's name: a name
+/// that runs to the end of the text, where anything might follow it, or to
+/// brackets or braces.
+fn starts_directive_name(after: &[char]) -> bool {
+    if !after.first().is_some_and(char::is_ascii_alphabetic) {
+        return false;
+    }
+    let name = after
+        .iter()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .count();
+    matches!(after.get(name), None | Some('[' | '{'))
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +618,10 @@ struct Builder {
     turtle_link: Option<Inline>,
     /// Where the line that made a quote a callout ends. Its marker is not text.
     callout_marker_end: Option<usize>,
+    /// The directives in running text, which the Markdown being read holds
+    /// as `stand_in`, their number, and `stand_in` again.
+    directives: Vec<String>,
+    stand_in: char,
 }
 
 impl Builder {
@@ -636,23 +668,25 @@ impl Builder {
     }
 
     fn text(&mut self, text: &str, code: bool) {
+        let pieces = stood_in(text, self.stand_in, &self.directives);
         // Whatever Markdown puts inside an image is its alternative text.
         if let Some((_, alt)) = &mut self.image {
-            alt.push_str(text);
+            pieces.iter().for_each(|(piece, _)| alt.push_str(piece));
             return;
         }
         if let Some(Frame::CodeBlock { text: body, .. }) = self.stack.last_mut() {
-            body.push_str(text);
+            pieces.iter().for_each(|(piece, _)| body.push_str(piece));
             return;
         }
         if self.turtle_link.is_some() {
             return;
         }
         let marks = self.marks.current(code);
-        self.inline_target().push(Inline::Text {
-            text: text.to_string(),
-            marks,
-        });
+        for (piece, is_directive) in pieces {
+            let directive = (is_directive && !code).then(|| inline_directive(&piece)).flatten();
+            let inline = directive.unwrap_or(Inline::Text { text: piece, marks: marks.clone() });
+            self.inline_target().push(inline);
+        }
     }
 
     fn hard_break(&mut self) {
@@ -683,17 +717,160 @@ impl Builder {
     }
 }
 
+/// Splits a text of the Markdown being read into its pieces, each with
+/// whether it is the source of a directive that a stand-in stood for.
+fn stood_in(text: &str, stand_in: char, directives: &[String]) -> Vec<(String, bool)> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(stand_in) {
+        let after = &rest[start + stand_in.len_utf8()..];
+        let number = after.find(stand_in).and_then(|end| Some((after[..end].parse::<usize>().ok()?, end)));
+        let Some((source, end)) = number.and_then(|(n, end)| Some((directives.get(n)?, end))) else {
+            break;
+        };
+        if start > 0 {
+            pieces.push((rest[..start].to_string(), false));
+        }
+        pieces.push((source.clone(), true));
+        rest = &after[end + stand_in.len_utf8()..];
+    }
+    if !rest.is_empty() || pieces.is_empty() {
+        pieces.push((rest.to_string(), false));
+    }
+    pieces
+}
+
+/// Part of the Markdown at the top level: Markdown, or a block directive.
+enum TopLevel<'a> {
+    Markdown(&'a str),
+    BlockDirective(&'a str),
+}
+
+/// The Markdown split around its block directives. One starts a line at
+/// the top level where Markdown would start a paragraph or heading.
+fn top_level(markdown: &str) -> Vec<TopLevel<'_>> {
+    let mut parts = Vec::new();
+    let mut rest = markdown;
+    'parts: loop {
+        let mut depth = 0;
+        for (event, range) in Parser::new_ext(rest, OPTIONS).into_offset_iter() {
+            match event {
+                Event::Start(tag) => {
+                    if depth == 0 && matches!(tag, Tag::Paragraph | Tag::Heading { .. }) {
+                        for (line, at) in directive::lines_with_ends(&rest[range.clone()]) {
+                            let start = range.start + at;
+                            let line_start = start == 0 || rest.as_bytes()[start - 1] == b'\n';
+                            if !line_start || !line.starts_with(":::") {
+                                continue;
+                            }
+                            if let Some((_, len)) = directive::block_at(&rest[start..]) {
+                                parts.push(TopLevel::Markdown(&rest[..start]));
+                                parts.push(TopLevel::BlockDirective(&rest[start..start + len]));
+                                rest = &rest[start + len..];
+                                continue 'parts;
+                            }
+                        }
+                    }
+                    depth += 1;
+                }
+                Event::End(_) => depth -= 1,
+                _ => {}
+            }
+        }
+        parts.push(TopLevel::Markdown(rest));
+        return parts;
+    }
+}
+
 pub fn from_markdown(markdown: &str) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    for part in top_level(markdown) {
+        match part {
+            TopLevel::Markdown(markdown) => blocks.extend(read_markdown(markdown)),
+            TopLevel::BlockDirective(source) => blocks.push(Block::UnknownDirective { source: source.to_string() }),
+        }
+    }
+    normalize(blocks)
+}
+
+const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_TABLES);
+
+/// Where the Markdown has directives in running text. A directive starts
+/// with a `:` that is text, so not in code, an address or HTML, and that is
+/// not escaped.
+fn inline_directives(markdown: &str) -> Vec<std::ops::Range<usize>> {
+    let mut found: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut in_code = false;
+    let mut in_image = 0;
+    let mut in_autolink = 0;
+    for (event, range) in Parser::new_ext(markdown, OPTIONS).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => in_code = true,
+            Event::End(TagEnd::CodeBlock) => in_code = false,
+            Event::Start(Tag::Image { .. }) => in_image += 1,
+            Event::End(TagEnd::Image) => in_image -= 1,
+            Event::Start(Tag::Link { link_type: LinkType::Autolink | LinkType::Email, .. }) => in_autolink += 1,
+            Event::End(TagEnd::Link) if in_autolink > 0 => in_autolink -= 1,
+            Event::Text(text) if !in_code && in_image == 0 && in_autolink == 0 && markdown[range.clone()] == *text => {
+                for (i, _) in text.match_indices(':') {
+                    let at = range.start + i;
+                    let escapes = markdown[..at].bytes().rev().take_while(|b| *b == b'\\').count();
+                    if escapes % 2 == 1 || found.last().is_some_and(|last| at < last.end) {
+                        continue;
+                    }
+                    if let Some((_, len)) = directive::inline_at(&markdown[at..]) {
+                        found.push(at..at + len);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Reads Markdown without block directives. Each directive in running text
+/// is read as a stand-in, so that what it holds is not read as Markdown.
+fn read_markdown(markdown: &str) -> Vec<Block> {
+    let stand_in = ('\u{E000}'..='\u{F8FF}').find(|c| !markdown.contains(*c)).unwrap_or('\u{E000}');
+    let mut replaced = markdown.to_string();
+    let mut directives = Vec::new();
+    // What a directive holds, such as a backtick, may hide a later one from
+    // the parser, so the Markdown is searched again once they stand in.
+    loop {
+        let found: Vec<_> = inline_directives(&replaced)
+            .into_iter()
+            .filter(|range| !replaced[range.clone()].contains(stand_in))
+            .collect();
+        if found.is_empty() {
+            break;
+        }
+        let mut next = String::with_capacity(replaced.len());
+        let mut at = 0;
+        for range in found {
+            next.push_str(&replaced[at..range.start]);
+            next.push_str(&format!("{stand_in}{}{stand_in}", directives.len()));
+            directives.push(replaced[range.clone()].to_string());
+            at = range.end;
+        }
+        next.push_str(&replaced[at..]);
+        replaced = next;
+    }
+    let markdown = replaced.as_str();
+
     let mut b = Builder {
         stack: vec![Frame::Root(Vec::new())],
         marks: ActiveMarks::default(),
         image: None,
         turtle_link: None,
         callout_marker_end: None,
+        directives,
+        stand_in,
     };
 
-    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
-    for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
+    for (event, range) in Parser::new_ext(markdown, OPTIONS).into_offset_iter() {
         if let Some(end) = b.callout_marker_end {
             if range.start > end {
                 b.callout_marker_end = None;
@@ -870,7 +1047,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
 
     b.close_implicit_paragraph();
     match b.stack.into_iter().next() {
-        Some(Frame::Root(blocks)) => normalize(blocks),
+        Some(Frame::Root(blocks)) => blocks,
         _ => Vec::new(),
     }
 }
@@ -878,6 +1055,21 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
 #[cfg(test)]
 pub(crate) mod testing {
     use crate::model::{Block, CalloutKind, Inline, Marks, TaskItem};
+
+    /// Directives Turtle does not know, holding what Markdown would read otherwise.
+    const INLINE_DIRECTIVES: &[&str] = &[
+        ":acme.demo[hi]{x=1}",
+        ":acme.x{}",
+        ":note[*a* `b ]c \\] <d> &amp;]",
+        ":acme.y[**]{k=\"v * w\" f}",
+        ":acme.z[a](not a link)",
+        ":acme.w[`]",
+    ];
+    const BLOCK_DIRECTIVES: &[&str] = &[
+        ":::acme.board{x=1}\n:::",
+        ":::acme.board\n# not a heading\n\n- [ ] *odd*   spacing\n:::",
+        "::::chart[x]\n:::inner\n```\n:::\n```\n:::\n::::",
+    ];
 
     // A small deterministic generator, so the property tests need no extra
     // dependency and failures are reproducible from the seed.
@@ -911,7 +1103,11 @@ pub(crate) mod testing {
                             let page_id = ["a1b2", "c3d4", "e5"][self.next(3)].to_string();
                             return Inline::PageLink { page_id };
                         }
-                        2 => {
+                        2 if self.next(3) == 0 => {
+                            let source = INLINE_DIRECTIVES[self.next(INLINE_DIRECTIVES.len())].to_string();
+                            return Inline::UnknownDirective { source };
+                        }
+                        3 => {
                             let person_id = ["m1", "m2"][self.next(2)].to_string();
                             return Inline::Mention { person_id };
                         }
@@ -941,7 +1137,16 @@ pub(crate) mod testing {
 
         pub fn blocks(&mut self, depth: usize) -> Vec<Block> {
             let len = self.next(4);
-            (0..len).map(|_| self.block(depth)).collect()
+            (0..len)
+                .map(|_| {
+                    // Block directives stand only at the top.
+                    if depth == 0 && self.next(8) == 0 {
+                        let source = BLOCK_DIRECTIVES[self.next(BLOCK_DIRECTIVES.len())].to_string();
+                        return Block::UnknownDirective { source };
+                    }
+                    self.block(depth)
+                })
+                .collect()
         }
 
         pub fn block(&mut self, depth: usize) -> Block {
@@ -1491,6 +1696,81 @@ mod tests {
     #[test]
     fn rows_of_a_table_read_from_markdown_have_as_many_cells_as_its_header() {
         assert_eq!(from_markdown("| a | b |\n|:-|-:|\n| 1 |\n| 1 | 2 | 3 |"), vec![table(&[&["a", "b"], &["1", ""], &["1", "2"]])]);
+    }
+
+    fn unknown(source: &str) -> Inline {
+        Inline::UnknownDirective { source: source.into() }
+    }
+
+    #[test]
+    fn an_unknown_inline_directive_is_kept_byte_for_byte() {
+        let markdown = "Before :acme.demo[hi *there*]{x=1 y=\"a b\"} after.\n";
+
+        let blocks = from_markdown(markdown);
+
+        assert_eq!(
+            blocks,
+            vec![para(vec![text("Before "), unknown(":acme.demo[hi *there*]{x=1 y=\"a b\"}"), text(" after.")])]
+        );
+        assert_eq!(to_markdown(&blocks), markdown);
+    }
+
+    #[test]
+    fn an_unknown_block_directive_is_kept_byte_for_byte() {
+        let board = ":::acme.board{columns=\"To do,Done\"}\n- [ ] *odd*   spacing\n\n```\n:::\n```\n::::acme.lane\n::::\n:::";
+        let markdown = format!("Intro\n\n{board}\n\n:::chart\n:::\n\nAfter :acme.demo[hi]{{x=1}}.\n");
+
+        let blocks = from_markdown(&markdown);
+
+        assert_eq!(
+            blocks,
+            vec![
+                para(vec![text("Intro")]),
+                Block::UnknownDirective { source: board.into() },
+                // An unnamespaced name Turtle does not know is kept all the same.
+                Block::UnknownDirective { source: ":::chart\n:::".into() },
+                para(vec![text("After "), unknown(":acme.demo[hi]{x=1}"), text(".")]),
+            ]
+        );
+        assert_eq!(to_markdown(&blocks), markdown);
+    }
+
+    #[test]
+    fn what_merely_looks_like_a_directive_stays_text() {
+        for s in [":acme.x[a]{b=1}", ":::acme.x", "a:b", "see :x", ":x{", "\\:x[a]", "::x[a]{}", "time 10:30", ":x"] {
+            assert_round_trip(vec![para(vec![text(s)])]);
+            assert_round_trip(vec![para(vec![text("x"), Inline::HardBreak, text(s)])]);
+        }
+        assert_round_trip(vec![para(vec![text("a :b"), page_link("c")]), para(vec![text("::"), unknown(":x[y]")])]);
+        assert_eq!(
+            from_markdown("`:acme.x[a]{}` and <https://x.org/:a{b}> and ![:acme.x[a]{}](y.png)\n\n```\n:acme.x[a]{}\n```"),
+            vec![
+                para(vec![
+                    marked(":acme.x[a]{}", |m| m.code = true),
+                    text(" and "),
+                    marked("https://x.org/:a{b}", |m| m.link = Some("https://x.org/:a{b}".into())),
+                    text(" and "),
+                    Inline::Image { src: "y.png".into(), alt: ":acme.x[a]{}".into() },
+                ]),
+                Block::CodeBlock { language: None, text: ":acme.x[a]{}".into() },
+            ]
+        );
+        // Without a closing line, a block directive is the text it says.
+        assert_eq!(from_markdown(":::acme.x\nnever closed"), vec![para(vec![text(":::acme.x never closed")])]);
+    }
+
+    #[test]
+    fn a_block_directive_away_from_the_top_is_kept_as_its_text() {
+        assert_eq!(
+            normalize(vec![Block::Blockquote(vec![Block::UnknownDirective { source: ":::acme.x\none\n:::".into() }])]),
+            vec![Block::Blockquote(vec![para(vec![
+                text(":::acme.x"),
+                Inline::HardBreak,
+                text("one"),
+                Inline::HardBreak,
+                text(":::"),
+            ])])]
+        );
     }
 
     const SEEDS: u64 = 20_000;

@@ -2,8 +2,10 @@
 //! see whose. An Agent has no Profile.
 
 use super::accounts::Nothing;
+use super::attachments::{decode_content, remove_stored_file, size_in_words, store_file};
 use super::permissions;
 use super::{Catalogue, Core, OpError, OpResult, Principal};
+use base64::Engine;
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 use schemars::JsonSchema;
@@ -31,6 +33,23 @@ pub(super) fn register(catalogue: &mut Catalogue) {
             get_mentioned_people,
         )
         .changes = false;
+    catalogue.add(
+        "set_profile_picture",
+        "Sets the caller's own Profile picture, replacing any they had: a PNG, JPEG, GIF or WebP of at most 10 MB, its content in base64. Turtle keeps its middle square, scaled down. Nobody can set another person's picture; Agents have no Profile.",
+        set_profile_picture,
+    );
+    catalogue.add(
+        "remove_profile_picture",
+        "Removes the picture from a Profile, so their initials stand in again. For the person themselves, and for a Workspace Admin on anyone's Profile.",
+        remove_profile_picture,
+    );
+    catalogue
+        .add(
+            "read_profile_picture",
+            "Returns the picture of a Member or Guest whose Profile the caller sees, as a PNG in base64.",
+            read_profile_picture,
+        )
+        .changes = false;
 }
 
 /// What Turtle shows others about a Member or Guest.
@@ -44,6 +63,9 @@ pub struct Profile {
     pub workspace_admin: bool,
     /// False once they have been deactivated; their Profile stays.
     pub active: bool,
+    /// The address their picture is shown from, which changes whenever the
+    /// picture does; absent without one, when their initials stand in.
+    pub picture: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -53,12 +75,7 @@ pub struct ProfileId {
 }
 
 pub fn get_profile(core: &Core, principal: &Principal, input: ProfileId) -> OpResult<Profile> {
-    let db = core.db();
-    let sight = Sight::of(&db, principal)?;
-    match read_profile(&db, &input.id)? {
-        Some(profile) if sight.sees(&db, principal, &profile)? => Ok(profile.into()),
-        _ => Err(no_such_person()),
-    }
+    Ok(seen_profile(&core.db(), principal, &input.id)?.into())
 }
 
 /// The people whose Profiles the caller sees.
@@ -173,7 +190,7 @@ fn reach(db: &Connection, principal: &Principal) -> rusqlite::Result<HashSet<Str
     Ok(reached)
 }
 
-const PROFILE_COLUMNS: &str = "id, name, email, guest, workspace_admin, deactivated_at IS NULL";
+const PROFILE_COLUMNS: &str = "id, name, email, guest, workspace_admin, deactivated_at IS NULL, picture_hash";
 
 fn read_profile(db: &Connection, id: &str) -> rusqlite::Result<Option<Profile>> {
     db.query_row(&format!("SELECT {PROFILE_COLUMNS} FROM members WHERE id = ?1"), [id], profile_row)
@@ -181,8 +198,11 @@ fn read_profile(db: &Connection, id: &str) -> rusqlite::Result<Option<Profile>> 
 }
 
 fn profile_row(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
+    let id: String = row.get(0)?;
+    let picture_hash: Option<String> = row.get(6)?;
     Ok(Profile {
-        id: row.get(0)?,
+        picture: picture_hash.map(|hash| picture_address(&id, &hash)),
+        id,
         name: row.get(1)?,
         email: row.get(2)?,
         guest: row.get(3)?,
@@ -196,8 +216,162 @@ pub(super) fn name_of(db: &Connection, id: &str) -> rusqlite::Result<Option<Stri
     Ok(read_profile(db, id)?.map(|profile| profile.name))
 }
 
+/// Where a browser shows a person's picture from. Its file's hash is part
+/// of it, so a new picture is never mistaken for a cached old one.
+pub(super) fn picture_address(person_id: &str, hash: &str) -> String {
+    format!("/api/profile_pictures/{person_id}?v={}", &hash[..hash.len().min(16)])
+}
+
 fn no_such_person() -> OpError {
     OpError::NotFound("There is no such Member or Guest.".into())
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NewProfilePicture {
+    /// A PNG, JPEG, GIF or WebP image, in base64.
+    pub content: String,
+}
+
+/// A Profile picture.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ProfilePicture {
+    /// Always "image/png": Turtle stores the picture it made from the upload.
+    pub content_type: String,
+    /// The image, in base64.
+    pub content: String,
+}
+
+/// How large an uploaded picture may be, before Turtle scales it down.
+const MAX_UPLOAD_SIZE: usize = 10 * 1024 * 1024;
+/// The most pixels an uploaded picture may have across or down, so that a
+/// small file cannot unpack into gigabytes.
+const MAX_UPLOAD_SIDE: u32 = 12_000;
+/// The width and height of a stored picture: sharp at the largest size
+/// Turtle shows one, on a screen with twice as many pixels.
+const PICTURE_SIDE: u32 = 256;
+
+pub fn set_profile_picture(core: &Core, principal: &Principal, input: NewProfilePicture) -> OpResult<Profile> {
+    let Principal::Member { id, .. } = principal else {
+        return Err(OpError::NotPermitted("Only a Member or Guest has a Profile picture.".into()));
+    };
+    let content = decode_content(&input.content)?;
+    if content.len() > MAX_UPLOAD_SIZE {
+        return Err(OpError::InvalidInput(format!(
+            "This file is larger than {}, the most a picture may be. Choose a smaller file.",
+            size_in_words(MAX_UPLOAD_SIZE as u64)
+        )));
+    }
+    let picture = square_picture(&content)?;
+    // Made and written before the database is taken, so an upload holds up
+    // nobody else.
+    let hash = store_file(core.profile_pictures_dir(), &picture)?;
+    let db = core.db();
+    // Another picture with the same file may have been removed meanwhile;
+    // under the lock it is stored again if so.
+    store_file(core.profile_pictures_dir(), &picture)?;
+    let replaced = picture_hash(&db, id)?;
+    db.execute("UPDATE members SET picture_hash = ?2 WHERE id = ?1", [id, &hash])?;
+    remove_unheld_picture(core, &db, replaced)?;
+    Ok(read_profile(&db, id)?.ok_or_else(no_such_person)?.into())
+}
+
+pub fn remove_profile_picture(core: &Core, principal: &Principal, input: ProfileId) -> OpResult<Profile> {
+    let db = core.db();
+    let profile = seen_profile(&db, principal, &input.id)?;
+    let own = matches!(principal, Principal::Member { id, .. } if *id == profile.id);
+    if !own && !principal.acts_as_workspace_admin() {
+        return Err(OpError::NotPermitted(
+            "Only the person themselves or a Workspace Admin can remove a Profile picture.".into(),
+        ));
+    }
+    let removed = picture_hash(&db, &profile.id)?;
+    db.execute("UPDATE members SET picture_hash = NULL WHERE id = ?1", [&profile.id])?;
+    remove_unheld_picture(core, &db, removed)?;
+    Ok(Profile { picture: None, ..profile }.into())
+}
+
+pub fn read_profile_picture(core: &Core, principal: &Principal, input: ProfileId) -> OpResult<ProfilePicture> {
+    let content = open_profile_picture(core, principal, &input.id)?;
+    Ok(ProfilePicture {
+        content_type: "image/png".into(),
+        content: base64::engine::general_purpose::STANDARD.encode(content),
+    }
+    .into())
+}
+
+/// The PNG of a picture the caller may see, for adapters that hand out the
+/// file itself.
+pub fn open_profile_picture(core: &Core, principal: &Principal, person_id: &str) -> Result<Vec<u8>, OpError> {
+    let no_picture = || OpError::NotFound("This Member or Guest has no picture.".into());
+    let hash = {
+        let db = core.db();
+        seen_profile(&db, principal, person_id)?;
+        picture_hash(&db, person_id)?.ok_or_else(no_picture)?
+    };
+    match std::fs::read(core.profile_pictures_dir().join(&hash)) {
+        Ok(content) => Ok(content),
+        // Replaced or removed meanwhile.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(no_picture()),
+        Err(error) => Err(OpError::Internal(anyhow::Error::new(error).context("reading a Profile picture"))),
+    }
+}
+
+/// The Profile with this ID if the caller sees it, and otherwise the answer
+/// for someone who does not exist.
+fn seen_profile(db: &Connection, principal: &Principal, id: &str) -> Result<Profile, OpError> {
+    let sight = Sight::of(db, principal)?;
+    match read_profile(db, id)? {
+        Some(profile) if sight.sees(db, principal, &profile)? => Ok(profile),
+        _ => Err(no_such_person()),
+    }
+}
+
+/// The middle square of an uploaded image, scaled down to `PICTURE_SIDE`
+/// if larger, as a PNG. A photo is turned upright first, as its camera
+/// noted, since browsers show it that way too.
+fn square_picture(content: &[u8]) -> Result<Vec<u8>, OpError> {
+    use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
+    let not_a_picture = || OpError::InvalidInput("Choose a PNG, JPEG, GIF or WebP image as your picture.".into());
+    let mut reader = ImageReader::new(std::io::Cursor::new(content))
+        .with_guessed_format()
+        .map_err(|_| not_a_picture())?;
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_UPLOAD_SIDE);
+    limits.max_image_height = Some(MAX_UPLOAD_SIDE);
+    reader.limits(limits);
+    let mut decoder = reader.into_decoder().map_err(|_| not_a_picture())?;
+    let orientation = decoder.orientation().ok();
+    let mut image = DynamicImage::from_decoder(decoder).map_err(|_| not_a_picture())?;
+    if let Some(orientation) = orientation {
+        image.apply_orientation(orientation);
+    }
+    let side = image.width().min(image.height());
+    let square = image.crop_imm((image.width() - side) / 2, (image.height() - side) / 2, side, side);
+    let scaled = if side > PICTURE_SIDE { square.thumbnail_exact(PICTURE_SIDE, PICTURE_SIDE) } else { square };
+    let mut png = Vec::new();
+    DynamicImage::ImageRgba8(scaled.to_rgba8())
+        .write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
+        .map_err(|error| OpError::Internal(anyhow::Error::new(error).context("writing a Profile picture")))?;
+    Ok(png)
+}
+
+fn picture_hash(db: &Connection, person_id: &str) -> rusqlite::Result<Option<String>> {
+    db.query_row("SELECT picture_hash FROM members WHERE id = ?1", [person_id], |row| row.get(0))
+        .optional()
+        .map(Option::flatten)
+}
+
+/// Removes a picture's file once nobody's Profile holds it any more. Called
+/// with the database held, which `set_profile_picture` also takes before it
+/// relies on a file being there.
+fn remove_unheld_picture(core: &Core, db: &Connection, hash: Option<String>) -> Result<(), OpError> {
+    let Some(hash) = hash else { return Ok(()) };
+    let held: bool =
+        db.query_row("SELECT EXISTS (SELECT 1 FROM members WHERE picture_hash = ?1)", [&hash], |row| row.get(0))?;
+    if !held {
+        remove_stored_file(core.profile_pictures_dir(), &hash);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -235,6 +409,7 @@ mod tests {
                 guest: false,
                 workspace_admin: true,
                 active: true,
+                picture: None,
             }
         );
     }
@@ -447,5 +622,138 @@ mod tests {
         let error = get_mentioned_people(&core, &Principal::Anonymous, PeopleToName { person_ids: vec!["member-ada".into()] })
             .unwrap_err();
         assert_eq!(error.kind(), "not_permitted");
+    }
+
+    /// A PNG `width` by `height`, blue in its middle third across and red
+    /// on either side of it.
+    fn banded_png(width: u32, height: u32) -> String {
+        let image = image::RgbImage::from_fn(width, height, |x, _| {
+            if x >= width / 3 && x < width - width / 3 { image::Rgb([0, 0, 255]) } else { image::Rgb([255, 0, 0]) }
+        });
+        let mut png = Vec::new();
+        image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        base64::engine::general_purpose::STANDARD.encode(png)
+    }
+
+    fn set_picture(core: &Core, owner: &Principal, content: String) -> Result<Profile, OpError> {
+        set_profile_picture(core, owner, NewProfilePicture { content }).map(|reply| reply.output)
+    }
+
+    fn picture(core: &Core, viewer: &Principal, of: &Principal) -> Result<image::DynamicImage, OpError> {
+        let read = read_profile_picture(core, viewer, ProfileId { id: id_of(of) })?.output;
+        assert_eq!(read.content_type, "image/png");
+        let png = base64::engine::general_purpose::STANDARD.decode(read.content).unwrap();
+        Ok(image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap())
+    }
+
+    #[test]
+    fn a_member_sets_their_picture_and_gets_its_middle_square_scaled_down() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        let ken = member(&core, "Ken", false);
+        assert_eq!(profile(&core, &ken, &ada).unwrap().picture, None);
+
+        set_picture(&core, &ada, banded_png(1500, 500)).unwrap();
+
+        assert!(profile(&core, &ken, &ada).unwrap().picture.is_some());
+        let shown = picture(&core, &ken, &ada).unwrap().to_rgb8();
+        assert_eq!(shown.dimensions(), (256, 256));
+        // Only the blue middle is left; the red sides are cropped away.
+        assert_eq!(*shown.get_pixel(0, 0), image::Rgb([0, 0, 255]));
+        assert_eq!(*shown.get_pixel(255, 128), image::Rgb([0, 0, 255]));
+    }
+
+    #[test]
+    fn a_small_picture_is_cropped_but_never_scaled_up() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        set_picture(&core, &ada, banded_png(30, 90)).unwrap();
+        assert_eq!(picture(&core, &ada, &ada).unwrap().to_rgb8().dimensions(), (30, 30));
+    }
+
+    #[test]
+    fn a_file_that_is_no_image_is_refused() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        let text = base64::engine::general_purpose::STANDARD.encode("not a picture");
+        assert_eq!(set_picture(&core, &ada, text).unwrap_err().kind(), "invalid_input");
+        assert_eq!(profile(&core, &ada, &ada).unwrap().picture, None);
+    }
+
+    #[test]
+    fn a_new_picture_replaces_the_old_one_under_a_new_address() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        let first = set_picture(&core, &ada, banded_png(300, 300)).unwrap().picture.unwrap();
+        let red = image::RgbImage::from_pixel(50, 50, image::Rgb([255, 0, 0]));
+        let mut png = Vec::new();
+        red.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+
+        let second = set_picture(&core, &ada, base64::engine::general_purpose::STANDARD.encode(png)).unwrap();
+
+        assert_ne!(second.picture.unwrap(), first);
+        assert_eq!(*picture(&core, &ada, &ada).unwrap().to_rgb8().get_pixel(25, 25), image::Rgb([255, 0, 0]));
+    }
+
+    #[test]
+    fn an_agent_has_no_picture_to_set() {
+        let core = fresh();
+        let wanda = member(&core, "Wanda", true);
+        let reviewer = create_agent(&core, &wanda, NewAgent { name: "Reviewer".into() }).unwrap().output;
+        let token = TokenLimits { id: "token".into(), read_only: false, areas: None };
+        let agent = Principal::Agent { id: reviewer.id, token };
+        assert_eq!(set_picture(&core, &agent, banded_png(10, 10)).unwrap_err().kind(), "not_permitted");
+    }
+
+    fn remove(core: &Core, by: &Principal, of: &Principal) -> Result<Profile, OpError> {
+        remove_profile_picture(core, by, ProfileId { id: id_of(of) }).map(|reply| reply.output)
+    }
+
+    #[test]
+    fn another_member_cannot_remove_someones_picture() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        let ken = member(&core, "Ken", false);
+        set_picture(&core, &ada, banded_png(10, 10)).unwrap();
+
+        assert_eq!(remove(&core, &ken, &ada).unwrap_err().kind(), "not_permitted");
+        assert!(profile(&core, &ken, &ada).unwrap().picture.is_some());
+    }
+
+    #[test]
+    fn the_owner_removes_their_picture_and_initials_stand_in_again() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        let ken = member(&core, "Ken", false);
+        set_picture(&core, &ada, banded_png(10, 10)).unwrap();
+
+        assert_eq!(remove(&core, &ada, &ada).unwrap().picture, None);
+        assert_eq!(profile(&core, &ken, &ada).unwrap().picture, None);
+        assert_eq!(picture(&core, &ken, &ada).unwrap_err().kind(), "not_found");
+    }
+
+    #[test]
+    fn a_workspace_admin_removes_anyones_picture() {
+        let core = fresh();
+        let wanda = member(&core, "Wanda", true);
+        let gus = guest(&core, "Gus");
+        set_picture(&core, &gus, banded_png(10, 10)).unwrap();
+
+        remove(&core, &wanda, &gus).unwrap();
+        assert_eq!(profile(&core, &gus, &gus).unwrap().picture, None);
+    }
+
+    #[test]
+    fn a_picture_is_hidden_from_whoever_may_not_see_the_profile() {
+        let core = fresh();
+        let ken = member(&core, "Ken", false);
+        let gus = guest(&core, "Gus");
+        set_picture(&core, &ken, banded_png(10, 10)).unwrap();
+
+        let hidden = picture(&core, &gus, &ken).unwrap_err();
+        let missing = read_profile_picture(&core, &gus, ProfileId { id: "nobody".into() }).unwrap_err();
+        assert_eq!((hidden.kind(), hidden.message()), (missing.kind(), missing.message()));
+        assert_eq!(remove(&core, &gus, &ken).unwrap_err().kind(), "not_found");
+        assert_eq!(picture(&core, &Principal::Anonymous, &ken).unwrap_err().kind(), "not_permitted");
     }
 }

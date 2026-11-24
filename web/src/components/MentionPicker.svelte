@@ -78,7 +78,7 @@
         {#each offered as person (person.id)}
           <li>
             <button type="button" class="person" onclick={() => mention(person)}>
-              <Avatar name={person.name} size={24} />
+              <Avatar name={person.name} size={24} picture={person.picture} />
               <span class="name">{person.name}</span>
               <span class="email">{person.email}</span>
             </button>
