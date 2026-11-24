@@ -176,6 +176,7 @@ fn text_of(content: &[Inline], titles: &HashMap<String, String>) -> String {
             Inline::HardBreak => " ",
             Inline::Image { alt, .. } => alt.as_str(),
             Inline::PageLink { page_id } => titles.get(page_id).map_or("", String::as_str),
+            Inline::UnknownDirective { .. } => "",
         })
         .collect();
     text.trim().to_string()

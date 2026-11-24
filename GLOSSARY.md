@@ -50,6 +50,10 @@ _Avoid_: Checklist, to-do list, todo
 A highlighted passage in a Page's content of one of four kinds: note, tip, warning or danger. In Markdown it is a quote whose first line is the kind's marker alone, such as `[!NOTE]`.
 _Avoid_: Admonition, alert, info box, panel
 
+**Directive**:
+A piece of a Page's content written in Markdown as `:name[text]{key=value}` in running text or as a block from `:::name{key=value}` to `:::`. Turtle's own have bare names, such as `status`; anyone else's carry a namespace, such as `acme.board`. One Turtle does not know is kept exactly as written and shown as a locked placeholder, "Unknown element: <name>", that can be moved and deleted but not edited.
+_Avoid_: Shortcode, macro, extension
+
 **Status**:
 A short coloured marker in the running text of a Page's content, holding any text in one of six colours: grey, blue, green, yellow, red or purple.
 _Avoid_: Chip, badge, lozenge, label

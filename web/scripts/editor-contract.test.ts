@@ -58,6 +58,8 @@ const CONTENT = {
       text('.'),
     ),
     paragraph(text('With '), { type: 'image', attrs: { src: 'logo.png', alt: 'Logo' } }, text(' inline.')),
+    paragraph(text('A '), { type: 'unknownDirective', attrs: { source: ':acme.demo[hi]{x=1}' } }, text(' kept.')),
+    { type: 'unknownDirectiveBlock', attrs: { source: ':::acme.board{x=1}\n- a\n:::' } },
     {
       type: 'bulletList',
       content: [

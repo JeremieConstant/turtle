@@ -5,6 +5,7 @@ use super::export::{attachment_id, file_name_of, readable_subtree};
 use super::tree::{Entry, Kind};
 use super::{areas, attachments, fonts, links, pdf_styles};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
+use crate::directive;
 use crate::model::{Block, Inline, Marks};
 use crate::pdf;
 use base64::Engine;
@@ -169,7 +170,7 @@ fn find_attachments(core: &Core, principal: &Principal, blocks: &[Block], found:
         Inline::Text { marks: Marks { link: Some(href), .. }, .. } => {
             referred.extend(attachment_id(href).map(String::from))
         }
-        Inline::Text { .. } | Inline::HardBreak | Inline::PageLink { .. } => {}
+        Inline::Text { .. } | Inline::HardBreak | Inline::PageLink { .. } | Inline::UnknownDirective { .. } => {}
     });
     let mut files = Vec::new();
     {
@@ -303,6 +304,7 @@ impl Chapter<'_> {
                 pdf::Block::Table { rows }
             }
             Block::HorizontalRule => pdf::Block::Rule,
+            Block::UnknownDirective { source } => pdf::Block::Unknown { name: directive_name(source) },
         };
         out.push(shown);
     }
@@ -353,8 +355,14 @@ impl Chapter<'_> {
                 let link = found.public_url.as_ref().map(|base| pdf::Link::Url(format!("{base}/p/{page_id}")));
                 Some(plain(title, link))
             }
+            Inline::UnknownDirective { source } => Some(pdf::Inline::Unknown { name: directive_name(source) }),
         }
     }
+}
+
+/// The name a directive Turtle does not know is shown by, as in the editor.
+fn directive_name(source: &str) -> String {
+    directive::name_of(source).unwrap_or_default().to_string()
 }
 
 fn plain(text: &str, link: Option<pdf::Link>) -> pdf::Inline {
@@ -376,7 +384,7 @@ fn plain_text(inlines: &[pdf::Inline]) -> String {
         .map(|inline| match inline {
             pdf::Inline::Text { text, .. } => text.as_str(),
             pdf::Inline::Break => " ",
-            pdf::Inline::Image { .. } => "",
+            pdf::Inline::Image { .. } | pdf::Inline::Unknown { .. } => "",
         })
         .collect();
     text.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -392,7 +400,7 @@ fn for_each_inline(blocks: &[Block], visit: &mut impl FnMut(&Inline)) {
             }
             Block::TaskList(items) => items.iter().for_each(|item| for_each_inline(&item.content, visit)),
             Block::Table(rows) => rows.iter().flatten().flatten().for_each(&mut *visit),
-            Block::CodeBlock { .. } | Block::HorizontalRule => {}
+            Block::CodeBlock { .. } | Block::HorizontalRule | Block::UnknownDirective { .. } => {}
         }
     }
 }
@@ -558,6 +566,22 @@ mod tests {
                 "ENGINEERING Everything Some bold, italic, struck and code, then a link. – one – nested 3. third 4. fourth \
                  done open quoted WARNING Careful. NAME ROLE Grace Admin fn main() {} The end. 3"
             )
+        );
+    }
+
+    #[test]
+    fn a_directive_turtle_does_not_know_is_shown_as_a_placeholder_naming_it() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let markdown = "Plan :acme.demo[hi]{x=1} today.\n\n:::acme.board{x=1}\n- a\n:::\n";
+        page(&core, &grace, &area_id, None, "Board", markdown);
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        assert_eq!(
+            pages[2],
+            squashed("ENGINEERING Board Plan Unknown element: acme.demo today. Unknown element: acme.board 3")
         );
     }
 

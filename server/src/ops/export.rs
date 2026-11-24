@@ -297,7 +297,7 @@ fn point_into_export(blocks: &mut [Block], from: &[String], addresses: &Addresse
                 *inline = Inline::Text { text: title.clone(), marks };
             }
         }
-        Inline::Text { .. } | Inline::HardBreak => {}
+        Inline::Text { .. } | Inline::HardBreak | Inline::UnknownDirective { .. } => {}
     });
 }
 
@@ -311,7 +311,7 @@ fn for_each_inline(blocks: &mut [Block], change: &mut impl FnMut(&mut Inline)) {
             }
             Block::TaskList(items) => items.iter_mut().for_each(|item| for_each_inline(&mut item.content, change)),
             Block::Table(rows) => rows.iter_mut().flatten().flatten().for_each(&mut *change),
-            Block::CodeBlock { .. } | Block::HorizontalRule => {}
+            Block::CodeBlock { .. } | Block::HorizontalRule | Block::UnknownDirective { .. } => {}
         }
     }
 }
@@ -460,6 +460,19 @@ mod tests {
             files["Runbook/Deploy.md"],
             format!("---\nid: \"{deploy}\"\nkind: page\ntitle: \"Deploy\"\nposition: 1\ntags: []\n---\n")
         );
+    }
+
+    #[test]
+    fn directives_turtle_does_not_know_are_exported_as_they_were_written() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let content = "Plan :acme.demo[hi *there*]{x=1} today.\n\n:::acme.board{x=1}\n- [ ] *odd*   spacing\n:::\n";
+        page(&core, &grace, &area_id, None, "Board", content);
+
+        let files = export_area(&core, &grace, &area_id);
+
+        assert!(files["Board.md"].ends_with(&format!("---\n\n{content}")), "{}", files["Board.md"]);
     }
 
     /// The frontmatter line of a file that starts with the given key.

@@ -1,6 +1,7 @@
 //! Turtle server: one binary with the web app inside and one data directory.
 
 mod diff;
+mod directive;
 mod http_api;
 mod live;
 mod markdown;
