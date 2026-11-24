@@ -396,6 +396,22 @@ export type Place = {
   parent_id?: string | null
 }
 
+export type Profile = {
+  /** False once they have been deactivated; their Profile stays. */
+  active: boolean
+  email: string
+  /** An outside person invited to chosen Areas or Subtrees. */
+  guest: boolean
+  id: string
+  name: string
+  workspace_admin: boolean
+}
+
+export type ProfileList = {
+  /** By name, deactivated people included. */
+  profiles: Profile[]
+}
+
 export type QuickNote = {
   /** The Area it sits in now. */
   area: Area
@@ -737,6 +753,19 @@ export type Operations = {
       secret: string
     }
     output: Member
+  }
+  /** Returns the Profile of a Member or Guest by ID: name, email, whether they are a Guest or Workspace Admin, and whether they are deactivated. A Guest sees only the Profiles of people who can reach an Area or Subtree the Guest can reach; Agents have no Profile. */
+  get_profile: {
+    input: {
+      /** The Member's or Guest's ID. */
+      id: string
+    }
+    output: Profile
+  }
+  /** Lists the Members and Guests whose Profiles the caller sees, by name, deactivated ones included. A Member sees everyone; a Guest only the people who can reach an Area or Subtree the Guest can reach. Agents have no Profile. */
+  list_profiles: {
+    input: Record<string, never>
+    output: ProfileList
   }
   /** Creates an Area. The caller becomes its Admin and is the only one with access. A standalone Agent, and a Token limited to chosen Areas, cannot. */
   create_area: {

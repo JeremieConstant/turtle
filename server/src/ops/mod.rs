@@ -23,6 +23,7 @@ pub mod moves;
 pub mod pdf_export;
 pub mod pdf_styles;
 pub mod permissions;
+pub mod profiles;
 pub mod quick_notes;
 pub mod search;
 pub mod tags;
@@ -483,6 +484,7 @@ pub fn catalogue() -> Catalogue {
     agents::register(&mut catalogue);
     attachments::register(&mut catalogue);
     members::register(&mut catalogue);
+    profiles::register(&mut catalogue);
     areas::register(&mut catalogue);
     grants::register(&mut catalogue);
     tree::register(&mut catalogue);
@@ -545,6 +547,25 @@ pub(crate) mod testing {
         Principal::Member {
             id,
             workspace_admin,
+            session: None,
+            token: None,
+        }
+    }
+
+    /// A signed-in Guest, created directly: Turtle cannot invite Guests yet.
+    /// A Guest has no Personal Area.
+    pub fn guest(core: &Core, name: &str) -> Principal {
+        let id = format!("guest-{}", name.to_lowercase());
+        core.db()
+            .execute(
+                "INSERT INTO members (id, email, name, password_hash, workspace_admin, guest, created_at)
+                 VALUES (?1, ?2, ?3, 'no password', 0, 1, 0)",
+                rusqlite::params![id, format!("{id}@example.org"), name],
+            )
+            .unwrap();
+        Principal::Member {
+            id,
+            workspace_admin: false,
             session: None,
             token: None,
         }
