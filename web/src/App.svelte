@@ -23,6 +23,7 @@
   import PageScreen from './screens/PageScreen.svelte'
   import PasswordResetScreen from './screens/PasswordResetScreen.svelte'
   import PdfStylesScreen from './screens/PdfStylesScreen.svelte'
+  import ProfileScreen from './screens/ProfileScreen.svelte'
   import SearchScreen from './screens/SearchScreen.svelte'
   import SetupScreen from './screens/SetupScreen.svelte'
   import SignInScreen from './screens/SignInScreen.svelte'
@@ -166,6 +167,10 @@
       {:else if route.screen === 'page'}
         {#key route.id}
           <PageScreen id={route.id} />
+        {/key}
+      {:else if route.screen === 'profile'}
+        {#key route.id}
+          <ProfileScreen id={route.id} />
         {/key}
       {:else if route.screen === 'trash'}
         {#key route.areaId}
