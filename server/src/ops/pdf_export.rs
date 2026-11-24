@@ -5,6 +5,7 @@ use super::export::{attachment_id, file_name_of, readable_subtree};
 use super::tree::{Entry, Kind};
 use super::{areas, attachments, fonts, links, pdf_styles};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
+use crate::directive;
 use crate::model::{Block, Inline, Marks};
 use crate::pdf;
 use base64::Engine;
@@ -77,6 +78,7 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
     let mut found = Found {
         in_pdf,
         outside: links::linked_titles(core, principal, &all_blocks)?,
+        names: links::mentioned_names(core, &all_blocks)?,
         public_url: core.public_url().map(|url| url.as_str().to_string()),
         attachment_names: HashMap::new(),
         images: HashMap::new(),
@@ -149,6 +151,8 @@ struct Found {
     /// The titles of other Pages the content links to that the exporter can read.
     outside: HashMap<String, String>,
     public_url: Option<String>,
+    /// The current names of the people the content mentions.
+    names: HashMap<String, String>,
     /// The names of the Attachments the content refers to that the exporter can read.
     attachment_names: HashMap<String, String>,
     /// Of those, the images the PDF can show, by their path in the document.
@@ -169,7 +173,12 @@ fn find_attachments(core: &Core, principal: &Principal, blocks: &[Block], found:
         Inline::Text { marks: Marks { link: Some(href), .. }, .. } => {
             referred.extend(attachment_id(href).map(String::from))
         }
-        Inline::Text { .. } | Inline::HardBreak | Inline::PageLink { .. } => {}
+        Inline::Text { .. }
+        | Inline::HardBreak
+        | Inline::PageLink { .. }
+        | Inline::Mention { .. }
+        | Inline::UnknownDirective { .. }
+        | Inline::Status { .. } => {}
     });
     let mut files = Vec::new();
     {
@@ -303,6 +312,7 @@ impl Chapter<'_> {
                 pdf::Block::Table { rows }
             }
             Block::HorizontalRule => pdf::Block::Rule,
+            Block::UnknownDirective { source } => pdf::Block::Unknown { name: directive_name(source) },
         };
         out.push(shown);
     }
@@ -353,8 +363,23 @@ impl Chapter<'_> {
                 let link = found.public_url.as_ref().map(|base| pdf::Link::Url(format!("{base}/p/{page_id}")));
                 Some(plain(title, link))
             }
+            // The name alone, in a rounded frame: the PDF shows no pictures of
+            // people and leads to no Profile (ADR-0012).
+            Inline::Mention { person_id } => {
+                found.names.get(person_id).map(|name| pdf::Inline::Mention { name: name.clone() })
+            }
+            Inline::UnknownDirective { source } => Some(pdf::Inline::Unknown { name: directive_name(source) }),
+            // Shown in uppercase, as in the app.
+            Inline::Status { text, color } => {
+                (!text.trim().is_empty()).then(|| pdf::Inline::Status { text: text.to_uppercase(), color: color.name() })
+            }
         }
     }
+}
+
+/// The name a directive Turtle does not know is shown by, as in the editor.
+fn directive_name(source: &str) -> String {
+    directive::name_of(source).unwrap_or_default().to_string()
 }
 
 fn plain(text: &str, link: Option<pdf::Link>) -> pdf::Inline {
@@ -374,9 +399,10 @@ fn plain_text(inlines: &[pdf::Inline]) -> String {
     let text: String = inlines
         .iter()
         .map(|inline| match inline {
-            pdf::Inline::Text { text, .. } => text.as_str(),
+            pdf::Inline::Text { text, .. } | pdf::Inline::Status { text, .. } => text.as_str(),
             pdf::Inline::Break => " ",
-            pdf::Inline::Image { .. } => "",
+            pdf::Inline::Image { .. } | pdf::Inline::Unknown { .. } => "",
+            pdf::Inline::Mention { name } => name.as_str(),
         })
         .collect();
     text.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -392,7 +418,7 @@ fn for_each_inline(blocks: &[Block], visit: &mut impl FnMut(&Inline)) {
             }
             Block::TaskList(items) => items.iter().for_each(|item| for_each_inline(&item.content, visit)),
             Block::Table(rows) => rows.iter().flatten().flatten().for_each(&mut *visit),
-            Block::CodeBlock { .. } | Block::HorizontalRule => {}
+            Block::CodeBlock { .. } | Block::HorizontalRule | Block::UnknownDirective { .. } => {}
         }
     }
 }
@@ -561,6 +587,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_directive_turtle_does_not_know_is_shown_as_a_placeholder_naming_it() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let markdown = "Plan :acme.demo[hi]{x=1} today.\n\n:::acme.board{x=1}\n- a\n:::\n";
+        page(&core, &grace, &area_id, None, "Board", markdown);
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        assert_eq!(
+            pages[2],
+            squashed("ENGINEERING Board Plan Unknown element: acme.demo today. Unknown element: acme.board 3")
+        );
+    }
+
+    #[test]
+    fn a_status_is_shown_as_a_marker_in_uppercase() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let markdown = "## Build :status[on track]{color=green}\n\n| Task | State |\n| - | - |\n| Ship | :status[late] |\n";
+        page(&core, &grace, &area_id, None, "Board", markdown);
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        // The contents name the Section by what it shows.
+        assert!(pages[1].contains(&squashed("Build ON TRACK")), "{}", pages[1]);
+        assert_eq!(pages[2], squashed("ENGINEERING Board Build ON TRACK TASK STATE Ship LATE 3"));
+    }
+
     /// A PNG of one pixel.
     const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
@@ -685,6 +742,22 @@ mod tests {
             link_targets(&exported),
             [format!("https://turtle.example.org/p/{overview}").as_str(), "page 3", "page 4"]
         );
+    }
+
+    #[test]
+    fn a_mention_shows_the_current_name_and_no_link() {
+        let mut core = fresh();
+        core.core.set_public_url(Some(crate::public_url::PublicUrl::parse("https://turtle.example.org").unwrap()));
+        let grace = member(&core, "Grace", false);
+        member(&core, "Ken", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Ask [@Kenneth](turtle:member/member-ken) or [@x](turtle:member/nobody).");
+
+        let exported = export_area(&core, &grace, &area_id);
+
+        assert_eq!(pages_of(&exported)[2], squashed("ENGINEERING Runbook Ask Ken or . 3"));
+        assert!(link_targets(&exported).iter().all(|target| target.starts_with("page ")));
+        assert_eq!(images_in(&exported), 0);
     }
 
     #[test]

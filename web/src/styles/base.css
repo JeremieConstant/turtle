@@ -242,6 +242,76 @@ dialog[open] {
 }
 
 /*
+ * A Status: its text in uppercase on its colour's fill. It breaks across
+ * lines like the words around it rather than being cut off.
+ */
+.status {
+  padding: var(--pad-status-y) var(--pad-status-x);
+  border-radius: var(--radius-s);
+  background: var(--status-fill);
+  color: var(--status-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-status);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Without text it still shows, so it can be found and clicked. */
+.status:empty {
+  padding: var(--pad-status-y) var(--pad-status-empty);
+}
+
+.status-grey {
+  --status-fill: var(--color-status-grey);
+  --status-text: var(--color-status-grey-text);
+}
+
+.status-blue {
+  --status-fill: var(--color-status-blue);
+  --status-text: var(--color-status-blue-text);
+}
+
+.status-green {
+  --status-fill: var(--color-status-green);
+  --status-text: var(--color-status-green-text);
+}
+
+.status-yellow {
+  --status-fill: var(--color-status-yellow);
+  --status-text: var(--color-status-yellow-text);
+}
+
+.status-red {
+  --status-fill: var(--color-status-red);
+  --status-text: var(--color-status-red-text);
+}
+
+.status-purple {
+  --status-fill: var(--color-status-purple);
+  --status-text: var(--color-status-purple-text);
+}
+
+/* One colour of a Status to choose, as its fill and text show it. */
+.status-swatch {
+  width: var(--size-tool);
+  height: var(--size-tool);
+  padding: 0;
+  border: var(--line) solid var(--status-text);
+  border-radius: var(--radius-s);
+  background: var(--status-fill);
+}
+
+/* The chosen colour carries a ring, so it shows without relying on colour. */
+.status-swatch[aria-checked='true'] {
+  box-shadow:
+    0 0 0 var(--line-thick) var(--color-surface),
+    0 0 0 calc(2 * var(--line-thick)) var(--status-text);
+}
+
+/*
  * The shared look of the settings screens (Members, Agents, Tokens), the
  * Grants of an Area and the screens outside the shell. These screens keep no
  * styles of their own.
@@ -455,6 +525,14 @@ dialog[open] {
 .item-name {
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
+}
+
+/* A person's mark beside their name and details in a row. */
+.item-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 .inactive .item-name {

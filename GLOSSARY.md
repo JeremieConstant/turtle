@@ -50,6 +50,14 @@ _Avoid_: Checklist, to-do list, todo
 A highlighted passage in a Page's content of one of four kinds: note, tip, warning or danger. In Markdown it is a quote whose first line is the kind's marker alone, such as `[!NOTE]`.
 _Avoid_: Admonition, alert, info box, panel
 
+**Directive**:
+A piece of a Page's content written in Markdown as `:name[text]{key=value}` in running text or as a block from `:::name{key=value}` to `:::`. Turtle's own have bare names, such as `status`; anyone else's carry a namespace, such as `acme.board`. One Turtle does not know is kept exactly as written and shown as a locked placeholder, "Unknown element: <name>", that can be moved and deleted but not edited.
+_Avoid_: Shortcode, macro, extension
+
+**Status**:
+A short coloured marker in the running text of a Page's content, holding any text in one of six colours: grey, blue, green, yellow, red or purple.
+_Avoid_: Chip, badge, lozenge, label
+
 **Table**:
 Rows of cells in a Page's content, the first row being the header; a cell holds text with formatting and links but no other blocks, and cells are never merged. In Markdown it is a table as GitHub writes them, with a `|` inside a cell written `\|`.
 _Avoid_: Grid, spreadsheet, matrix
@@ -88,7 +96,11 @@ _Avoid_: Label, category, keyword
 
 **Page link**:
 A link in a Page's content to another Page by its ID, shown with that Page's current title so renaming or moving it never breaks the link, and shown without title to someone who may not read it. In Markdown it is a link to the address `turtle:` followed by the Page's ID.
-_Avoid_: Internal link, wiki link, reference, mention
+_Avoid_: Internal link, wiki link, reference
+
+**Mention**:
+A reference in a Page's content to a Member or Guest by their ID, shown with their current picture and name and leading to their Profile; an Agent cannot be mentioned. Mentioning someone does not notify them.
+_Avoid_: User tag, user badge, @-link
 
 ### People and agents
 
@@ -99,6 +111,10 @@ _Avoid_: User, account, Nutzer
 **Guest**:
 An outside person with an account who is invited to specific Areas or Subtrees, can hold Read or Write but never Admin, and is not counted among "all Members".
 _Avoid_: External user, collaborator, visitor
+
+**Profile**:
+What Turtle shows others about a Member or Guest: their picture, name and email, and whether they are a Guest or a Workspace Admin. Only the person sets their picture, and a Workspace Admin may remove it; without one, their initials stand in. A Member sees everyone's Profile, a Guest only the Profiles of people who can reach an Area or Subtree the Guest can reach.
+_Avoid_: Account page, user page, About me
 
 **Workspace Admin**:
 A Member who manages the other Members and can see every Area except the Personal Areas of other active Members.

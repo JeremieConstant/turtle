@@ -2,7 +2,9 @@
 //!
 //! This is the common ground between the collaborative document (see `ydoc`)
 //! and Markdown (see `markdown`). It can only hold what Markdown can express
-//! (ADR-0006).
+//! (ADR-0006), extended by directives (ADR-0013).
+
+use crate::directive::{self, Directive};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Marks {
@@ -13,6 +15,20 @@ pub struct Marks {
     pub link: Option<String>,
 }
 
+/// An element of running text.
+///
+/// Page links, Mentions and unknown directives have no one plain-text form,
+/// because each reader of plain text needs a different one, and the
+/// differences are deliberate:
+/// - Search (`plain_text` here) leaves out titles, names and unknown
+///   directives: a linked title is not this Page's to give away, searching by
+///   mentioned person is not offered, and what an unknown directive means is
+///   unknown.
+/// - Matching a heading (`text_of` in `ops/content.rs`) uses the title and
+///   `@` and name the reader sees, as an Agent reads them in the Markdown.
+/// - Judging how alike two versions are (`plain_text` in `ydoc.rs`) uses the
+///   IDs and the source, which change exactly when the element does.
+/// - The PDF (`ops/pdf_export.rs`) draws each as an element of its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Inline {
     Text { text: String, marks: Marks },
@@ -24,16 +40,128 @@ pub enum Inline {
     /// the Page's current title, so renaming or moving the Page never breaks
     /// it, and with nothing to someone who may not read the Page.
     PageLink { page_id: String },
+    /// A Mention of a Member or Guest by their ID. Like a Page link it holds
+    /// no text: it is shown with the person's current name.
+    Mention { person_id: String },
+    /// A directive in the running text that Turtle does not know (ADR-0013),
+    /// such as `:acme.demo[hi]{x=1}`. It is kept exactly as it was written,
+    /// so a Page survives an installation that lacks the plugin it is from.
+    UnknownDirective { source: String },
+    /// A Status: a short coloured marker, written `:status[ON TRACK]{color=green}`.
+    /// Its text is kept as typed and shown in uppercase. It takes no
+    /// formatting, stays on one line and holds no `|`, which would end a
+    /// table cell.
+    Status { text: String, color: StatusColor },
+}
+
+/// The colours a Status comes in. They are named in the content; each theme
+/// and the PDF give them their own shades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusColor {
+    #[default]
+    Grey,
+    Blue,
+    Green,
+    Yellow,
+    Red,
+    Purple,
+}
+
+impl StatusColor {
+    pub const ALL: [StatusColor; 6] = [Self::Grey, Self::Blue, Self::Green, Self::Yellow, Self::Red, Self::Purple];
+
+    /// The name the colour is written and stored by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Grey => "grey",
+            Self::Blue => "blue",
+            Self::Green => "green",
+            Self::Yellow => "yellow",
+            Self::Red => "red",
+            Self::Purple => "purple",
+        }
+    }
+
+    /// The colour by its name; any other name is grey.
+    pub fn named(name: &str) -> Self {
+        Self::ALL.into_iter().find(|c| c.name() == name).unwrap_or_default()
+    }
+}
+
+/// The name of the Status directive, and its attribute naming the colour.
+/// They are the Markdown's names; the editor's schema has its own (in
+/// `ydoc.rs`), held to the web app by the editor contract, not to these.
+const STATUS: &str = "status";
+const STATUS_COLOR: &str = "color";
+
+/// A Status written as a directive.
+pub fn status_directive(text: &str, color: StatusColor) -> Directive {
+    Directive {
+        name: STATUS.to_string(),
+        label: Some(text.to_string()),
+        attributes: vec![(STATUS_COLOR.to_string(), color.name().to_string())],
+    }
 }
 
 /// How a Page link is written as a link address: `turtle:` and the Page's ID.
 pub const PAGE_ADDRESS_SCHEME: &str = "turtle:";
 
+/// How a Mention is written as a link address: `turtle:member/` and the
+/// person's ID (ADR-0013).
+pub const MEMBER_ADDRESS_SCHEME: &str = "turtle:member/";
+/// The inline element a directive written in running text stands for: one
+/// of Turtle's own, or one it does not know, kept as written. Nothing when
+/// the source is not exactly one directive.
+pub fn inline_directive(source: &str) -> Option<Inline> {
+    let (directive, len) = directive::inline_at(source)?;
+    (len == source.len())
+        .then(|| known_inline(&directive).unwrap_or_else(|| Inline::UnknownDirective { source: source.to_string() }))
+}
+
+/// The element one of Turtle's own directives in running text stands for.
+/// Their names are bare and reserved (ADR-0013); each is matched here by
+/// name. A namespaced one is never Turtle's.
+fn known_inline(directive: &Directive) -> Option<Inline> {
+    if directive.is_namespaced() {
+        return None;
+    }
+    match directive.name.as_str() {
+        STATUS => {
+            let color = directive.attributes.iter().find(|(key, _)| key == STATUS_COLOR);
+            Some(Inline::Status {
+                text: directive.label.clone().unwrap_or_default(),
+                color: color.map(|(_, name)| StatusColor::named(name)).unwrap_or_default(),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Whether the source is exactly one block directive Turtle does not know.
+pub fn is_unknown_block_directive(source: &str) -> bool {
+    directive::block_at(source).is_some_and(|(_, len)| len == source.len())
+}
+
 /// The ID of the Page a link address points at, when it is a Page link.
 pub fn page_id_of(address: &str) -> Option<&str> {
-    let id = address.strip_prefix(PAGE_ADDRESS_SCHEME)?;
-    let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    valid.then_some(id)
+    address.strip_prefix(PAGE_ADDRESS_SCHEME).filter(|id| is_id(id))
+}
+
+/// The ID of the person a link address mentions, when it is a Mention.
+pub fn person_id_of(address: &str) -> Option<&str> {
+    address.strip_prefix(MEMBER_ADDRESS_SCHEME).filter(|id| is_id(id))
+}
+
+/// The Page link or Mention a link address stands for, if it is either.
+pub fn turtle_link_of(address: &str) -> Option<Inline> {
+    if let Some(person_id) = person_id_of(address) {
+        return Some(Inline::Mention { person_id: person_id.to_string() });
+    }
+    page_id_of(address).map(|page_id| Inline::PageLink { page_id: page_id.to_string() })
+}
+
+fn is_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 // The variants are named as Markdown and the editor name them, so a code
@@ -56,6 +184,11 @@ pub enum Block {
     /// number of cells, and a cell holds inline content only.
     Table(Vec<Row>),
     HorizontalRule,
+    /// A block directive Turtle does not know (ADR-0013), from its opening
+    /// line such as `:::acme.board{x=1}` to its closing `:::`, kept exactly
+    /// as it was written. It stands only at the top of a Page's content,
+    /// never inside a list, quote or Callout.
+    UnknownDirective { source: String },
 }
 
 /// The cells of a table row, left to right.
@@ -104,11 +237,31 @@ pub struct TaskItem {
 /// empty paragraphs, line breaks at the edge of a block or inside a heading,
 /// and formatting combined with inline code.
 pub fn normalize(blocks: Vec<Block>) -> Vec<Block> {
-    blocks.into_iter().filter_map(normalize_block).collect()
+    blocks.into_iter().filter_map(|block| normalize_block(block, true)).collect()
 }
 
-fn normalize_block(block: Block) -> Option<Block> {
+/// As `normalize`, for the blocks inside a list, quote or Callout.
+fn normalize_nested(blocks: Vec<Block>) -> Vec<Block> {
+    blocks.into_iter().filter_map(|block| normalize_block(block, false)).collect()
+}
+
+fn normalize_block(block: Block, at_top: bool) -> Option<Block> {
     Some(match block {
+        // Markdown can only hold a block directive at the top of the content,
+        // so anywhere else, or when it is not one, its lines are kept as text.
+        Block::UnknownDirective { source } if at_top && is_unknown_block_directive(&source) => {
+            Block::UnknownDirective { source }
+        }
+        Block::UnknownDirective { source } => {
+            let mut lines = Vec::new();
+            for line in source.lines() {
+                if !lines.is_empty() {
+                    lines.push(Inline::HardBreak);
+                }
+                lines.push(Inline::Text { text: line.to_string(), marks: Marks::default() });
+            }
+            return normalize_block(Block::Paragraph(lines), at_top);
+        }
         Block::Paragraph(content) => {
             let content = normalize_inlines(content, false);
             if content.is_empty() {
@@ -126,13 +279,13 @@ fn normalize_block(block: Block) -> Option<Block> {
                 .filter(|l| !l.is_empty()),
             text: text.replace("\r\n", "\n").replace('\r', "\n"),
         },
-        Block::Blockquote(children) => Block::Blockquote(normalize(children)),
-        Block::Callout { kind, content } => Block::Callout { kind, content: normalize(content) },
+        Block::Blockquote(children) => Block::Blockquote(normalize_nested(children)),
+        Block::Callout { kind, content } => Block::Callout { kind, content: normalize_nested(content) },
         Block::BulletList(items) => {
             if items.is_empty() {
                 return None;
             }
-            Block::BulletList(items.into_iter().map(normalize).collect())
+            Block::BulletList(items.into_iter().map(normalize_nested).collect())
         }
         Block::OrderedList { start, items } => {
             if items.is_empty() {
@@ -140,7 +293,7 @@ fn normalize_block(block: Block) -> Option<Block> {
             }
             Block::OrderedList {
                 start: start.min(999_999_999),
-                items: items.into_iter().map(normalize).collect(),
+                items: items.into_iter().map(normalize_nested).collect(),
             }
         }
         Block::TaskList(items) => {
@@ -150,7 +303,7 @@ fn normalize_block(block: Block) -> Option<Block> {
             Block::TaskList(
                 items
                     .into_iter()
-                    .map(|item| TaskItem { checked: item.checked, content: normalize(item.content) })
+                    .map(|item| TaskItem { checked: item.checked, content: normalize_nested(item.content) })
                     .collect(),
             )
         }
@@ -178,28 +331,41 @@ fn normalize_block(block: Block) -> Option<Block> {
 
 fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
     let mut out: Vec<Inline> = Vec::new();
-    // The Page that the text just before links to, so one link stays one
-    // Page link where its formatting changes partway.
-    let mut linked_page: Option<String> = None;
+    // The Page link or Mention that the text just before links to, so one
+    // link stays one where its formatting changes partway.
+    let mut linked: Option<Inline> = None;
     for inline in inlines {
         let inline = match inline {
             Inline::HardBreak if in_heading => Inline::Text {
                 text: " ".into(),
                 marks: Marks::default(),
             },
+            // What is not exactly one directive is the text it says.
+            Inline::UnknownDirective { source } => {
+                inline_directive(&source).unwrap_or(Inline::Text { text: source, marks: Marks::default() })
+            }
             other => other,
         };
         match inline {
             Inline::HardBreak => {
-                linked_page = None;
+                linked = None;
                 out.push(Inline::HardBreak)
             }
-            Inline::PageLink { page_id } => {
-                linked_page = None;
-                out.push(Inline::PageLink { page_id })
+            link @ (Inline::PageLink { .. } | Inline::Mention { .. }) => {
+                linked = None;
+                out.push(link)
+            }
+            Inline::UnknownDirective { source } => {
+                linked = None;
+                out.push(Inline::UnknownDirective { source })
+            }
+            // A directive in running text stays on one line and holds no `|`.
+            Inline::Status { text, color } => {
+                linked = None;
+                out.push(Inline::Status { text: text.replace(['\n', '\r'], " ").replace('|', "/"), color })
             }
             Inline::Image { src, alt } => {
-                linked_page = None;
+                linked = None;
                 out.push(Inline::Image {
                     src: src.replace(['\n', '\r'], ""),
                     alt: alt.replace(['\n', '\r'], " "),
@@ -216,16 +382,17 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
                         ..Marks::default()
                     };
                 }
-                // Text linked to a Page is that Page link, however it is
-                // formatted; its words give way to the Page's title.
-                if let Some(page_id) = marks.link.as_deref().and_then(page_id_of) {
-                    if linked_page.as_deref() != Some(page_id) {
-                        out.push(Inline::PageLink { page_id: page_id.to_string() });
-                        linked_page = Some(page_id.to_string());
+                // Text linked to a Page or person is that Page link or
+                // Mention, however it is formatted; its words give way to the
+                // Page's title or the person's name.
+                if let Some(link) = marks.link.as_deref().and_then(turtle_link_of) {
+                    if linked.as_ref() != Some(&link) {
+                        out.push(link.clone());
+                        linked = Some(link);
                     }
                     continue;
                 }
-                linked_page = None;
+                linked = None;
                 match out.last_mut() {
                     Some(Inline::Text {
                         text: prev,
@@ -266,13 +433,42 @@ pub fn linked_pages(blocks: &[Block]) -> Vec<String> {
                 }
                 Block::TaskList(items) => items.iter().for_each(|item| collect(&item.content, out)),
                 Block::Table(rows) => rows.iter().flatten().for_each(|cell| inlines(cell, out)),
-                Block::CodeBlock { .. } | Block::HorizontalRule => {}
+                Block::CodeBlock { .. } | Block::HorizontalRule | Block::UnknownDirective { .. } => {}
             }
         }
     }
     let mut out = Vec::new();
     collect(blocks, &mut out);
     out
+}
+
+/// The IDs of the people the content mentions, each once, in order.
+pub fn mentioned_people(blocks: &[Block]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for_each_inline(blocks, &mut |inline| {
+        if let Inline::Mention { person_id } = inline {
+            if !out.contains(person_id) {
+                out.push(person_id.clone());
+            }
+        }
+    });
+    out
+}
+
+/// Calls `visit` with every inline element of the content, in order.
+fn for_each_inline(blocks: &[Block], visit: &mut dyn FnMut(&Inline)) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(content) | Block::Heading { content, .. } => content.iter().for_each(&mut *visit),
+            Block::Blockquote(children) | Block::Callout { content: children, .. } => for_each_inline(children, visit),
+            Block::BulletList(items) | Block::OrderedList { items, .. } => {
+                items.iter().for_each(|item| for_each_inline(item, visit))
+            }
+            Block::TaskList(items) => items.iter().for_each(|item| for_each_inline(&item.content, visit)),
+            Block::Table(rows) => rows.iter().flatten().flatten().for_each(&mut *visit),
+            Block::CodeBlock { .. } | Block::HorizontalRule | Block::UnknownDirective { .. } => {}
+        }
+    }
 }
 
 /// The words of the content without any formatting, one line per paragraph,
@@ -284,8 +480,16 @@ pub fn plain_text(blocks: &[Block]) -> String {
                 Inline::Text { text, .. } => out.push_str(text),
                 Inline::HardBreak => out.push('\n'),
                 Inline::Image { alt, .. } => out.push_str(alt),
-                // The linked Page's title is not this Page's to give away.
-                Inline::PageLink { .. } => out.push(' '),
+                // The linked Page's title is not this Page's to give away,
+                // and searching by mentioned person is not offered.
+                Inline::PageLink { .. } | Inline::Mention { .. } => out.push(' '),
+                // What a directive Turtle does not know means is unknown.
+                Inline::UnknownDirective { .. } => out.push(' '),
+                Inline::Status { text, .. } => {
+                    out.push(' ');
+                    out.push_str(text);
+                    out.push(' ');
+                }
             }
         }
         out.push('\n');
@@ -310,7 +514,7 @@ pub fn plain_text(blocks: &[Block]) -> String {
                     }
                 }
                 Block::Table(rows) => rows.iter().flatten().for_each(|cell| inlines(cell, out)),
-                Block::HorizontalRule => {}
+                Block::HorizontalRule | Block::UnknownDirective { .. } => {}
             }
         }
     }

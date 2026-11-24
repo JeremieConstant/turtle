@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { currentPerson, personColor, presenceLabel } from './person'
+import { currentPerson, personColor, pictureOf, presenceLabel } from './person'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -52,4 +52,26 @@ test('an app acting for a Member is named the way its changes are credited', () 
 
 test('a standalone Agent is recognisable as one', () => {
   expect(presenceLabel({ name: 'Release notes writer', agent: true })).toBe('Release notes writer (Agent)')
+})
+
+test('a person is sent with their ID, so the others can show their picture', () => {
+  vi.stubGlobal('sessionStorage', fakeSessionStorage())
+  expect(currentPerson('Ada', 'member-ada').id).toBe('member-ada')
+})
+
+test('a person present shows the picture of the Profile with their ID', () => {
+  const profiles = [
+    { id: 'member-ada', picture: '/api/profile_pictures/member-ada?v=1' },
+    { id: 'member-ken', picture: null },
+  ]
+  expect(pictureOf({ id: 'member-ada' }, profiles)).toBe('/api/profile_pictures/member-ada?v=1')
+  expect(pictureOf({ id: 'member-ken' }, profiles)).toBeNull()
+})
+
+test('a person present whose Profile the viewer does not see, or who sent no ID, shows no picture', () => {
+  const profiles = [{ id: 'member-ada', picture: '/api/profile_pictures/member-ada?v=1' }]
+  expect(pictureOf({ id: 'member-gus' }, profiles)).toBeNull()
+  expect(pictureOf({}, profiles)).toBeNull()
+  // What another browser sends is not trusted.
+  expect(pictureOf({ id: ['member-ada'] }, profiles)).toBeNull()
 })

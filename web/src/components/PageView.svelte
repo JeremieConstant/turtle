@@ -88,7 +88,7 @@
   })
 
   // The app shows Pages only to a signed-in Member.
-  const person = currentPerson(session.member?.name ?? 'Unknown')
+  const person = currentPerson(session.member?.name ?? 'Unknown', session.member?.id)
   const doc = new Y.Doc()
   const connection = new Connection(
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${encodeURIComponent(id)}`,
@@ -230,7 +230,7 @@
       <!-- The editor starts only once the stored content is here, so it never
            writes into an empty Page that is about to be filled. -->
       {#if loaded}
-        <Editor {doc} {connection} {person} {editable} attach={attachFile} onready={started => (editor = started)} />
+        <Editor {doc} {connection} {person} {editable} pageId={id} attach={attachFile} onready={started => (editor = started)} />
       {/if}
 
       <Attachments {attachments} writable={editable} onattach={files => files.forEach(file => void attachFile(file))} />

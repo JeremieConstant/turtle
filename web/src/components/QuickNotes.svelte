@@ -40,7 +40,7 @@
   }
 
   const unsaved = $derived(unsavedQuickNote(memberId))
-  const person = $derived(currentPerson(session.member?.name ?? ''))
+  const person = $derived(currentPerson(session.member?.name ?? '', session.member?.id))
   let title = $state('')
   let body = $state.raw<{ doc: Y.Doc; connection: { awareness: Awareness } }>(bodyFrom(''))
   let editor = $state.raw<TipTap | null>(null)

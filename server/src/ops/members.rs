@@ -5,7 +5,7 @@ use super::accounts::{
     check_password, digest, hash_password, random_hex, read_member, start_session, valid_email, valid_name,
     Member, Nothing,
 };
-use super::{Catalogue, Core, OpError, OpResult, Principal, Reply, SessionChange};
+use super::{profiles, Catalogue, Core, OpError, OpResult, Principal, Reply, SessionChange};
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,8 @@ pub struct MemberEntry {
     pub workspace_admin: bool,
     /// False once the Member has been deactivated.
     pub active: bool,
+    /// The address their Profile picture is shown from; absent without one.
+    pub picture: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -246,11 +248,14 @@ pub fn accept_invitation(core: &Core, _: &Principal, input: Joining) -> OpResult
     })
 }
 
-const ENTRY_COLUMNS: &str = "id, name, email, workspace_admin, deactivated_at IS NULL";
+const ENTRY_COLUMNS: &str = "id, name, email, workspace_admin, deactivated_at IS NULL, picture_hash";
 
 fn read_entry(row: &rusqlite::Row) -> rusqlite::Result<MemberEntry> {
+    let id: String = row.get(0)?;
+    let picture_hash: Option<String> = row.get(5)?;
     Ok(MemberEntry {
-        id: row.get(0)?,
+        picture: profiles::picture_address(&id, picture_hash.as_deref()),
+        id,
         name: row.get(1)?,
         email: row.get(2)?,
         workspace_admin: row.get(3)?,
@@ -380,6 +385,7 @@ fn require_workspace_admin(principal: &Principal) -> Result<(), OpError> {
 mod tests {
     use super::*;
     use crate::ops::accounts::{get_session, principal_for_session, sign_in, Credentials};
+    use crate::ops::profiles::{set_profile_picture, NewProfilePicture};
     use crate::ops::testing::{fresh, member};
     use crate::ops::{Reply, SessionChange};
 
@@ -452,7 +458,22 @@ mod tests {
             email: format!("{id}@example.org"),
             workspace_admin,
             active,
+            picture: None,
         }
+    }
+
+    #[test]
+    fn the_members_list_shows_each_members_picture() {
+        let core = fresh();
+        let admin = member(&core, "Ada", true);
+        let ken = member(&core, "Ken", false);
+        // A PNG of one green pixel.
+        let content = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+        let set = set_profile_picture(&core, &ken, NewProfilePicture { content: content.into() }).unwrap();
+
+        let list = list_members(&core, &admin, Nothing {}).unwrap().output;
+        let pictures: Vec<_> = list.members.into_iter().map(|entry| entry.picture).collect();
+        assert_eq!(pictures, [None, set.output.picture]);
     }
 
     #[test]

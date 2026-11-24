@@ -264,6 +264,21 @@ mod tests {
     }
 
     #[test]
+    fn a_page_is_found_by_the_text_of_its_statuses() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let engineering = area(&core, &grace, "Engineering");
+        let roadmap = page(&core, &grace, &engineering, "Roadmap");
+        page(&core, &grace, &engineering, "Holidays");
+
+        write(&core, &roadmap, "| Task | State |\n| - | - |\n| Build |:status[Blocked]{color=red}|\n");
+
+        assert_eq!(found(&core, &grace, "blocked"), ["Roadmap"]);
+        assert_eq!(found(&core, &grace, "build blocked"), ["Roadmap"]);
+        assert!(found(&core, &grace, "red").is_empty());
+    }
+
+    #[test]
     fn a_query_with_a_typo_still_finds_the_page() {
         let core = fresh();
         let grace = member(&core, "Grace", false);

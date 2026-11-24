@@ -1,8 +1,13 @@
 # Sourced by the scripts that build the server. Shells that skip the login
-# profile (agents, git hooks, GUI git clients) may not have cargo on PATH
-# even though rustup is installed, as with Homebrew's keg-only rustup.
-# rustup knows where its cargo is.
+# profile (agents, git hooks, GUI git clients) may not have cargo, or even
+# rustup, on PATH, as with Homebrew's keg-only rustup. rustup knows where
+# its cargo is.
 if ! command -v cargo >/dev/null; then
+  for dir in "$HOME/.cargo/bin" /opt/homebrew/opt/rustup/bin /usr/local/opt/rustup/bin; do
+    if ! command -v rustup >/dev/null && [ -x "$dir/rustup" ]; then
+      PATH="$dir:$PATH"
+    fi
+  done
   if command -v rustup >/dev/null; then
     PATH="$(dirname "$(rustup which cargo)"):$PATH"
   else

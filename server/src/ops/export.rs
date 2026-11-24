@@ -297,7 +297,12 @@ fn point_into_export(blocks: &mut [Block], from: &[String], addresses: &Addresse
                 *inline = Inline::Text { text: title.clone(), marks };
             }
         }
-        Inline::Text { .. } | Inline::HardBreak => {}
+        // A Mention stays one, as `[@Name](turtle:member/<ID>)`, for the import to read back.
+        Inline::Text { .. }
+        | Inline::HardBreak
+        | Inline::Mention { .. }
+        | Inline::UnknownDirective { .. }
+        | Inline::Status { .. } => {}
     });
 }
 
@@ -311,7 +316,7 @@ fn for_each_inline(blocks: &mut [Block], change: &mut impl FnMut(&mut Inline)) {
             }
             Block::TaskList(items) => items.iter_mut().for_each(|item| for_each_inline(&mut item.content, change)),
             Block::Table(rows) => rows.iter_mut().flatten().flatten().for_each(&mut *change),
-            Block::CodeBlock { .. } | Block::HorizontalRule => {}
+            Block::CodeBlock { .. } | Block::HorizontalRule | Block::UnknownDirective { .. } => {}
         }
     }
 }
@@ -462,6 +467,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn directives_turtle_does_not_know_are_exported_as_they_were_written() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let content = "Plan :acme.demo[hi *there*]{x=1} today.\n\n:::acme.board{x=1}\n- [ ] *odd*   spacing\n:::\n";
+        page(&core, &grace, &area_id, None, "Board", content);
+
+        let files = export_area(&core, &grace, &area_id);
+
+        assert!(files["Board.md"].ends_with(&format!("---\n\n{content}")), "{}", files["Board.md"]);
+    }
+
+    #[test]
+    fn statuses_are_exported_as_directives() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let content = "| Task | State |\n| --- | --- |\n| Build | :status[On track]{color=green} |\n| Ship | :status[Idle] |\n";
+        page(&core, &grace, &area_id, None, "Board", content);
+
+        let files = export_area(&core, &grace, &area_id);
+
+        let expected = "| Task | State |\n| --- | --- |\n| Build | :status[On track]{color=green} |\n| Ship | :status[Idle]{color=grey} |\n";
+        assert!(files["Board.md"].ends_with(&format!("---\n\n{expected}")), "{}", files["Board.md"]);
+    }
+
     /// The frontmatter line of a file that starts with the given key.
     fn frontmatter<'a>(file: &'a str, key: &str) -> &'a str {
         file.lines().find(|line| line.starts_with(&format!("{key}: "))).unwrap()
@@ -573,6 +605,21 @@ mod tests {
 
         assert!(files["Runbook.md"].ends_with("\nStart with [Set up](<Guides %231/Set up.md>).\n"));
         assert!(files["Guides #1/Set up.md"].ends_with("\nThen read [Runbook](<../Runbook.md>).\n"));
+    }
+
+    #[test]
+    fn a_mention_is_exported_with_the_current_name_and_reads_back_as_one() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        member(&core, "Ken", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Ask [@Kenny](turtle:member/member-ken).");
+
+        let files = export_area(&core, &grace, &area_id);
+
+        let written = "Ask [@Ken](turtle:member/member-ken).\n";
+        assert!(files["Runbook.md"].ends_with(&format!("\n{written}")));
+        assert_eq!(crate::markdown::to_markdown(&crate::markdown::from_markdown(written)), "Ask [@](turtle:member/member-ken).\n");
     }
 
     #[test]

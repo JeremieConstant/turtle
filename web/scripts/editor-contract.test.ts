@@ -20,7 +20,7 @@ import { expect, test, vi } from 'vitest'
 import * as Y from 'yjs'
 import { contentExtensions } from '../src/lib/extensions'
 
-// A Page link is followed through the router, which reads the address bar as
+// A Page link and a Mention are followed through the router, which reads the address bar as
 // it loads; the schema this test needs never follows one.
 vi.mock('../src/lib/router.svelte', () => ({ router: {} }))
 
@@ -58,6 +58,9 @@ const CONTENT = {
       text('.'),
     ),
     paragraph(text('With '), { type: 'image', attrs: { src: 'logo.png', alt: 'Logo' } }, text(' inline.')),
+    paragraph(text('A '), { type: 'unknownDirective', attrs: { source: ':acme.demo[hi]{x=1}' } }, text(' kept.')),
+    paragraph(text('Now '), { type: 'status', attrs: { text: 'On track', color: 'green' } }, text('.')),
+    { type: 'unknownDirectiveBlock', attrs: { source: ':::acme.board{x=1}\n- a\n:::' } },
     {
       type: 'bulletList',
       content: [
@@ -82,7 +85,7 @@ const CONTENT = {
       type: 'table',
       content: [
         row('tableHeader', [text('Name')], [text('Role', { type: 'bold' })]),
-        row('tableCell', [text('a | b')], []),
+        row('tableCell', [text('a | b')], [{ type: 'mention', attrs: { personId: 'm1' } }]),
       ],
     },
     { type: 'codeBlock', attrs: { language: 'rust' }, content: [text('fn main() {}')] },

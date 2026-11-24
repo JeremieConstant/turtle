@@ -250,6 +250,8 @@ export type MemberEntry = {
   email: string
   id: string
   name: string
+  /** The address their Profile picture is shown from; absent without one. */
+  picture?: string | null
   workspace_admin: boolean
 }
 
@@ -265,6 +267,21 @@ export type MembersToken = {
 export type MembersTokenList = {
   /** By Member name, then newest first. */
   tokens: MembersToken[]
+}
+
+export type MentionedPeople = {
+  /** The Members and Guests among those asked for that the caller may be
+told of, in the order asked, each once. */
+  people: MentionedPerson[]
+}
+
+export type MentionedPerson = {
+  id: string
+  /** Their current name. */
+  name: string
+  /** Their Profile, when the caller may see it; otherwise a Mention shows
+the name alone. */
+  profile?: Profile | null
 }
 
 export type MovedEntry = {
@@ -394,6 +411,32 @@ export type Place = {
   before_id?: string | null
   /** The Page or Folder it is beneath; the top of the Area if absent. */
   parent_id?: string | null
+}
+
+export type Profile = {
+  /** False once they have been deactivated; their Profile stays. */
+  active: boolean
+  email: string
+  /** An outside person invited to chosen Areas or Subtrees. */
+  guest: boolean
+  id: string
+  name: string
+  /** The address their picture is shown from, which changes whenever the
+picture does; absent without one, when their initials stand in. */
+  picture?: string | null
+  workspace_admin: boolean
+}
+
+export type ProfileList = {
+  /** By name, deactivated people included. */
+  profiles: Profile[]
+}
+
+export type ProfilePicture = {
+  /** The image, in base64. */
+  content: string
+  /** Always "image/png": Turtle stores the picture it made from the upload. */
+  content_type: string
 }
 
 export type QuickNote = {
@@ -738,6 +781,55 @@ export type Operations = {
     }
     output: Member
   }
+  /** Returns the Profile of a Member or Guest by ID: name, email, whether they are a Guest or Workspace Admin, and whether they are deactivated. A Guest sees only the Profiles of people who can reach an Area or Subtree the Guest can reach; Agents have no Profile. */
+  get_profile: {
+    input: {
+      /** The Member's or Guest's ID. */
+      id: string
+    }
+    output: Profile
+  }
+  /** Lists the Members and Guests whose Profiles the caller sees, by name, deactivated ones included. A Member sees everyone; a Guest only the people who can reach an Area or Subtree the Guest can reach. Agents have no Profile. */
+  list_profiles: {
+    input: Record<string, never>
+    output: ProfileList
+  }
+  /** Gets the current names of the Members and Guests that Mentions name, by ID, as Mentions show them: the name and Profile of someone whose Profile the caller sees, and the name alone of someone the given Page mentions. Anyone else is left out, as is an ID that names no Member or Guest, such as an Agent's. */
+  get_mentioned_people: {
+    input: {
+      /** The Page whose Mentions are being shown, which the caller must be
+able to read. Its Mentions are read as they are now, unsaved edits
+included. Absent for content that is in no Page yet. */
+      page_id?: string | null
+      /** The IDs of the Members and Guests, as Mentions name them. Only the first 500 count. */
+      person_ids: string[]
+    }
+    output: MentionedPeople
+  }
+  /** Sets the caller's own Profile picture, replacing any they had: a PNG, JPEG, GIF or WebP of at most 10 MB, its content in base64. Turtle keeps its middle square, scaled down. Nobody can set another person's picture; Agents have no Profile. */
+  set_profile_picture: {
+    input: {
+      /** A PNG, JPEG, GIF or WebP image, in base64. */
+      content: string
+    }
+    output: Profile
+  }
+  /** Removes the picture from a Profile, so their initials stand in again. For the person themselves, and for a Workspace Admin on anyone's Profile. */
+  remove_profile_picture: {
+    input: {
+      /** The Member's or Guest's ID. */
+      id: string
+    }
+    output: Profile
+  }
+  /** Returns the picture of a Member or Guest whose Profile the caller sees, as a PNG in base64. */
+  read_profile_picture: {
+    input: {
+      /** The Member's or Guest's ID. */
+      id: string
+    }
+    output: ProfilePicture
+  }
   /** Creates an Area. The caller becomes its Admin and is the only one with access. A standalone Agent, and a Token limited to chosen Areas, cannot. */
   create_area: {
     input: {
@@ -1007,14 +1099,14 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
     }
     output: MovedEntry
   }
-  /** Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. Needs the Read Role. */
+  /** Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. A Mention of a Member or Guest is written as [@Name](turtle:member/ID), with their current name. Needs the Read Role. */
   get_page_markdown: {
     input: {
       page_id: string
     }
     output: PageMarkdown
   }
-  /** Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
+  /** Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Likewise [@Name](turtle:member/ID) mentions the Member or Guest with that ID, as list_profiles gives it, and always shows their current name. A Status, a short coloured marker, is written `:status[ON TRACK]{color=green}`, in grey, blue, green, yellow, red or purple, and grey without a color. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
   replace_page: {
     input: {
       markdown: string
@@ -1027,7 +1119,7 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
     input: {
       /** The text of the Section's heading, without the leading `#`s, and with a
 Page link in it written as its title, as in "See Setup" for
-`## See [Setup](turtle:ID)`. */
+`## See [Setup](turtle:ID)`, and a Status as its text. */
       heading: string
       /** What replaces the Section, heading included. */
       markdown: string

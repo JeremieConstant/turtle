@@ -14,6 +14,8 @@ Every capability is an operation in `server/src/ops` (ADR-0005), and every permi
 
 Something the caller may not read answers exactly like something that does not exist: same error kind, same message, and nothing in the message that came from it.
 
+This covers people as much as Pages: a Profile, a person's name and their picture reach only those who may see that Profile, except where the spec names the exception. A comment in the code explaining a wider rule does not make one.
+
 `permissions::role_on` is where reading is decided. A reader that decides it some other way, such as the search index through `readable_through` and `governing_node`, or `list_tags`, applies every exclusion `role_on` makes itself, such as leaving out what is in the Trash.
 
 ## Messages are for people

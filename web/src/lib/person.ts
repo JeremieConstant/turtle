@@ -4,7 +4,7 @@
  * number is sent, not the colour, so the others show it in their own
  * appearance and everyone still names it the same.
  */
-export type Person = { name: string; colorNumber: number }
+export type Person = { name: string; colorNumber: number; id?: string }
 
 /**
  * Who is on a Page as the others see them: a person, or an Agent that just
@@ -26,9 +26,25 @@ export function presenceLabel(present: { name: string; agent: true; member?: str
 const PERSON_COLORS = 6
 const KEY = 'turtle-color-number'
 
-/** A signed-in Member as the others see them: their name, and a colour that lasts for the browser session. */
-export function currentPerson(name: string): Person {
-  return { name, colorNumber: sessionColorNumber() }
+/**
+ * A signed-in Member as the others see them: their name, a colour that lasts
+ * for the browser session, and their ID, by which the others find their picture.
+ */
+export function currentPerson(name: string, id?: string): Person {
+  return { name, colorNumber: sessionColorNumber(), ...(id ? { id } : {}) }
+}
+
+/**
+ * The picture to show a person present by: that of the Profile with the ID
+ * they sent, among those the viewer sees. The address comes from the
+ * viewer's own Profiles, never from another browser.
+ */
+export function pictureOf(
+  present: { id?: unknown },
+  profiles: readonly { id: string; picture?: string | null }[],
+): string | null {
+  if (typeof present.id !== 'string') return null
+  return profiles.find(profile => profile.id === present.id)?.picture ?? null
 }
 
 /**

@@ -7,7 +7,7 @@
 //! fixtures in `tests/fixtures`.
 
 use crate::diff::{align, common_edges, text_hunks, Fit, Step};
-use crate::model::{normalize, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem};
+use crate::model::{normalize, Block, CalloutKind, Cell, Inline, Marks, Row, StatusColor, TaskItem};
 use std::collections::HashMap;
 use std::sync::Arc;
 use yrs::types::text::YChange;
@@ -22,6 +22,9 @@ const FRAGMENT: &str = "default";
 /// The element a Page link is stored as, and its attribute naming the Page.
 const PAGE_LINK: &str = "pageLink";
 const PAGE_ID: &str = "pageId";
+/// The element a Mention is stored as, and its attribute naming the person.
+const MENTION: &str = "mention";
+const PERSON_ID: &str = "personId";
 /// The elements a task list and its items are stored as, and whether an item is checked.
 const TASK_LIST: &str = "taskList";
 const TASK_ITEM: &str = "taskItem";
@@ -35,6 +38,15 @@ const TABLE: &str = "table";
 const TABLE_ROW: &str = "tableRow";
 const TABLE_HEADER: &str = "tableHeader";
 const TABLE_CELL: &str = "tableCell";
+/// The elements a directive Turtle does not know is stored as, in running
+/// text and as a block, and their attribute holding its source.
+const UNKNOWN_DIRECTIVE: &str = "unknownDirective";
+const UNKNOWN_DIRECTIVE_BLOCK: &str = "unknownDirectiveBlock";
+const SOURCE: &str = "source";
+/// The element a Status is stored as, and its attributes.
+const STATUS: &str = "status";
+const STATUS_TEXT: &str = "text";
+const STATUS_COLOR: &str = "color";
 
 /// The content of a Page from its stored state.
 pub fn read_state(state: &[u8]) -> anyhow::Result<Vec<Block>> {
@@ -96,8 +108,9 @@ fn read_blocks<T: ReadTxn>(txn: &T, nodes: impl Iterator<Item = XmlOut>) -> Vec<
                     .map(|inline| match inline {
                         Inline::Text { text, .. } => text,
                         Inline::HardBreak => "\n".to_string(),
-                        Inline::Image { .. } => String::new(),
-                        Inline::PageLink { .. } => String::new(),
+                        Inline::Image { .. } | Inline::PageLink { .. } | Inline::Mention { .. } => String::new(),
+                        Inline::UnknownDirective { source } => source,
+                        Inline::Status { text, .. } => text,
                     })
                     .collect(),
             }),
@@ -119,6 +132,9 @@ fn read_blocks<T: ReadTxn>(txn: &T, nodes: impl Iterator<Item = XmlOut>) -> Vec<
             )),
             TABLE => blocks.push(Block::Table(read_rows(txn, &element))),
             "horizontalRule" => blocks.push(Block::HorizontalRule),
+            UNKNOWN_DIRECTIVE_BLOCK => blocks.push(Block::UnknownDirective {
+                source: string_attribute(txn, &element, SOURCE).unwrap_or_default(),
+            }),
             // An element this version does not know keeps its content.
             _ => blocks.extend(read_blocks(txn, element.children(txn))),
         }
@@ -200,10 +216,40 @@ fn read_inlines<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Inline> {
                     inlines.push(Inline::PageLink { page_id });
                 }
             }
+            XmlOut::Element(child) if child.tag().as_ref() == MENTION => {
+                if let Some(person_id) = string_attribute(txn, &child, PERSON_ID) {
+                    inlines.push(Inline::Mention { person_id });
+                }
+            }
+            XmlOut::Element(child) if child.tag().as_ref() == UNKNOWN_DIRECTIVE => {
+                if let Some(source) = string_attribute(txn, &child, SOURCE) {
+                    inlines.push(Inline::UnknownDirective { source });
+                }
+            }
+            XmlOut::Element(child) if child.tag().as_ref() == STATUS => inlines.push(read_status(txn, &child)),
             _ => {}
         }
     }
     inlines
+}
+
+/// A Status as the editor stores it: a `status` element with its text and
+/// the name of its colour as attributes.
+fn read_status<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Inline {
+    Inline::Status {
+        text: string_attribute(txn, element, STATUS_TEXT).unwrap_or_default(),
+        color: string_attribute(txn, element, STATUS_COLOR).map(|name| StatusColor::named(&name)).unwrap_or_default(),
+    }
+}
+
+/// Gives a stored Status the text and colour it does not have yet.
+fn set_status(txn: &mut TransactionMut, element: &XmlElementRef, text: &str, color: StatusColor) {
+    if string_attribute(txn, element, STATUS_TEXT).as_deref() != Some(text) {
+        element.insert_attribute(txn, STATUS_TEXT, Any::from(text));
+    }
+    if string_attribute(txn, element, STATUS_COLOR).as_deref() != Some(color.name()) {
+        element.insert_attribute(txn, STATUS_COLOR, Any::from(color.name()));
+    }
 }
 
 /// An image as the editor stores it: an `image` element with its address and
@@ -339,6 +385,7 @@ fn tag_for(block: &Block) -> &'static str {
         Block::TaskList(_) => TASK_LIST,
         Block::Table(_) => TABLE,
         Block::HorizontalRule => "horizontalRule",
+        Block::UnknownDirective { .. } => UNKNOWN_DIRECTIVE_BLOCK,
     }
 }
 
@@ -358,6 +405,9 @@ fn plain_text(blocks: &[Block]) -> Vec<char> {
                 Inline::HardBreak => out.push('\n'),
                 Inline::Image { alt, .. } => out.extend(alt.chars()),
                 Inline::PageLink { page_id } => out.extend(page_id.chars()),
+                Inline::Mention { person_id } => out.extend(person_id.chars()),
+                Inline::UnknownDirective { source } => out.extend(source.chars()),
+                Inline::Status { text, .. } => out.extend(text.chars()),
             }
         }
     }
@@ -378,6 +428,7 @@ fn plain_text(blocks: &[Block]) -> Vec<char> {
                 }
                 Block::TaskList(items) => items.iter().for_each(|item| collect(&item.content, out)),
                 Block::HorizontalRule => {}
+                Block::UnknownDirective { source } => out.extend(source.chars()),
             }
             out.push('\n');
         }
@@ -442,6 +493,11 @@ fn update_block(txn: &mut TransactionMut, element: &XmlElementRef, block: &Block
         Block::TaskList(items) => diff_items(txn, element, &task_items(items)),
         Block::Table(rows) => diff_rows(txn, element, rows),
         Block::HorizontalRule => {}
+        Block::UnknownDirective { source } => {
+            if string_attribute(txn, element, SOURCE).as_ref() != Some(source) {
+                element.insert_attribute(txn, SOURCE, Any::from(source.as_str()));
+            }
+        }
     }
 }
 
@@ -659,6 +715,9 @@ enum Part<'a> {
     Break,
     Image { src: &'a str, alt: &'a str },
     PageLink(&'a str),
+    Mention(&'a str),
+    UnknownDirective(&'a str),
+    Status { text: &'a str, color: StatusColor },
 }
 
 fn parts(inlines: &[Inline]) -> Vec<Part<'_>> {
@@ -668,6 +727,9 @@ fn parts(inlines: &[Inline]) -> Vec<Part<'_>> {
             (Inline::HardBreak, _) => parts.push(Part::Break),
             (Inline::Image { src, alt }, _) => parts.push(Part::Image { src, alt }),
             (Inline::PageLink { page_id }, _) => parts.push(Part::PageLink(page_id)),
+            (Inline::Mention { person_id }, _) => parts.push(Part::Mention(person_id)),
+            (Inline::UnknownDirective { source }, _) => parts.push(Part::UnknownDirective(source)),
+            (Inline::Status { text, color }, _) => parts.push(Part::Status { text, color: *color }),
             (Inline::Text { text, marks }, Some(Part::Run(run))) => run.push((text, marks)),
             (Inline::Text { text, marks }, _) => parts.push(Part::Run(vec![(text, marks)])),
         }
@@ -685,6 +747,12 @@ enum Child {
     /// A Page link, by the ID of its Page; without one it is not a Page link
     /// anyone can follow, and is removed like any other unwanted child.
     PageLink(Option<String>),
+    /// A Mention, by the ID of the person; without one it is removed.
+    Mention(Option<String>),
+    /// A directive Turtle does not know, by its source.
+    UnknownDirective(Option<String>),
+    /// A Status, changed in place when its text or colour changes.
+    Status(XmlElementRef),
     /// Something this version does not know. It is left alone.
     Other,
 }
@@ -697,7 +765,14 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
         .iter()
         .map(|part| match part {
             Part::Run(run) => run.iter().flat_map(|(text, _)| text.chars()).collect(),
-            Part::Break | Part::Image { .. } | Part::PageLink(_) => Vec::new(),
+            Part::Break
+            | Part::Image { .. }
+            | Part::PageLink(_)
+            | Part::Mention(_)
+            | Part::UnknownDirective(_)
+            | Part::Status { .. } => {
+                Vec::new()
+            }
         })
         .collect();
     let children: Vec<Child> = element
@@ -713,6 +788,13 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
             XmlOut::Element(child) if child.tag().as_ref() == PAGE_LINK => {
                 Child::PageLink(string_attribute(txn, &child, PAGE_ID))
             }
+            XmlOut::Element(child) if child.tag().as_ref() == MENTION => {
+                Child::Mention(string_attribute(txn, &child, PERSON_ID))
+            }
+            XmlOut::Element(child) if child.tag().as_ref() == UNKNOWN_DIRECTIVE => {
+                Child::UnknownDirective(string_attribute(txn, &child, SOURCE))
+            }
+            XmlOut::Element(child) if child.tag().as_ref() == STATUS => Child::Status(child),
             _ => Child::Other,
         })
         .collect();
@@ -731,6 +813,15 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                 Fit::Same(1)
             }
             (Child::PageLink(Some(has)), Part::PageLink(wanted)) if has == wanted => Fit::Same(1),
+            (Child::Mention(Some(has)), Part::Mention(wanted)) if has == wanted => Fit::Same(1),
+            (Child::UnknownDirective(Some(has)), Part::UnknownDirective(wanted)) if has == wanted => Fit::Same(1),
+            (Child::Status(status), Part::Status { text, color }) => {
+                if read_status(txn, status) == (Inline::Status { text: text.to_string(), color: *color }) {
+                    Fit::Same(1)
+                } else {
+                    Fit::Similar(1)
+                }
+            }
             _ => Fit::No,
         },
         |i| matches!(children[i], Child::Other),
@@ -743,6 +834,9 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                 if let (Child::Text(text, Some(said)), Part::Run(run)) = (&children[i], &target[j])
                 {
                     diff_text(txn, text, said, run, &new_text[j]);
+                }
+                if let (Child::Status(status), Part::Status { text, color }) = (&children[i], &target[j]) {
+                    set_status(txn, status, text, *color);
                 }
                 at += 1;
             }
@@ -765,6 +859,18 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                     Part::PageLink(page_id) => {
                         let link = element.insert(txn, at, XmlElementPrelim::empty(PAGE_LINK));
                         link.insert_attribute(txn, PAGE_ID, Any::from(*page_id));
+                    }
+                    Part::Mention(person_id) => {
+                        let mention = element.insert(txn, at, XmlElementPrelim::empty(MENTION));
+                        mention.insert_attribute(txn, PERSON_ID, Any::from(*person_id));
+                    }
+                    Part::UnknownDirective(source) => {
+                        let directive = element.insert(txn, at, XmlElementPrelim::empty(UNKNOWN_DIRECTIVE));
+                        directive.insert_attribute(txn, SOURCE, Any::from(*source));
+                    }
+                    Part::Status { text, color } => {
+                        let status = element.insert(txn, at, XmlElementPrelim::empty(STATUS));
+                        set_status(txn, &status, text, *color);
                     }
                 }
                 at += 1;
@@ -943,6 +1049,9 @@ fn insert_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, index: u32
             }
         }
         Block::HorizontalRule => {}
+        Block::UnknownDirective { source } => {
+            element.insert_attribute(txn, SOURCE, Any::from(source.as_str()));
+        }
     }
 }
 
@@ -1079,6 +1188,104 @@ mod tests {
         let Some(XmlOut::Element(link)) = paragraph.get(&txn, 1) else { panic!("no Page link") };
         assert_eq!(link.tag().as_ref(), "pageLink");
         assert_eq!(string_attribute(&txn, &link, "pageId").as_deref(), Some("a1b2"));
+        drop(txn);
+        assert_eq!(read(&doc), blocks);
+    }
+
+    #[test]
+    fn a_status_is_stored_as_the_editors_status_with_its_text_and_colour() {
+        let blocks = from_markdown("| Task | State |\n| - | - |\n| Build | :status[On track]{color=green} |\n");
+        let doc = Doc::new();
+        write(&doc, &blocks);
+
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = doc.transact();
+        let status = (|| {
+            let XmlOut::Element(table) = fragment.get(&txn, 0)? else { return None };
+            let XmlOut::Element(row) = table.get(&txn, 1)? else { return None };
+            let XmlOut::Element(cell) = row.get(&txn, 1)? else { return None };
+            let XmlOut::Element(paragraph) = cell.get(&txn, 0)? else { return None };
+            let XmlOut::Element(status) = paragraph.get(&txn, 0)? else { return None };
+            Some(status)
+        })()
+        .expect("no status in the cell");
+        assert_eq!(status.tag().as_ref(), "status");
+        assert_eq!(string_attribute(&txn, &status, "text").as_deref(), Some("On track"));
+        assert_eq!(string_attribute(&txn, &status, "color").as_deref(), Some("green"));
+        drop(txn);
+        assert_eq!(read(&doc), blocks);
+    }
+
+    #[test]
+    fn a_status_changed_by_an_agent_keeps_what_a_person_types_beside_it() {
+        let server = Doc::new();
+        write(&server, &from_markdown("Build :status[On track]{color=green} now\n"));
+        let editor = replica(&server);
+
+        let typed = type_into(&editor, 0, "Build ".len() as u32, "it ");
+        let written = write(&server, &from_markdown("Build :status[Late]{color=red} now\n")).unwrap();
+        apply(&server, &typed);
+        apply(&editor, &written);
+
+        let expected = "Build it :status[Late]{color=red} now\n";
+        assert_eq!(to_markdown(&read(&server)), expected);
+        assert_eq!(to_markdown(&read(&editor)), expected);
+    }
+
+    #[test]
+    fn an_unknown_directive_is_stored_as_the_editors_placeholder_holding_its_source() {
+        let blocks = from_markdown("See :acme.demo[hi]{x=1} here.\n\n:::acme.board{x=1}\n- a\n:::\n");
+        let doc = Doc::new();
+        write(&doc, &blocks);
+
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = doc.transact();
+        let Some(XmlOut::Element(paragraph)) = fragment.get(&txn, 0) else { panic!("no paragraph") };
+        let Some(XmlOut::Element(inline)) = paragraph.get(&txn, 1) else { panic!("no inline directive") };
+        assert_eq!(inline.tag().as_ref(), "unknownDirective");
+        assert_eq!(string_attribute(&txn, &inline, "source").as_deref(), Some(":acme.demo[hi]{x=1}"));
+        let Some(XmlOut::Element(block)) = fragment.get(&txn, 1) else { panic!("no block directive") };
+        assert_eq!(block.tag().as_ref(), "unknownDirectiveBlock");
+        assert_eq!(string_attribute(&txn, &block, "source").as_deref(), Some(":::acme.board{x=1}\n- a\n:::"));
+        drop(txn);
+        assert_eq!(read(&doc), blocks);
+    }
+
+    #[test]
+    fn unknown_directives_stay_while_an_agent_and_a_person_edit_around_them() {
+        let server = Doc::new();
+        let before = "Plan :acme.demo[hi]{x=1} for today.\n\n:::acme.board\n:::\n\nNotes\n";
+        write(&server, &from_markdown(before));
+        let editor = replica(&server);
+
+        // A person types in the last paragraph while an Agent rewrites the first.
+        let typed = type_into(&editor, 2, "Notes".len() as u32, " and more");
+        let written =
+            write(&server, &from_markdown("Our plan :acme.demo[hi]{x=1} for tomorrow.\n\n:::acme.board\n:::\n\nNotes\n"))
+                .unwrap();
+        apply(&server, &typed);
+        apply(&editor, &written);
+
+        let expected = "Our plan :acme.demo[hi]{x=1} for tomorrow.\n\n:::acme.board\n:::\n\nNotes and more\n";
+        assert_eq!(to_markdown(&read(&server)), expected);
+        assert_eq!(to_markdown(&read(&editor)), expected);
+    }
+
+    #[test]
+    fn a_mention_is_stored_as_the_editors_mention_node_naming_the_person() {
+        let blocks = from_markdown("| Owner |\n| --- |\n| [@Ada](turtle:member/m1) |");
+        let doc = Doc::new();
+        write(&doc, &blocks);
+
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = doc.transact();
+        let Some(XmlOut::Element(table)) = fragment.get(&txn, 0) else { panic!("no table") };
+        let Some(XmlOut::Element(row)) = table.get(&txn, 1) else { panic!("no second row") };
+        let Some(XmlOut::Element(cell)) = row.get(&txn, 0) else { panic!("no cell") };
+        let Some(XmlOut::Element(paragraph)) = cell.get(&txn, 0) else { panic!("no paragraph") };
+        let Some(XmlOut::Element(mention)) = paragraph.get(&txn, 0) else { panic!("no Mention") };
+        assert_eq!(mention.tag().as_ref(), "mention");
+        assert_eq!(string_attribute(&txn, &mention, "personId").as_deref(), Some("m1"));
         drop(txn);
         assert_eq!(read(&doc), blocks);
     }
@@ -1567,6 +1774,7 @@ mod tests {
                 Block::Table(rows)
             }
             Block::HorizontalRule => Block::HorizontalRule,
+            Block::UnknownDirective { source } => Block::UnknownDirective { source: source.clone() },
         }
     }
 

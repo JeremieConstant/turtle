@@ -23,6 +23,7 @@ pub mod moves;
 pub mod pdf_export;
 pub mod pdf_styles;
 pub mod permissions;
+pub mod profiles;
 pub mod quick_notes;
 pub mod search;
 pub mod tags;
@@ -61,6 +62,7 @@ pub struct Core {
     /// Where uploaded font files are kept, each under the hash of its
     /// content. Apart from the Attachments, whose clean-up would remove them.
     fonts: std::path::PathBuf,
+    profile_pictures: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
     /// The address Turtle is reached at from outside. OAuth is offered only
@@ -98,6 +100,7 @@ impl Core {
             attachments: db_path.with_file_name("attachments"),
             pdf_logos: db_path.with_file_name("pdf-logos"),
             fonts: db_path.with_file_name("fonts"),
+            profile_pictures: db_path.with_file_name("profile-pictures"),
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             public_url: None,
             resolve: intranet::system_resolver(),
@@ -150,6 +153,11 @@ impl Core {
     /// Where the files of PDF Styles' logos are kept.
     pub fn pdf_logos_dir(&self) -> &Path {
         &self.pdf_logos
+    }
+
+    /// Where the files of Profile pictures are kept.
+    pub fn profile_pictures_dir(&self) -> &Path {
+        &self.profile_pictures
     }
 
     /// Where uploaded font files are kept.
@@ -483,6 +491,7 @@ pub fn catalogue() -> Catalogue {
     agents::register(&mut catalogue);
     attachments::register(&mut catalogue);
     members::register(&mut catalogue);
+    profiles::register(&mut catalogue);
     areas::register(&mut catalogue);
     grants::register(&mut catalogue);
     tree::register(&mut catalogue);
@@ -545,6 +554,25 @@ pub(crate) mod testing {
         Principal::Member {
             id,
             workspace_admin,
+            session: None,
+            token: None,
+        }
+    }
+
+    /// A signed-in Guest, created directly: Turtle cannot invite Guests yet.
+    /// A Guest has no Personal Area.
+    pub fn guest(core: &Core, name: &str) -> Principal {
+        let id = format!("guest-{}", name.to_lowercase());
+        core.db()
+            .execute(
+                "INSERT INTO members (id, email, name, password_hash, workspace_admin, guest, created_at)
+                 VALUES (?1, ?2, ?3, 'no password', 0, 1, 0)",
+                rusqlite::params![id, format!("{id}@example.org"), name],
+            )
+            .unwrap();
+        Principal::Member {
+            id,
+            workspace_admin: false,
             session: None,
             token: None,
         }

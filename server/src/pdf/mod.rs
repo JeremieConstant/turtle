@@ -139,6 +139,7 @@ impl Language {
                 tip: "Tip",
                 warning: "Warning",
                 danger: "Danger",
+                unknown_element: "Unknown element",
             },
             Language::German => Labels {
                 contents: "Inhalt",
@@ -147,6 +148,7 @@ impl Language {
                 tip: "Tipp",
                 warning: "Warnung",
                 danger: "Gefahr",
+                unknown_element: "Unbekanntes Element",
             },
         }
     }
@@ -177,6 +179,8 @@ struct Labels {
     tip: &'static str,
     warning: &'static str,
     danger: &'static str,
+    /// What a placeholder for a directive Turtle does not know says before its name.
+    unknown_element: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,6 +315,8 @@ pub enum Block {
     /// The first row is the header; every row has as many cells as it.
     Table { rows: Vec<Vec<Vec<Inline>>> },
     Rule,
+    /// A block directive Turtle does not know, shown as a placeholder naming it.
+    Unknown { name: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -326,6 +332,12 @@ pub enum Inline {
     Break,
     /// One of the document's images.
     Image { path: String, alt: String },
+    /// A Mention, drawn with the person's name in a rounded frame.
+    Mention { name: String },
+    /// A directive Turtle does not know, shown as a placeholder naming it.
+    Unknown { name: String },
+    /// A Status, by the text it shows and the name of its colour.
+    Status { text: String, color: &'static str },
 }
 
 #[derive(Debug, Serialize)]

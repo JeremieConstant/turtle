@@ -2,27 +2,44 @@
 //!
 //! The contract: for any normalised content `c`,
 //! `from_markdown(&to_markdown(&c)) == c`.
+//!
+//! Beyond CommonMark and GitHub's tables, task lists and strikethrough, it
+//! reads and writes directives (ADR-0013), see `directive`. A directive
+//! Turtle does not know is read as its source and written back unchanged.
 
-use crate::model::{normalize, page_id_of, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem, PAGE_ADDRESS_SCHEME};
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use crate::directive;
+use crate::model::{
+    inline_directive, normalize, status_directive, turtle_link_of, Block, CalloutKind, Cell, Inline, Marks, Row,
+    TaskItem, MEMBER_ADDRESS_SCHEME, PAGE_ADDRESS_SCHEME,
+};
+use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 
 // ---------------------------------------------------------------------------
 // Content -> Markdown
 // ---------------------------------------------------------------------------
 
-/// The title a Page link shows for the Page with the given ID, or None when
-/// it shows none, because the reader may not read that Page.
-pub type Titles<'a> = &'a dyn Fn(&str) -> Option<String>;
-
-/// The Markdown of some content, with Page links shown without titles.
-pub fn to_markdown(blocks: &[Block]) -> String {
-    to_markdown_with_titles(blocks, &|_| None)
+/// What a Page link or Mention points at, by ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Linked<'a> {
+    Page(&'a str),
+    Person(&'a str),
 }
 
-/// The Markdown of some content, with each Page link shown with the title
-/// `titles` gives it. Reading it back ignores those titles.
-pub fn to_markdown_with_titles(blocks: &[Block], titles: Titles) -> String {
-    let mut out = render_blocks(blocks, "\n\n", None, titles);
+/// The text a Page link or Mention shows: a Page's title, or None when the
+/// reader may not read that Page; a person's current name, or None when
+/// there is no such Member or Guest.
+pub type LinkTexts<'a> = &'a dyn Fn(Linked) -> Option<String>;
+
+/// The Markdown of some content, with Page links and Mentions shown without
+/// titles or names.
+pub fn to_markdown(blocks: &[Block]) -> String {
+    to_markdown_with_link_texts(blocks, &|_| None)
+}
+
+/// The Markdown of some content, with each Page link and Mention shown with
+/// the text `link_texts` gives it. Reading it back ignores that text.
+pub fn to_markdown_with_link_texts(blocks: &[Block], link_texts: LinkTexts) -> String {
+    let mut out = render_blocks(blocks, "\n\n", None, link_texts);
     if !out.is_empty() {
         out.push('\n');
     }
@@ -30,7 +47,7 @@ pub fn to_markdown_with_titles(blocks: &[Block], titles: Titles) -> String {
 }
 
 /// `parent_bullet` is the marker of the list item these blocks sit in, if any.
-fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>, titles: Titles) -> String {
+fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>, link_texts: LinkTexts) -> String {
     let mut parts: Vec<String> = Vec::new();
     // Two lists of the same kind in a row would merge into one when read back,
     // so the second one switches to the other marker. A list that opens an
@@ -41,12 +58,12 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
         let mut bullet = None;
         let mut delimiter = None;
         let rendered = match block {
-            Block::Paragraph(_) | Block::Heading { .. } => render_inline_block(block, titles),
+            Block::Paragraph(_) | Block::Heading { .. } => render_inline_block(block, link_texts),
             Block::CodeBlock { language, text } => render_code_block(language.as_deref(), text),
-            Block::Blockquote(children) => quote(&render_blocks(children, "\n\n", None, titles)),
+            Block::Blockquote(children) => quote(&render_blocks(children, "\n\n", None, link_texts)),
             Block::Callout { kind, content } => {
                 let marker = format!("[!{}]", kind.name().to_ascii_uppercase());
-                let inner = render_blocks(content, "\n\n", None, titles);
+                let inner = render_blocks(content, "\n\n", None, link_texts);
                 // A paragraph continues on the marker's next line, as people
                 // write callouts; anything else might not end the marker's
                 // paragraph, so it follows an empty line.
@@ -71,16 +88,17 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
                     Block::BulletList(items) => items.iter().map(|item| (None, item.as_slice())).collect(),
                     _ => unreachable!(),
                 };
-                render_list(&items, Some(marker), |_| marker.to_string(), titles)
+                render_list(&items, Some(marker), |_| marker.to_string(), link_texts)
             }
             Block::OrderedList { start, items } => {
                 let delim = if previous_delimiter == Some('.') { ')' } else { '.' };
                 delimiter = Some(delim);
                 let items: Vec<_> = items.iter().map(|item| (None, item.as_slice())).collect();
-                render_list(&items, None, |i| format!("{}{}", start + i as u64, delim), titles)
+                render_list(&items, None, |i| format!("{}{}", start + i as u64, delim), link_texts)
             }
-            Block::Table(rows) => render_table(rows, titles),
+            Block::Table(rows) => render_table(rows, link_texts),
             Block::HorizontalRule => "***".to_string(),
+            Block::UnknownDirective { source } => source.clone(),
         };
         previous_bullet = bullet;
         previous_delimiter = delimiter;
@@ -114,7 +132,7 @@ fn render_list(
     items: &[(Option<bool>, &[Block])],
     bullet: Option<char>,
     marker: impl Fn(usize) -> String,
-    titles: Titles,
+    link_texts: LinkTexts,
 ) -> String {
     let tight = items.iter().all(|(_, item)| is_tight_item(item));
     let separator = if tight { "\n" } else { "\n\n" };
@@ -123,7 +141,7 @@ fn render_list(
         .enumerate()
         .map(|(i, (task, item))| {
             let marker = marker(i);
-            let mut body = render_blocks(item, separator, bullet, titles);
+            let mut body = render_blocks(item, separator, bullet, link_texts);
             if let Some(checked) = task {
                 let checkbox = if *checked { "[x]" } else { "[ ]" };
                 // The checkbox only counts in front of a paragraph, so an item
@@ -163,11 +181,11 @@ fn render_list(
 
 /// Renders a table as GitHub writes them: a header row, a row of dashes, and
 /// the other rows.
-fn render_table(rows: &[Row], titles: Titles) -> String {
+fn render_table(rows: &[Row], link_texts: LinkTexts) -> String {
     let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
     let mut lines: Vec<String> = Vec::new();
     for (i, row) in rows.iter().enumerate() {
-        lines.push(line(row.iter().map(|cell| render_cell(cell, titles)).collect()));
+        lines.push(line(row.iter().map(|cell| render_cell(cell, link_texts)).collect()));
         if i == 0 {
             lines.push(line(vec!["---".to_string(); row.len()]));
         }
@@ -179,8 +197,8 @@ fn render_table(rows: &[Row], titles: Titles) -> String {
 /// break is `<br>`, and every `|` is escaped so it does not end the cell,
 /// even inside code or a link address. Like a paragraph, it falls back to
 /// HTML tags for formatting the markers cannot express.
-fn render_cell(cell: &[Inline], titles: Titles) -> String {
-    let render = |html| render_inlines(cell, InlinePlace::Cell, html, titles).replace('|', "\\|");
+fn render_cell(cell: &[Inline], link_texts: LinkTexts) -> String {
+    let render = |html| render_inlines(cell, InlinePlace::Cell, html, link_texts).replace('|', "\\|");
     let markdown = render(false);
     let read = from_markdown(&format!("| {markdown} |\n| --- |"));
     if read == [Block::Table(vec![vec![cell.to_vec()]])] {
@@ -232,21 +250,21 @@ fn longest_run(text: &str, needle: char) -> usize {
 /// Renders a paragraph or heading. Markdown's emphasis markers only work next
 /// to certain characters (`**bold **x` does not parse as bold), so the result
 /// is read back and, if it does not match, written again with HTML tags.
-fn render_inline_block(block: &Block, titles: Titles) -> String {
-    let markdown = render_inline_block_with(block, false, titles);
+fn render_inline_block(block: &Block, link_texts: LinkTexts) -> String {
+    let markdown = render_inline_block_with(block, false, link_texts);
     if from_markdown(&markdown).as_slice() == std::slice::from_ref(block) {
         markdown
     } else {
-        render_inline_block_with(block, true, titles)
+        render_inline_block_with(block, true, link_texts)
     }
 }
 
-fn render_inline_block_with(block: &Block, html: bool, titles: Titles) -> String {
+fn render_inline_block_with(block: &Block, html: bool, link_texts: LinkTexts) -> String {
     match block {
-        Block::Paragraph(content) => render_inlines(content, InlinePlace::Paragraph, html, titles),
+        Block::Paragraph(content) => render_inlines(content, InlinePlace::Paragraph, html, link_texts),
         Block::Heading { level, content } => {
             let hashes = "#".repeat(*level as usize);
-            let inner = render_inlines(content, InlinePlace::Heading, html, titles);
+            let inner = render_inlines(content, InlinePlace::Heading, html, link_texts);
             if inner.is_empty() {
                 hashes
             } else {
@@ -315,7 +333,7 @@ enum InlinePlace {
     Cell,
 }
 
-fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Titles) -> String {
+fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, link_texts: LinkTexts) -> String {
     let mut out = String::new();
     let mut open: Vec<Mark> = Vec::new();
     let mut at_line_start = true;
@@ -337,14 +355,32 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
                 out.push_str(&format!("![{alt}](<{}>)", escape_url(src)));
                 at_line_start = false;
             }
-            Inline::PageLink { page_id } => {
-                // A Page link carries no formatting of its own.
+            // Like an image, it takes no formatting and leaves the marks around it open.
+            Inline::UnknownDirective { source } => {
+                out.push_str(source);
+                at_line_start = false;
+            }
+            Inline::Status { text, color } => {
+                out.push_str(&status_directive(text, *color).to_inline_markdown());
+                at_line_start = false;
+            }
+            Inline::PageLink { .. } | Inline::Mention { .. } => {
+                // A Page link or Mention carries no formatting of its own.
                 while let Some(mark) = open.pop() {
                     out.push_str(&close_mark(&mark, html));
                 }
-                let title = titles(page_id).unwrap_or_default().replace(['\n', '\r'], " ");
-                let title = escape_text(&title, false, false, place);
-                out.push_str(&format!("[{title}]({PAGE_ADDRESS_SCHEME}{page_id})"));
+                let (shown, address) = match inline {
+                    Inline::PageLink { page_id } => {
+                        (link_texts(Linked::Page(page_id)).unwrap_or_default(), format!("{PAGE_ADDRESS_SCHEME}{page_id}"))
+                    }
+                    Inline::Mention { person_id } => {
+                        let name = link_texts(Linked::Person(person_id)).unwrap_or_default();
+                        (format!("@{name}"), format!("{MEMBER_ADDRESS_SCHEME}{person_id}"))
+                    }
+                    _ => unreachable!("matched above"),
+                };
+                let shown = escape_text(&shown.replace(['\n', '\r'], " "), false, false, place);
+                out.push_str(&format!("[{shown}]({address})"));
                 at_line_start = false;
             }
             Inline::Text { text, marks } => {
@@ -449,6 +485,9 @@ fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, place: Inline
             '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '&' | '~' => true,
             '#' => in_heading || first_visible,
             '-' | '+' | '=' => first_visible,
+            // A `:` would start a directive where a name follows it, and a
+            // block directive at the start of a line.
+            ':' => first_visible || starts_directive_name(&chars[i + 1..]),
             '.' | ')' => list_delimiter_at == Some(i),
             // A `!` directly before a link would turn it into an image.
             '!' => i + 1 == chars.len(),
@@ -463,6 +502,20 @@ fn escape_text(text: &str, at_line_start: bool, at_line_end: bool, place: Inline
         out.push(c);
     }
     out
+}
+
+/// Whether text after a `:` might be read as a directive's name: a name
+/// that runs to the end of the text, where anything might follow it, or to
+/// brackets or braces.
+fn starts_directive_name(after: &[char]) -> bool {
+    if !after.first().is_some_and(char::is_ascii_alphabetic) {
+        return false;
+    }
+    let name = after
+        .iter()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .count();
+    matches!(after.get(name), None | Some('[' | '{'))
 }
 
 // ---------------------------------------------------------------------------
@@ -564,11 +617,15 @@ struct Builder {
     marks: ActiveMarks,
     /// The image being read, if any: where it points and its text so far.
     image: Option<(String, String)>,
-    /// The Page whose link is being read. What the link says is left out,
-    /// because a Page link shows the Page's current title instead.
-    page_link: Option<String>,
+    /// The Page link or Mention being read. What the link says is left out,
+    /// because it shows the Page's current title or the person's name instead.
+    turtle_link: Option<Inline>,
     /// Where the line that made a quote a callout ends. Its marker is not text.
     callout_marker_end: Option<usize>,
+    /// The directives in running text, which the Markdown being read holds
+    /// as `stand_in`, their number, and `stand_in` again.
+    directives: Vec<String>,
+    stand_in: char,
 }
 
 impl Builder {
@@ -615,27 +672,29 @@ impl Builder {
     }
 
     fn text(&mut self, text: &str, code: bool) {
+        let pieces = stood_in(text, self.stand_in, &self.directives);
         // Whatever Markdown puts inside an image is its alternative text.
         if let Some((_, alt)) = &mut self.image {
-            alt.push_str(text);
+            pieces.iter().for_each(|(piece, _)| alt.push_str(piece));
             return;
         }
         if let Some(Frame::CodeBlock { text: body, .. }) = self.stack.last_mut() {
-            body.push_str(text);
+            pieces.iter().for_each(|(piece, _)| body.push_str(piece));
             return;
         }
-        if self.page_link.is_some() {
+        if self.turtle_link.is_some() {
             return;
         }
         let marks = self.marks.current(code);
-        self.inline_target().push(Inline::Text {
-            text: text.to_string(),
-            marks,
-        });
+        for (piece, is_directive) in pieces {
+            let directive = (is_directive && !code).then(|| inline_directive(&piece)).flatten();
+            let inline = directive.unwrap_or(Inline::Text { text: piece, marks: marks.clone() });
+            self.inline_target().push(inline);
+        }
     }
 
     fn hard_break(&mut self) {
-        if self.page_link.is_none() {
+        if self.turtle_link.is_none() {
             self.inline_target().push(Inline::HardBreak);
         }
     }
@@ -662,17 +721,160 @@ impl Builder {
     }
 }
 
+/// Splits a text of the Markdown being read into its pieces, each with
+/// whether it is the source of a directive that a stand-in stood for.
+fn stood_in(text: &str, stand_in: char, directives: &[String]) -> Vec<(String, bool)> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(stand_in) {
+        let after = &rest[start + stand_in.len_utf8()..];
+        let number = after.find(stand_in).and_then(|end| Some((after[..end].parse::<usize>().ok()?, end)));
+        let Some((source, end)) = number.and_then(|(n, end)| Some((directives.get(n)?, end))) else {
+            break;
+        };
+        if start > 0 {
+            pieces.push((rest[..start].to_string(), false));
+        }
+        pieces.push((source.clone(), true));
+        rest = &after[end + stand_in.len_utf8()..];
+    }
+    if !rest.is_empty() || pieces.is_empty() {
+        pieces.push((rest.to_string(), false));
+    }
+    pieces
+}
+
+/// Part of the Markdown at the top level: Markdown, or a block directive.
+enum TopLevel<'a> {
+    Markdown(&'a str),
+    BlockDirective(&'a str),
+}
+
+/// The Markdown split around its block directives. One starts a line at
+/// the top level where Markdown would start a paragraph or heading.
+fn top_level(markdown: &str) -> Vec<TopLevel<'_>> {
+    let mut parts = Vec::new();
+    let mut rest = markdown;
+    'parts: loop {
+        let mut depth = 0;
+        for (event, range) in Parser::new_ext(rest, OPTIONS).into_offset_iter() {
+            match event {
+                Event::Start(tag) => {
+                    if depth == 0 && matches!(tag, Tag::Paragraph | Tag::Heading { .. }) {
+                        for (line, at) in directive::lines_with_ends(&rest[range.clone()]) {
+                            let start = range.start + at;
+                            let line_start = start == 0 || rest.as_bytes()[start - 1] == b'\n';
+                            if !line_start || !line.starts_with(":::") {
+                                continue;
+                            }
+                            if let Some((_, len)) = directive::block_at(&rest[start..]) {
+                                parts.push(TopLevel::Markdown(&rest[..start]));
+                                parts.push(TopLevel::BlockDirective(&rest[start..start + len]));
+                                rest = &rest[start + len..];
+                                continue 'parts;
+                            }
+                        }
+                    }
+                    depth += 1;
+                }
+                Event::End(_) => depth -= 1,
+                _ => {}
+            }
+        }
+        parts.push(TopLevel::Markdown(rest));
+        return parts;
+    }
+}
+
 pub fn from_markdown(markdown: &str) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    for part in top_level(markdown) {
+        match part {
+            TopLevel::Markdown(markdown) => blocks.extend(read_markdown(markdown)),
+            TopLevel::BlockDirective(source) => blocks.push(Block::UnknownDirective { source: source.to_string() }),
+        }
+    }
+    normalize(blocks)
+}
+
+const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_TABLES);
+
+/// Where the Markdown has directives in running text. A directive starts
+/// with a `:` that is text, so not in code, an address or HTML, and that is
+/// not escaped.
+fn inline_directives(markdown: &str) -> Vec<std::ops::Range<usize>> {
+    let mut found: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut in_code = false;
+    let mut in_image = 0;
+    let mut in_autolink = 0;
+    for (event, range) in Parser::new_ext(markdown, OPTIONS).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => in_code = true,
+            Event::End(TagEnd::CodeBlock) => in_code = false,
+            Event::Start(Tag::Image { .. }) => in_image += 1,
+            Event::End(TagEnd::Image) => in_image -= 1,
+            Event::Start(Tag::Link { link_type: LinkType::Autolink | LinkType::Email, .. }) => in_autolink += 1,
+            Event::End(TagEnd::Link) if in_autolink > 0 => in_autolink -= 1,
+            Event::Text(text) if !in_code && in_image == 0 && in_autolink == 0 && markdown[range.clone()] == *text => {
+                for (i, _) in text.match_indices(':') {
+                    let at = range.start + i;
+                    let escapes = markdown[..at].bytes().rev().take_while(|b| *b == b'\\').count();
+                    if escapes % 2 == 1 || found.last().is_some_and(|last| at < last.end) {
+                        continue;
+                    }
+                    if let Some((_, len)) = directive::inline_at(&markdown[at..]) {
+                        found.push(at..at + len);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Reads Markdown without block directives. Each directive in running text
+/// is read as a stand-in, so that what it holds is not read as Markdown.
+fn read_markdown(markdown: &str) -> Vec<Block> {
+    let stand_in = ('\u{E000}'..='\u{F8FF}').find(|c| !markdown.contains(*c)).unwrap_or('\u{E000}');
+    let mut replaced = markdown.to_string();
+    let mut directives = Vec::new();
+    // What a directive holds, such as a backtick, may hide a later one from
+    // the parser, so the Markdown is searched again once they stand in.
+    loop {
+        let found: Vec<_> = inline_directives(&replaced)
+            .into_iter()
+            .filter(|range| !replaced[range.clone()].contains(stand_in))
+            .collect();
+        if found.is_empty() {
+            break;
+        }
+        let mut next = String::with_capacity(replaced.len());
+        let mut at = 0;
+        for range in found {
+            next.push_str(&replaced[at..range.start]);
+            next.push_str(&format!("{stand_in}{}{stand_in}", directives.len()));
+            directives.push(replaced[range.clone()].to_string());
+            at = range.end;
+        }
+        next.push_str(&replaced[at..]);
+        replaced = next;
+    }
+    let markdown = replaced.as_str();
+
     let mut b = Builder {
         stack: vec![Frame::Root(Vec::new())],
         marks: ActiveMarks::default(),
         image: None,
-        page_link: None,
+        turtle_link: None,
         callout_marker_end: None,
+        directives,
+        stand_in,
     };
 
-    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
-    for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
+    for (event, range) in Parser::new_ext(markdown, OPTIONS).into_offset_iter() {
         if let Some(end) = b.callout_marker_end {
             if range.start > end {
                 b.callout_marker_end = None;
@@ -744,8 +946,8 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 Tag::Emphasis => b.marks.italic += 1,
                 Tag::Strong => b.marks.bold += 1,
                 Tag::Strikethrough => b.marks.strike += 1,
-                Tag::Link { dest_url, .. } => match page_id_of(&dest_url) {
-                    Some(page_id) => b.page_link = Some(page_id.to_string()),
+                Tag::Link { dest_url, .. } => match turtle_link_of(&dest_url) {
+                    Some(link) => b.turtle_link = Some(link),
                     None => b.marks.links.push(dest_url.to_string()),
                 },
                 Tag::Image { dest_url, .. } => b.image = Some((dest_url.to_string(), String::new())),
@@ -807,9 +1009,9 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 TagEnd::Emphasis => b.marks.italic = b.marks.italic.saturating_sub(1),
                 TagEnd::Strong => b.marks.bold = b.marks.bold.saturating_sub(1),
                 TagEnd::Strikethrough => b.marks.strike = b.marks.strike.saturating_sub(1),
-                // Links do not nest, so a link that ends inside a Page link is that one.
-                TagEnd::Link => match b.page_link.take() {
-                    Some(page_id) => b.inline_target().push(Inline::PageLink { page_id }),
+                // Links do not nest, so a link that ends inside a Page link or Mention is that one.
+                TagEnd::Link => match b.turtle_link.take() {
+                    Some(link) => b.inline_target().push(link),
                     None => {
                         b.marks.links.pop();
                     }
@@ -817,7 +1019,7 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
                 TagEnd::Image => {
                     if let Some((src, alt)) = b.image.take() {
                         // Like the rest of what a Page link says, an image inside one is left out.
-                        if b.page_link.is_none() {
+                        if b.turtle_link.is_none() {
                             b.inline_target().push(Inline::Image { src, alt });
                         }
                     }
@@ -849,14 +1051,29 @@ pub fn from_markdown(markdown: &str) -> Vec<Block> {
 
     b.close_implicit_paragraph();
     match b.stack.into_iter().next() {
-        Some(Frame::Root(blocks)) => normalize(blocks),
+        Some(Frame::Root(blocks)) => blocks,
         _ => Vec::new(),
     }
 }
 
 #[cfg(test)]
 pub(crate) mod testing {
-    use crate::model::{Block, CalloutKind, Inline, Marks, TaskItem};
+    use crate::model::{Block, CalloutKind, Inline, Marks, StatusColor, TaskItem};
+
+    /// Directives Turtle does not know, holding what Markdown would read otherwise.
+    const INLINE_DIRECTIVES: &[&str] = &[
+        ":acme.demo[hi]{x=1}",
+        ":acme.x{}",
+        ":note[*a* `b ]c \\] <d> &amp;]",
+        ":acme.y[**]{k=\"v * w\" f}",
+        ":acme.z[a](not a link)",
+        ":acme.w[`]",
+    ];
+    const BLOCK_DIRECTIVES: &[&str] = &[
+        ":::acme.board{x=1}\n:::",
+        ":::acme.board\n# not a heading\n\n- [ ] *odd*   spacing\n:::",
+        "::::chart[x]\n:::inner\n```\n:::\n```\n:::\n::::",
+    ];
 
     // A small deterministic generator, so the property tests need no extra
     // dependency and failures are reproducible from the seed.
@@ -890,6 +1107,19 @@ pub(crate) mod testing {
                             let page_id = ["a1b2", "c3d4", "e5"][self.next(3)].to_string();
                             return Inline::PageLink { page_id };
                         }
+                        2 if self.next(3) == 0 => {
+                            let source = INLINE_DIRECTIVES[self.next(INLINE_DIRECTIVES.len())].to_string();
+                            return Inline::UnknownDirective { source };
+                        }
+                        3 => {
+                            let person_id = ["m1", "m2"][self.next(2)].to_string();
+                            return Inline::Mention { person_id };
+                        }
+                        4 if self.next(3) == 0 => {
+                            let color = StatusColor::ALL[self.next(StatusColor::ALL.len())];
+                            let text = if self.next(4) == 0 { String::new() } else { self.text() };
+                            return Inline::Status { text, color };
+                        }
                         _ => {}
                     }
                     if self.next(8) == 0 {
@@ -916,7 +1146,16 @@ pub(crate) mod testing {
 
         pub fn blocks(&mut self, depth: usize) -> Vec<Block> {
             let len = self.next(4);
-            (0..len).map(|_| self.block(depth)).collect()
+            (0..len)
+                .map(|_| {
+                    // Block directives stand only at the top.
+                    if depth == 0 && self.next(8) == 0 {
+                        let source = BLOCK_DIRECTIVES[self.next(BLOCK_DIRECTIVES.len())].to_string();
+                        return Block::UnknownDirective { source };
+                    }
+                    self.block(depth)
+                })
+                .collect()
         }
 
         pub fn block(&mut self, depth: usize) -> Block {
@@ -966,6 +1205,7 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use super::testing::Rng;
+    use crate::model::StatusColor;
     use super::*;
 
     fn text(s: &str) -> Inline {
@@ -1201,9 +1441,9 @@ mod tests {
     #[test]
     fn a_page_link_is_a_turtle_address_shown_with_the_current_title() {
         let blocks = vec![para(vec![text("See "), page_link("a1b2"), text(" first.")])];
-        let titles = |id: &str| (id == "a1b2").then(|| "Setup [draft] *v2*".to_string());
+        let titles = |linked: Linked| (linked == Linked::Page("a1b2")).then(|| "Setup [draft] *v2*".to_string());
 
-        let markdown = to_markdown_with_titles(&blocks, &titles);
+        let markdown = to_markdown_with_link_texts(&blocks, &titles);
 
         assert_eq!(markdown, "See [Setup \\[draft\\] \\*v2\\*](turtle:a1b2) first.\n");
         assert_eq!(from_markdown(&markdown), blocks);
@@ -1213,7 +1453,7 @@ mod tests {
     fn a_page_link_whose_title_may_not_be_shown_has_no_text() {
         let blocks = vec![para(vec![page_link("a1b2")])];
 
-        assert_eq!(to_markdown_with_titles(&blocks, &|_| None), "[](turtle:a1b2)\n");
+        assert_eq!(to_markdown_with_link_texts(&blocks, &|_| None), "[](turtle:a1b2)\n");
         assert_eq!(to_markdown(&blocks), "[](turtle:a1b2)\n");
         assert_eq!(from_markdown("[](turtle:a1b2)"), blocks);
     }
@@ -1243,6 +1483,50 @@ mod tests {
             normalize(vec![para(vec![text("x"), linked("Set", true), linked("up", false), text("y")])]),
             vec![para(vec![text("x"), page_link("a1b2"), text("y")])]
         );
+    }
+
+    fn mention(id: &str) -> Inline {
+        Inline::Mention { person_id: id.into() }
+    }
+
+    #[test]
+    fn a_mention_is_a_member_address_shown_with_the_current_name() {
+        let blocks = vec![para(vec![text("Ask "), mention("m1"), text(".")])];
+        let names = |linked: Linked| (linked == Linked::Person("m1")).then(|| "Ada [the] *first*".to_string());
+
+        let markdown = to_markdown_with_link_texts(&blocks, &names);
+
+        assert_eq!(markdown, "Ask [@Ada \\[the\\] \\*first\\*](turtle:member/m1).\n");
+        assert_eq!(from_markdown(&markdown), blocks);
+    }
+
+    #[test]
+    fn reading_a_member_address_makes_a_mention_whatever_its_text_says() {
+        assert_eq!(
+            from_markdown("**[@Old *name*](turtle:member/m1)** and [](turtle:member/m2)"),
+            vec![para(vec![mention("m1"), text(" and "), mention("m2")])]
+        );
+        // An address that names nobody stays an ordinary link.
+        assert_eq!(
+            from_markdown("[odd](turtle:member/a/b)"),
+            vec![para(vec![marked("odd", |m| m.link = Some("turtle:member/a/b".into()))])]
+        );
+    }
+
+    #[test]
+    fn a_mention_of_nobody_known_is_an_at_sign() {
+        let blocks = vec![para(vec![mention("m1")])];
+        assert_eq!(to_markdown(&blocks), "[@](turtle:member/m1)\n");
+        assert_eq!(from_markdown("[@](turtle:member/m1)"), blocks);
+    }
+
+    #[test]
+    fn mentions_beside_formatting_and_in_table_cells_round_trip() {
+        assert_round_trip(vec![
+            para(vec![marked("bold", |m| m.bold = true), mention("m1"), marked("bold!", |m| m.bold = true)]),
+            Block::Heading { level: 2, content: vec![mention("m1"), mention("m1"), page_link("m1")] },
+            Block::Table(vec![vec![vec![text("Owner")]], vec![vec![mention("m1"), text(" and "), mention("m2")]]]),
+        ]);
     }
 
     #[test]
@@ -1424,6 +1708,139 @@ mod tests {
         assert_eq!(from_markdown("| a | b |\n|:-|-:|\n| 1 |\n| 1 | 2 | 3 |"), vec![table(&[&["a", "b"], &["1", ""], &["1", "2"]])]);
     }
 
+    fn unknown(source: &str) -> Inline {
+        Inline::UnknownDirective { source: source.into() }
+    }
+
+    #[test]
+    fn an_unknown_inline_directive_is_kept_byte_for_byte() {
+        let markdown = "Before :acme.demo[hi *there*]{x=1 y=\"a b\"} after.\n";
+
+        let blocks = from_markdown(markdown);
+
+        assert_eq!(
+            blocks,
+            vec![para(vec![text("Before "), unknown(":acme.demo[hi *there*]{x=1 y=\"a b\"}"), text(" after.")])]
+        );
+        assert_eq!(to_markdown(&blocks), markdown);
+    }
+
+    #[test]
+    fn an_unknown_block_directive_is_kept_byte_for_byte() {
+        let board = ":::acme.board{columns=\"To do,Done\"}\n- [ ] *odd*   spacing\n\n```\n:::\n```\n::::acme.lane\n::::\n:::";
+        let markdown = format!("Intro\n\n{board}\n\n:::chart\n:::\n\nAfter :acme.demo[hi]{{x=1}}.\n");
+
+        let blocks = from_markdown(&markdown);
+
+        assert_eq!(
+            blocks,
+            vec![
+                para(vec![text("Intro")]),
+                Block::UnknownDirective { source: board.into() },
+                // An unnamespaced name Turtle does not know is kept all the same.
+                Block::UnknownDirective { source: ":::chart\n:::".into() },
+                para(vec![text("After "), unknown(":acme.demo[hi]{x=1}"), text(".")]),
+            ]
+        );
+        assert_eq!(to_markdown(&blocks), markdown);
+    }
+
+    #[test]
+    fn what_merely_looks_like_a_directive_stays_text() {
+        for s in [":acme.x[a]{b=1}", ":::acme.x", "a:b", "see :x", ":x{", "\\:x[a]", "::x[a]{}", "time 10:30", ":x"] {
+            assert_round_trip(vec![para(vec![text(s)])]);
+            assert_round_trip(vec![para(vec![text("x"), Inline::HardBreak, text(s)])]);
+        }
+        assert_round_trip(vec![para(vec![text("a :b"), page_link("c")]), para(vec![text("::"), unknown(":x[y]")])]);
+        assert_eq!(
+            from_markdown("`:acme.x[a]{}` and <https://x.org/:a{b}> and ![:acme.x[a]{}](y.png)\n\n```\n:acme.x[a]{}\n```"),
+            vec![
+                para(vec![
+                    marked(":acme.x[a]{}", |m| m.code = true),
+                    text(" and "),
+                    marked("https://x.org/:a{b}", |m| m.link = Some("https://x.org/:a{b}".into())),
+                    text(" and "),
+                    Inline::Image { src: "y.png".into(), alt: ":acme.x[a]{}".into() },
+                ]),
+                Block::CodeBlock { language: None, text: ":acme.x[a]{}".into() },
+            ]
+        );
+        // Without a closing line, a block directive is the text it says.
+        assert_eq!(from_markdown(":::acme.x\nnever closed"), vec![para(vec![text(":::acme.x never closed")])]);
+    }
+
+    #[test]
+    fn a_block_directive_away_from_the_top_is_kept_as_its_text() {
+        assert_eq!(
+            normalize(vec![Block::Blockquote(vec![Block::UnknownDirective { source: ":::acme.x\none\n:::".into() }])]),
+            vec![Block::Blockquote(vec![para(vec![
+                text(":::acme.x"),
+                Inline::HardBreak,
+                text("one"),
+                Inline::HardBreak,
+                text(":::"),
+            ])])]
+        );
+    }
+
+    fn status(text: &str, color: StatusColor) -> Inline {
+        Inline::Status { text: text.into(), color }
+    }
+
+    #[test]
+    fn a_status_is_read_and_written_as_a_directive() {
+        let markdown = "Build :status[On track]{color=green} today.\n";
+
+        let blocks = from_markdown(markdown);
+
+        assert_eq!(blocks, vec![para(vec![text("Build "), status("On track", StatusColor::Green), text(" today.")])]);
+        assert_eq!(to_markdown(&blocks), markdown);
+    }
+
+    #[test]
+    fn a_status_without_a_known_colour_is_grey() {
+        assert_eq!(from_markdown(":status[Idle]"), vec![para(vec![status("Idle", StatusColor::Grey)])]);
+        assert_eq!(from_markdown(":status[Idle]{color=orange}"), vec![para(vec![status("Idle", StatusColor::Grey)])]);
+        assert_eq!(to_markdown(&[para(vec![status("Idle", StatusColor::Grey)])]), ":status[Idle]{color=grey}\n");
+        for color in ["grey", "blue", "green", "yellow", "red", "purple"] {
+            let markdown = format!(":status[x]{{color={color}}}\n");
+            assert_eq!(to_markdown(&from_markdown(&markdown)), markdown);
+        }
+    }
+
+    #[test]
+    fn a_status_stands_wherever_running_text_does() {
+        let markdown = "# Plan :status[Draft]{color=blue}\n\n| Task | State |\n| --- | --- |\n| Build | **:status[Late]{color=red}** |\n";
+
+        let blocks = from_markdown(markdown);
+
+        assert_eq!(
+            blocks,
+            vec![
+                Block::Heading { level: 1, content: vec![text("Plan "), status("Draft", StatusColor::Blue)] },
+                Block::Table(vec![
+                    vec![vec![text("Task")], vec![text("State")]],
+                    vec![vec![text("Build")], vec![status("Late", StatusColor::Red)]],
+                ]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_status_keeps_its_text_as_typed() {
+        for typed in ["on Track", "a [b] c\\d", "*not bold* `x`", "50% & <ok>", "", "  spaced  "] {
+            assert_round_trip(vec![para(vec![text("x "), status(typed, StatusColor::Purple)])]);
+            assert_eq!(normalize(vec![para(vec![status(typed, StatusColor::Purple)])]), vec![para(vec![status(typed, StatusColor::Purple)])]);
+        }
+        // A directive in running text stays on one line and holds no `|`, which would end a table cell.
+        assert_eq!(
+            normalize(vec![para(vec![status("a|b\nc", StatusColor::Green)])]),
+            vec![para(vec![status("a/b c", StatusColor::Green)])]
+        );
+        // Another's directive of the same name is not a Status.
+        assert_eq!(from_markdown(":acme.status[x]"), vec![para(vec![unknown(":acme.status[x]")])]);
+    }
+
     const SEEDS: u64 = 20_000;
 
     #[test]
@@ -1434,7 +1851,7 @@ mod tests {
             let blocks = normalize(rng.blocks(0));
             // Page links shown with a title must read back the same as without one.
             let title = format!("t `x` ](y) <br> *z*\\ !{}", rng.text());
-            for markdown in [to_markdown(&blocks), to_markdown_with_titles(&blocks, &|_| Some(title.clone()))] {
+            for markdown in [to_markdown(&blocks), to_markdown_with_link_texts(&blocks, &|_| Some(title.clone()))] {
                 if from_markdown(&markdown) != blocks {
                     failures.push((seed, markdown));
                 }

@@ -5,6 +5,14 @@ Next line, and [](turtle:a1b2).
 
 With ![Logo](<logo.png>) inline.
 
+A :acme.demo[hi]{x=1} kept.
+
+Now :status[On track]{color=green}.
+
+:::acme.board{x=1}
+- a
+:::
+
 - one
 - two
   1. nested
@@ -32,7 +40,7 @@ With ![Logo](<logo.png>) inline.
 
 | Name | **Role** |
 | --- | --- |
-| a \| b |  |
+| a \| b | [@](turtle:member/m1) |
 
 ```rust
 fn main() {}

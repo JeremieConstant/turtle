@@ -1,7 +1,9 @@
-//! Page links: links to another Page by its ID, shown with that Page's
-//! current title to whoever may read it, and with nothing to anyone else.
+//! Page links and Mentions in content: a Page link is shown with that Page's
+//! current title to whoever may read it, and with nothing to anyone else; a
+//! Mention with the person's current name to whoever reads the content.
 
 use super::areas;
+use crate::markdown::Linked;
 use super::permissions;
 use super::tree::Kind;
 use super::{Catalogue, Core, OpResult, Principal};
@@ -88,11 +90,50 @@ pub(super) fn linked_titles(
     Ok(titles)
 }
 
+/// What the Page links and Mentions of some content show the principal.
+pub(super) struct Shown {
+    titles: std::collections::HashMap<String, String>,
+    names: std::collections::HashMap<String, String>,
+}
+
+impl Shown {
+    pub(super) fn of(core: &Core, principal: &Principal, blocks: &[crate::model::Block]) -> rusqlite::Result<Shown> {
+        Ok(Shown { titles: linked_titles(core, principal, blocks)?, names: mentioned_names(core, blocks)? })
+    }
+
+    /// A Page link's title as `readable_title` gives it, or a Mentioned
+    /// person's current name.
+    pub(super) fn text(&self, linked: Linked) -> Option<String> {
+        match linked {
+            Linked::Page(page_id) => self.titles.get(page_id).cloned(),
+            Linked::Person(person_id) => self.names.get(person_id).cloned(),
+        }
+    }
+}
+
+/// The current names of the people some content mentions, by ID, for a
+/// reader of that content: a Mention shows its name to whoever may read the
+/// content it is in, whether or not they may see the Profile, and the
+/// caller has checked that. An ID that names no Member or Guest is left out.
+pub(super) fn mentioned_names(
+    core: &Core,
+    blocks: &[crate::model::Block],
+) -> rusqlite::Result<std::collections::HashMap<String, String>> {
+    let db = core.db();
+    let mut names = std::collections::HashMap::new();
+    for person_id in crate::model::mentioned_people(blocks) {
+        if let Some(name) = super::profiles::name_of(&db, &person_id)? {
+            names.insert(person_id, name);
+        }
+    }
+    Ok(names)
+}
+
 /// The Markdown of some content as the principal sees it, each Page link
-/// with the title `readable_title` gives it.
+/// and Mention with the text `Shown` gives it.
 pub(super) fn markdown_for(core: &Core, principal: &Principal, blocks: &[crate::model::Block]) -> rusqlite::Result<String> {
-    let titles = linked_titles(core, principal, blocks)?;
-    Ok(crate::markdown::to_markdown_with_titles(blocks, &|page_id| titles.get(page_id).cloned()))
+    let shown = Shown::of(core, principal, blocks)?;
+    Ok(crate::markdown::to_markdown_with_link_texts(blocks, &|linked| shown.text(linked)))
 }
 
 /// Stored Markdown, such as a Version's, as the principal sees it. Stored
@@ -142,6 +183,28 @@ mod tests {
 
         rename_page(&core, &grace, RenameEntry { id: setup.clone(), title: "Getting started".into() }).unwrap();
         assert_eq!(markdown(&core, &grace, &handbook), format!("Read [Getting started](turtle:{setup}) first.\n"));
+    }
+
+    #[test]
+    fn a_mention_is_written_with_the_current_name_whatever_it_said_and_whoever_reads_it() {
+        use crate::ops::members::{deactivate_member, MemberId};
+        use crate::ops::testing::guest;
+        let core = fresh();
+        let grace = member(&core, "Grace", true);
+        member(&core, "Ken", false);
+        let gus = guest(&core, "Gus");
+        let engineering = area(&core, &grace, "Engineering");
+        give_role(&core, &engineering, &gus, Role::Read);
+        let handbook = page(&core, &grace, &engineering, "Handbook");
+
+        write(&core, &grace, &handbook, "| Owner |\n| --- |\n| [@Kenny](turtle:member/member-ken) [@x](turtle:member/nobody) |");
+        let expected = "| Owner |\n| --- |\n| [@Ken](turtle:member/member-ken) [@](turtle:member/nobody) |\n";
+        assert_eq!(markdown(&core, &grace, &handbook), expected);
+        // Ken shares no Area with Gus, so Gus may not see his Profile, but sees his name.
+        assert_eq!(markdown(&core, &gus, &handbook), expected);
+
+        deactivate_member(&core, &grace, MemberId { id: "member-ken".into() }).unwrap();
+        assert_eq!(markdown(&core, &grace, &handbook), expected);
     }
 
     #[test]

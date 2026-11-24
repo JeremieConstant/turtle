@@ -18,6 +18,7 @@
     label = 'Page content',
     compact = false,
     attach,
+    pageId = null,
     onready,
   }: {
     doc: Y.Doc
@@ -34,6 +35,8 @@
     compact?: boolean
     /** Attaches a pasted or dropped file to the Page. */
     attach: ImageOptions['attach']
+    /** The Page the content is in; absent for content in no Page yet. */
+    pageId?: string | null
     /** Called with the editor once it runs. It lives exactly as long as this component. */
     onready: (editor: Editor) => void
   } = $props()
@@ -44,7 +47,7 @@
     const editor = new Editor({
       element,
       extensions: [
-        ...contentExtensions({ attach }),
+        ...contentExtensions({ attach }, pageId),
         Collaboration.configure({ document: doc }),
         CollaborationCaret.configure({
           provider: connection,
@@ -147,6 +150,43 @@
   }
 
   /* A Page link reads as a link, with a small page in front of its title. */
+  /* A Mention shows the person's mark and name. */
+  .editor :global(.tiptap .mention) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-2) 0 var(--space-half);
+    border: var(--line) solid var(--color-line);
+    border-radius: var(--radius-round);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+    text-decoration: none;
+    vertical-align: baseline;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .editor :global(.tiptap .mention.name),
+  .editor :global(.tiptap .mention.unknown),
+  .editor :global(.tiptap .mention.failed),
+  .editor :global(.tiptap .mention.loading) {
+    padding-left: var(--space-2);
+    cursor: default;
+  }
+
+  .editor :global(.tiptap .mention:is(.unknown, .failed, .loading, .deactivated)) {
+    color: var(--color-muted);
+  }
+
+  .editor :global(.tiptap .mention-mark:empty) {
+    display: none;
+  }
+
+  .editor :global(.tiptap .mention.ProseMirror-selectednode) {
+    background: var(--color-selected);
+  }
+
   .editor :global(.tiptap .page-link) {
     cursor: pointer;
   }
@@ -177,6 +217,35 @@
   .editor :global(.tiptap .page-link.ProseMirror-selectednode) {
     border-radius: var(--radius-s);
     background: var(--color-selected);
+  }
+
+  /* A directive Turtle does not know: a locked grey placeholder naming it. */
+  .editor :global(.tiptap .unknown-directive) {
+    padding: var(--space-hair) var(--space-1);
+    border-radius: var(--radius-s);
+    background: var(--color-sunken);
+    color: var(--color-muted);
+    font-size: var(--text-code-inline);
+    cursor: default;
+    user-select: none;
+  }
+
+  .editor :global(.tiptap div.unknown-directive) {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .editor :global(.tiptap .unknown-directive.ProseMirror-selectednode) {
+    background: var(--color-selected);
+  }
+
+  /* A Status is changed with a click, while it can be edited. */
+  .editor:not(.readonly) :global(.tiptap .status) {
+    cursor: pointer;
+  }
+
+  .editor :global(.tiptap .status.ProseMirror-selectednode) {
+    outline: var(--line-thick) solid var(--color-focus);
+    outline-offset: var(--line);
   }
 
   .editor :global(.tiptap code) {
