@@ -18,6 +18,7 @@
     label = 'Page content',
     compact = false,
     attach,
+    pageId = null,
     onready,
   }: {
     doc: Y.Doc
@@ -34,6 +35,8 @@
     compact?: boolean
     /** Attaches a pasted or dropped file to the Page. */
     attach: ImageOptions['attach']
+    /** The Page the content is in; absent for content in no Page yet. */
+    pageId?: string | null
     /** Called with the editor once it runs. It lives exactly as long as this component. */
     onready: (editor: Editor) => void
   } = $props()
@@ -44,7 +47,7 @@
     const editor = new Editor({
       element,
       extensions: [
-        ...contentExtensions({ attach }),
+        ...contentExtensions({ attach }, pageId),
         Collaboration.configure({ document: doc }),
         CollaborationCaret.configure({
           provider: connection,
@@ -147,7 +150,7 @@
   }
 
   /* A Page link reads as a link, with a small page in front of its title. */
-  /* A Mention is a badge: the person's mark and name. */
+  /* A Mention shows the person's mark and name. */
   .editor :global(.tiptap .mention) {
     display: inline-flex;
     align-items: center;

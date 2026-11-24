@@ -6,7 +6,7 @@
    * chooses their own picture here, and a Workspace Admin may remove it.
    */
   import { untrack } from 'svelte'
-  import Avatar from '../components/Avatar.svelte'
+  import ProfilePicture from '../components/ProfilePicture.svelte'
   import { base64Of } from '../lib/attachments'
   import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
@@ -90,16 +90,16 @@
 {:else}
   <main>
     {#if loadFailed}
-      <p class="sub">This Profile could not be loaded. Reload the page to try again.</p>
+      <p class="sub">This Profile could not be loaded. Reload to try again.</p>
     {:else if profile}
       <div class="head">
-        <Avatar name={profile.name} size={72} picture={profile.picture} />
+        <ProfilePicture name={profile.name} size={72} picture={profile.picture} />
         <div>
           <h1>{profile.name}</h1>
           {#if role || !profile.active}
-            <p class="badges">
-              {#if role}<span class="badge">{role}</span>{/if}
-              {#if !profile.active}<span class="badge">Deactivated</span>{/if}
+            <p class="roles">
+              {#if role}<span class="role">{role}</span>{/if}
+              {#if !profile.active}<span class="role">Deactivated</span>{/if}
             </p>
           {/if}
         </div>
@@ -155,14 +155,14 @@
     overflow-wrap: anywhere;
   }
 
-  .badges {
+  .roles {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
     margin: var(--space-2) 0 0;
   }
 
-  .badge {
+  .role {
     padding: var(--space-half) var(--space-2);
     border: var(--space-hair) solid var(--color-line);
     border-radius: var(--radius-round);

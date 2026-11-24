@@ -8,7 +8,7 @@
   import { choices } from '../lib/mention'
   import type { Profile } from '../lib/operations.gen'
   import { call } from '../lib/ops'
-  import Avatar from './Avatar.svelte'
+  import ProfilePicture from './ProfilePicture.svelte'
 
   const { editor }: { editor: Editor } = $props()
 
@@ -78,7 +78,7 @@
         {#each offered as person (person.id)}
           <li>
             <button type="button" class="person" onclick={() => mention(person)}>
-              <Avatar name={person.name} size={24} picture={person.picture} />
+              <ProfilePicture name={person.name} size={24} picture={person.picture} />
               <span class="name">{person.name}</span>
               <span class="email">{person.email}</span>
             </button>
@@ -132,7 +132,7 @@
     transition: background var(--dur-fast) var(--ease-out);
   }
 
-  .person :global(.avatar) {
+  .person :global(.profile-picture) {
     grid-row: span 2;
   }
 

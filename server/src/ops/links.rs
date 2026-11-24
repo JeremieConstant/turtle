@@ -1,5 +1,6 @@
-//! Page links: links to another Page by its ID, shown with that Page's
-//! current title to whoever may read it, and with nothing to anyone else.
+//! Page links and Mentions in content: a Page link is shown with that Page's
+//! current title to whoever may read it, and with nothing to anyone else; a
+//! Mention with the person's current name to whoever reads the content.
 
 use super::areas;
 use crate::markdown::Linked;
@@ -110,9 +111,10 @@ impl Shown {
     }
 }
 
-/// The current names of the people some content mentions, by ID. A Mention
-/// shows the name to everyone who reads the content, whether or not they
-/// may see the Profile; an ID that names no Member or Guest is left out.
+/// The current names of the people some content mentions, by ID, for a
+/// reader of that content: a Mention shows its name to whoever may read the
+/// content it is in, whether or not they may see the Profile, and the
+/// caller has checked that. An ID that names no Member or Guest is left out.
 pub(super) fn mentioned_names(
     core: &Core,
     blocks: &[crate::model::Block],
@@ -131,7 +133,7 @@ pub(super) fn mentioned_names(
 /// and Mention with the text `Shown` gives it.
 pub(super) fn markdown_for(core: &Core, principal: &Principal, blocks: &[crate::model::Block]) -> rusqlite::Result<String> {
     let shown = Shown::of(core, principal, blocks)?;
-    Ok(crate::markdown::to_markdown_with_titles(blocks, &|linked| shown.text(linked)))
+    Ok(crate::markdown::to_markdown_with_link_texts(blocks, &|linked| shown.text(linked)))
 }
 
 /// Stored Markdown, such as a Version's, as the principal sees it. Stored

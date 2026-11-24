@@ -21,7 +21,7 @@
   let failed = $state<string | null>(null)
 </script>
 
-<span class="avatar" style:--size="{size}px" aria-hidden="true">
+<span class="profile-picture" style:--size="{size}px" aria-hidden="true">
   {#if picture && failed !== picture}
     <img src={picture} alt="" onerror={() => (failed = picture)} />
   {:else}
@@ -30,7 +30,7 @@
 </span>
 
 <style>
-  .avatar {
+  .profile-picture {
     display: inline-grid;
     place-items: center;
     flex: none;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Avatar from '../components/Avatar.svelte'
+  import ProfilePicture from '../components/ProfilePicture.svelte'
   import { ask } from '../lib/confirm.svelte'
   import { call, OperationError } from '../lib/ops'
   import type { MemberEntry, SingleUseLink } from '../lib/operations.gen'
@@ -135,7 +135,7 @@
       {#each members as member (member.id)}
         <li class:inactive={!member.active}>
           <div class="item-person">
-            <Avatar name={member.name} picture={member.picture} />
+            <ProfilePicture name={member.name} picture={member.picture} />
             <div class="item">
               <span class="item-name">{member.name}</span>
               <small class="hint">{[member.email, member.workspace_admin && 'Workspace Admin', !member.active && 'Deactivated'].filter(Boolean).join(' · ')}</small>

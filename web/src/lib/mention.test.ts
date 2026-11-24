@@ -4,7 +4,7 @@ import type { Profile } from './operations.gen'
 // A Mention is followed through the router, which reads the address bar as it loads.
 vi.mock('./router.svelte', () => ({ router: {} }))
 
-const { badgeOf, choices, personIdOf } = await import('./mention')
+const { appearanceOf, choices, personIdOf } = await import('./mention')
 
 function person(name: string, changes: Partial<Profile> = {}): Profile {
   const id = name.toLowerCase().replace(/\s+/g, '-')
@@ -20,7 +20,7 @@ test('a Mention is written as turtle:member/ and the ID, as the server reads it'
 
 test('someone whose Profile the reader sees is shown with their picture and name, leading to the Profile', () => {
   const ada = person('Ada Lovelace', { picture: '/api/profile_pictures/ada-lovelace?v=1' })
-  expect(badgeOf({ id: ada.id, name: ada.name, profile: ada })).toEqual({
+  expect(appearanceOf({ id: ada.id, name: ada.name, profile: ada })).toEqual({
     state: 'profile',
     name: 'Ada Lovelace',
     address: '/u/ada-lovelace/ada-lovelace',
@@ -31,16 +31,16 @@ test('someone whose Profile the reader sees is shown with their picture and name
 
 test('a deactivated person keeps their last name and their Profile stays reachable', () => {
   const ken = person('Ken', { active: false })
-  expect(badgeOf({ id: ken.id, name: ken.name, profile: ken })).toMatchObject({ state: 'profile', name: 'Ken', active: false })
+  expect(appearanceOf({ id: ken.id, name: ken.name, profile: ken })).toMatchObject({ state: 'profile', name: 'Ken', active: false })
 })
 
 test('someone whose Profile the reader may not see is shown by name alone', () => {
-  expect(badgeOf({ id: 'ken', name: 'Ken', profile: null })).toEqual({ state: 'name', name: 'Ken' })
+  expect(appearanceOf({ id: 'ken', name: 'Ken', profile: null })).toEqual({ state: 'name', name: 'Ken' })
 })
 
 test('a Mention of nobody known, or whose name could not be loaded, says so', () => {
-  expect(badgeOf(null)).toEqual({ state: 'unknown' })
-  expect(badgeOf(undefined)).toEqual({ state: 'failed' })
+  expect(appearanceOf(null)).toEqual({ state: 'unknown' })
+  expect(appearanceOf(undefined)).toEqual({ state: 'failed' })
 })
 
 test('the picker offers the active people whose name or email matches, by name', () => {

@@ -270,13 +270,14 @@ export type MembersTokenList = {
 }
 
 export type MentionedPeople = {
-  /** The Members and Guests among those asked for, in the order asked, each once. */
+  /** The Members and Guests among those asked for that the caller may be
+told of, in the order asked, each once. */
   people: MentionedPerson[]
 }
 
 export type MentionedPerson = {
   id: string
-  /** Their current name, which a Mention shows to everyone. */
+  /** Their current name. */
   name: string
   /** Their Profile, when the caller may see it; otherwise a Mention shows
 the name alone. */
@@ -793,9 +794,13 @@ export type Operations = {
     input: Record<string, never>
     output: ProfileList
   }
-  /** Gets the current names of the Members and Guests that Mentions name, by ID, as Mentions show them: everyone is told the name, and the Profile only when the caller may see it. An ID that names no Member or Guest, such as an Agent's, is left out. */
+  /** Gets the current names of the Members and Guests that Mentions name, by ID, as Mentions show them: the name and Profile of someone whose Profile the caller sees, and the name alone of someone the given Page mentions. Anyone else is left out, as is an ID that names no Member or Guest, such as an Agent's. */
   get_mentioned_people: {
     input: {
+      /** The Page whose Mentions are being shown, which the caller must be
+able to read. Its Mentions are read as they are now, unsaved edits
+included. Absent for content that is in no Page yet. */
+      page_id?: string | null
       /** The IDs of the Members and Guests, as Mentions name them. Only the first 500 count. */
       person_ids: string[]
     }

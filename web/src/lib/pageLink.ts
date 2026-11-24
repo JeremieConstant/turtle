@@ -7,10 +7,15 @@ import { pageAddress } from './routes'
 /** How a Page link is written as a link address: `turtle:` and the Page's ID, as in its Markdown. */
 export const SCHEME = 'turtle:'
 
-/** The ID of the Page a link address points at, when it is a Page link; as the server reads it. */
-export function pageIdOf(address: string): string | null {
-  const id = address.startsWith(SCHEME) ? address.slice(SCHEME.length) : ''
+/** The ID that follows `scheme` in a link address, when it starts so and is an ID; as the server reads it. */
+export function idAfter(scheme: string, address: string): string | null {
+  const id = address.startsWith(scheme) ? address.slice(scheme.length) : ''
   return /^[A-Za-z0-9_-]+$/.test(id) ? id : null
+}
+
+/** The ID of the Page a link address points at, when it is a Page link. */
+export function pageIdOf(address: string): string | null {
+  return idAfter(SCHEME, address)
 }
 
 /** What a Page link says when it may not show its Page's title. */

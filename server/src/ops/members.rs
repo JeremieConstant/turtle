@@ -254,7 +254,7 @@ fn read_entry(row: &rusqlite::Row) -> rusqlite::Result<MemberEntry> {
     let id: String = row.get(0)?;
     let picture_hash: Option<String> = row.get(5)?;
     Ok(MemberEntry {
-        picture: picture_hash.map(|hash| profiles::picture_address(&id, &hash)),
+        picture: profiles::picture_address(&id, picture_hash.as_deref()),
         id,
         name: row.get(1)?,
         email: row.get(2)?,

@@ -4,6 +4,7 @@
 use super::accounts::Nothing;
 use super::attachments::{decode_content, remove_stored_file, size_in_words, store_file};
 use super::permissions;
+use super::tree::{readable_entry, Kind};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use base64::Engine;
 use rusqlite::{Connection, OptionalExtension};
@@ -29,7 +30,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue
         .add(
             "get_mentioned_people",
-            "Gets the current names of the Members and Guests that Mentions name, by ID, as Mentions show them: everyone is told the name, and the Profile only when the caller may see it. An ID that names no Member or Guest, such as an Agent's, is left out.",
+            "Gets the current names of the Members and Guests that Mentions name, by ID, as Mentions show them: the name and Profile of someone whose Profile the caller sees, and the name alone of someone the given Page mentions. Anyone else is left out, as is an ID that names no Member or Guest, such as an Agent's.",
             get_mentioned_people,
         )
         .changes = false;
@@ -106,20 +107,26 @@ const MAX_PEOPLE: usize = 500;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PeopleToName {
+    /// The Page whose Mentions are being shown, which the caller must be
+    /// able to read. Its Mentions are read as they are now, unsaved edits
+    /// included. Absent for content that is in no Page yet.
+    #[serde(default)]
+    pub page_id: Option<String>,
     /// The IDs of the Members and Guests, as Mentions name them. Only the first 500 count.
     pub person_ids: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct MentionedPeople {
-    /// The Members and Guests among those asked for, in the order asked, each once.
+    /// The Members and Guests among those asked for that the caller may be
+    /// told of, in the order asked, each once.
     pub people: Vec<MentionedPerson>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct MentionedPerson {
     pub id: String,
-    /// Their current name, which a Mention shows to everyone.
+    /// Their current name.
     pub name: String,
     /// Their Profile, when the caller may see it; otherwise a Mention shows
     /// the name alone.
@@ -127,6 +134,15 @@ pub struct MentionedPerson {
 }
 
 pub fn get_mentioned_people(core: &Core, principal: &Principal, input: PeopleToName) -> OpResult<MentionedPeople> {
+    Sight::of(&core.db(), principal)?;
+    // Read before the database is taken again, as the live Pages take their own locks.
+    let in_page: HashSet<String> = match &input.page_id {
+        Some(page_id) => {
+            readable_entry(&core.db(), principal, page_id, Some(Kind::Page))?;
+            crate::model::mentioned_people(&core.live().content(page_id)?).into_iter().collect()
+        }
+        None => HashSet::new(),
+    };
     let db = core.db();
     let sight = Sight::of(&db, principal)?;
     let mut people: Vec<MentionedPerson> = Vec::new();
@@ -134,11 +150,13 @@ pub fn get_mentioned_people(core: &Core, principal: &Principal, input: PeopleToN
         if people.iter().any(|person| person.id == id) {
             continue;
         }
-        // A name is given for any ID, since Mentions show it to every reader
-        // of the content; IDs are random, so only that content tells one.
+        // Someone whose Profile the caller may not see is named only where
+        // a Page the caller reads mentions them, and is otherwise not found.
         let Some(person) = read_profile(&db, &id)? else { continue };
         let profile = sight.sees(&db, principal, &person)?.then(|| person.clone());
-        people.push(MentionedPerson { id, name: person.name, profile });
+        if profile.is_some() || in_page.contains(&id) {
+            people.push(MentionedPerson { id, name: person.name, profile });
+        }
     }
     Ok(MentionedPeople { people }.into())
 }
@@ -168,14 +186,20 @@ impl Sight {
         if matches!(viewer, Principal::Member { id, .. } if *id == person.id) {
             return Ok(true);
         }
-        let as_person = Principal::Member {
-            id: person.id.clone(),
-            workspace_admin: person.workspace_admin,
-            session: None,
-            token: None,
-        };
-        Ok(!reach(db, &as_person)?.is_disjoint(reached))
+        Ok(!reach_of_person(db, person)?.is_disjoint(reached))
     }
+}
+
+/// What a Member or Guest reaches themselves, however they sign in: as the
+/// principal they are without a session or a Token, which could only narrow it.
+fn reach_of_person(db: &Connection, person: &Profile) -> rusqlite::Result<HashSet<String>> {
+    let themselves = Principal::Member {
+        id: person.id.clone(),
+        workspace_admin: person.workspace_admin,
+        session: None,
+        token: None,
+    };
+    reach(db, &themselves)
 }
 
 /// The nodes governing what a principal can read, leaving out what is in the
@@ -201,7 +225,7 @@ fn profile_row(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
     let id: String = row.get(0)?;
     let picture_hash: Option<String> = row.get(6)?;
     Ok(Profile {
-        picture: picture_hash.map(|hash| picture_address(&id, &hash)),
+        picture: picture_address(&id, picture_hash.as_deref()),
         id,
         name: row.get(1)?,
         email: row.get(2)?,
@@ -211,15 +235,17 @@ fn profile_row(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
     })
 }
 
-/// The current name of a Member or Guest, deactivated or not, whoever asks.
+/// The current name of a Member or Guest, deactivated or not. Does not
+/// check who may be told it.
 pub(super) fn name_of(db: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
     Ok(read_profile(db, id)?.map(|profile| profile.name))
 }
 
-/// Where a browser shows a person's picture from. Its file's hash is part
-/// of it, so a new picture is never mistaken for a cached old one.
-pub(super) fn picture_address(person_id: &str, hash: &str) -> String {
-    format!("/api/profile_pictures/{person_id}?v={}", &hash[..hash.len().min(16)])
+/// Where a browser shows a person's picture from, given its stored hash;
+/// None without a picture. The hash is part of it, so a new picture is
+/// never mistaken for a cached old one.
+pub(super) fn picture_address(person_id: &str, picture_hash: Option<&str>) -> Option<String> {
+    picture_hash.map(|hash| format!("/api/profile_pictures/{person_id}?v={}", &hash[..hash.len().min(16)]))
 }
 
 fn no_such_person() -> OpError {
@@ -385,6 +411,7 @@ mod tests {
     use crate::ops::grants::{set_grant, GrantHolder, SetGrant};
     use crate::ops::permissions::Role;
     use crate::ops::testing::{fresh, guest, member};
+    use crate::ops::tree::{create_page, NewEntry, NewPage};
 
     fn id_of(principal: &Principal) -> String {
         let Principal::Member { id, .. } = principal else { panic!("not a Member") };
@@ -580,13 +607,21 @@ mod tests {
         assert_eq!(names(&core, &gus), ["Ada", "Gus", "Wanda"]);
     }
 
-    fn mentioned(core: &Core, reader: &Principal, ids: &[&str]) -> Vec<MentionedPerson> {
-        let input = PeopleToName { person_ids: ids.iter().map(|id| id.to_string()).collect() };
-        get_mentioned_people(core, reader, input).unwrap().output.people
+    fn page(core: &Core, writer: &Principal, area_id: &str, markdown: &str) -> String {
+        let entry = NewEntry { area_id: area_id.into(), parent_id: None, title: "Plan".into() };
+        create_page(core, writer, NewPage { entry, markdown: Some(markdown.into()) }).unwrap().output.id
+    }
+
+    fn mentioned(core: &Core, reader: &Principal, page_id: Option<&str>, ids: &[&str]) -> Result<Vec<MentionedPerson>, OpError> {
+        let input = PeopleToName {
+            page_id: page_id.map(str::to_string),
+            person_ids: ids.iter().map(|id| id.to_string()).collect(),
+        };
+        get_mentioned_people(core, reader, input).map(|reply| reply.output.people)
     }
 
     #[test]
-    fn a_mention_shows_everyone_the_name_and_the_profile_only_to_whoever_sees_it() {
+    fn a_reader_is_told_the_name_of_someone_mentioned_in_the_page_and_the_profile_only_if_they_see_it() {
         let core = fresh();
         let ada = member(&core, "Ada", false);
         let ken = member(&core, "Ken", false);
@@ -596,11 +631,11 @@ mod tests {
         let sales = area(&core, &ada, "Sales");
         give(&core, &ada, &sales, holder(&gus));
         deactivate_member(&core, &wanda, MemberId { id: id_of(&ken) }).unwrap();
+        let plan = page(&core, &ada, &sales, "Owner: [@Ken](turtle:member/member-ken)");
 
         let ids = ["member-ken", "member-ada", "member-ken", "nobody", reviewer.id.as_str()];
-        let as_gus = mentioned(&core, &gus, &ids);
         assert_eq!(
-            as_gus,
+            mentioned(&core, &gus, Some(&plan), &ids).unwrap(),
             [
                 MentionedPerson { id: "member-ken".into(), name: "Ken".into(), profile: None },
                 MentionedPerson {
@@ -610,16 +645,52 @@ mod tests {
                 },
             ]
         );
-        let as_ada = mentioned(&core, &ada, &ids);
+        let as_ada = mentioned(&core, &ada, Some(&plan), &ids).unwrap();
         let ken_seen = as_ada[0].profile.as_ref().unwrap();
         assert_eq!((ken_seen.name.as_str(), ken_seen.active), ("Ken", false));
+    }
+
+    #[test]
+    fn a_guest_is_not_told_the_name_of_someone_they_may_not_see_and_no_page_they_read_mentions() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        member(&core, "Ken", false);
+        let gus = guest(&core, "Gus");
+        let sales = area(&core, &ada, "Sales");
+        give(&core, &ada, &sales, holder(&gus));
+        let plan = page(&core, &ada, &sales, "Owner: Ada");
+        let secret = area(&core, &ada, "Secret");
+        let hidden = page(&core, &ada, &secret, "Owner: [@Ken](turtle:member/member-ken)");
+
+        assert_eq!(mentioned(&core, &gus, Some(&plan), &["member-ken"]).unwrap(), []);
+        assert_eq!(mentioned(&core, &gus, None, &["member-ken"]).unwrap(), []);
+        let error = mentioned(&core, &gus, Some(&hidden), &["member-ken"]).unwrap_err();
+        assert_eq!(error.kind(), "not_found");
+    }
+
+    #[test]
+    fn a_mention_a_co_editor_just_typed_shows_its_name_before_it_is_saved() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        member(&core, "Ken", false);
+        let gus = guest(&core, "Gus");
+        let sales = area(&core, &ada, "Sales");
+        give(&core, &ada, &sales, holder(&gus));
+        let plan = page(&core, &ada, &sales, "Owner: Ada");
+
+        let open = core.live().open(&plan).unwrap();
+        let typed = crate::markdown::from_markdown("Owner: [@Ken](turtle:member/member-ken)");
+        core.live().write(&open, &typed, &crate::live::Author::member("member-ada"));
+
+        let as_gus = mentioned(&core, &gus, Some(&plan), &["member-ken"]).unwrap();
+        assert_eq!(as_gus, [MentionedPerson { id: "member-ken".into(), name: "Ken".into(), profile: None }]);
     }
 
     #[test]
     fn nobody_signed_in_is_told_no_names() {
         let core = fresh();
         member(&core, "Ada", false);
-        let error = get_mentioned_people(&core, &Principal::Anonymous, PeopleToName { person_ids: vec!["member-ada".into()] })
+        let error = get_mentioned_people(&core, &Principal::Anonymous, PeopleToName { page_id: None, person_ids: vec!["member-ada".into()] })
             .unwrap_err();
         assert_eq!(error.kind(), "not_permitted");
     }

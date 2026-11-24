@@ -15,6 +15,20 @@ pub struct Marks {
     pub link: Option<String>,
 }
 
+/// An element of running text.
+///
+/// Page links, Mentions and unknown directives have no one plain-text form,
+/// because each reader of plain text needs a different one, and the
+/// differences are deliberate:
+/// - Search (`plain_text` here) leaves out titles, names and unknown
+///   directives: a linked title is not this Page's to give away, searching by
+///   mentioned person is not offered, and what an unknown directive means is
+///   unknown.
+/// - Matching a heading (`text_of` in `ops/content.rs`) uses the title and
+///   `@` and name the reader sees, as an Agent reads them in the Markdown.
+/// - Judging how alike two versions are (`plain_text` in `ydoc.rs`) uses the
+///   IDs and the source, which change exactly when the element does.
+/// - The PDF (`ops/pdf_export.rs`) draws each as an element of its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Inline {
     Text { text: String, marks: Marks },
@@ -74,15 +88,18 @@ impl StatusColor {
     }
 }
 
-/// The name of the Status directive.
+/// The name of the Status directive, and its attribute naming the colour.
+/// They are the Markdown's names; the editor's schema has its own (in
+/// `ydoc.rs`), held to the web app by the editor contract, not to these.
 const STATUS: &str = "status";
+const STATUS_COLOR: &str = "color";
 
 /// A Status written as a directive.
 pub fn status_directive(text: &str, color: StatusColor) -> Directive {
     Directive {
         name: STATUS.to_string(),
         label: Some(text.to_string()),
-        attributes: vec![("color".to_string(), color.name().to_string())],
+        attributes: vec![(STATUS_COLOR.to_string(), color.name().to_string())],
     }
 }
 
@@ -110,7 +127,7 @@ fn known_inline(directive: &Directive) -> Option<Inline> {
     }
     match directive.name.as_str() {
         STATUS => {
-            let color = directive.attributes.iter().find(|(key, _)| key == "color");
+            let color = directive.attributes.iter().find(|(key, _)| key == STATUS_COLOR);
             Some(Inline::Status {
                 text: directive.label.clone().unwrap_or_default(),
                 color: color.map(|(_, name)| StatusColor::named(name)).unwrap_or_default(),

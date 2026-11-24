@@ -363,7 +363,7 @@ impl Chapter<'_> {
                 let link = found.public_url.as_ref().map(|base| pdf::Link::Url(format!("{base}/p/{page_id}")));
                 Some(plain(title, link))
             }
-            // A badge with the name alone: the PDF shows no pictures of
+            // The name alone, in a rounded frame: the PDF shows no pictures of
             // people and leads to no Profile (ADR-0012).
             Inline::Mention { person_id } => {
                 found.names.get(person_id).map(|name| pdf::Inline::Mention { name: name.clone() })
@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mention_is_a_badge_with_the_current_name_and_no_link() {
+    fn a_mention_shows_the_current_name_and_no_link() {
         let mut core = fresh();
         core.core.set_public_url(Some(crate::public_url::PublicUrl::parse("https://turtle.example.org").unwrap()));
         let grace = member(&core, "Grace", false);

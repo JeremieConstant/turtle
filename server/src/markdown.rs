@@ -28,18 +28,18 @@ pub enum Linked<'a> {
 /// The text a Page link or Mention shows: a Page's title, or None when the
 /// reader may not read that Page; a person's current name, or None when
 /// there is no such Member or Guest.
-pub type Titles<'a> = &'a dyn Fn(Linked) -> Option<String>;
+pub type LinkTexts<'a> = &'a dyn Fn(Linked) -> Option<String>;
 
 /// The Markdown of some content, with Page links and Mentions shown without
 /// titles or names.
 pub fn to_markdown(blocks: &[Block]) -> String {
-    to_markdown_with_titles(blocks, &|_| None)
+    to_markdown_with_link_texts(blocks, &|_| None)
 }
 
 /// The Markdown of some content, with each Page link and Mention shown with
-/// the text `titles` gives it. Reading it back ignores that text.
-pub fn to_markdown_with_titles(blocks: &[Block], titles: Titles) -> String {
-    let mut out = render_blocks(blocks, "\n\n", None, titles);
+/// the text `link_texts` gives it. Reading it back ignores that text.
+pub fn to_markdown_with_link_texts(blocks: &[Block], link_texts: LinkTexts) -> String {
+    let mut out = render_blocks(blocks, "\n\n", None, link_texts);
     if !out.is_empty() {
         out.push('\n');
     }
@@ -47,7 +47,7 @@ pub fn to_markdown_with_titles(blocks: &[Block], titles: Titles) -> String {
 }
 
 /// `parent_bullet` is the marker of the list item these blocks sit in, if any.
-fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>, titles: Titles) -> String {
+fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>, link_texts: LinkTexts) -> String {
     let mut parts: Vec<String> = Vec::new();
     // Two lists of the same kind in a row would merge into one when read back,
     // so the second one switches to the other marker. A list that opens an
@@ -58,12 +58,12 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
         let mut bullet = None;
         let mut delimiter = None;
         let rendered = match block {
-            Block::Paragraph(_) | Block::Heading { .. } => render_inline_block(block, titles),
+            Block::Paragraph(_) | Block::Heading { .. } => render_inline_block(block, link_texts),
             Block::CodeBlock { language, text } => render_code_block(language.as_deref(), text),
-            Block::Blockquote(children) => quote(&render_blocks(children, "\n\n", None, titles)),
+            Block::Blockquote(children) => quote(&render_blocks(children, "\n\n", None, link_texts)),
             Block::Callout { kind, content } => {
                 let marker = format!("[!{}]", kind.name().to_ascii_uppercase());
-                let inner = render_blocks(content, "\n\n", None, titles);
+                let inner = render_blocks(content, "\n\n", None, link_texts);
                 // A paragraph continues on the marker's next line, as people
                 // write callouts; anything else might not end the marker's
                 // paragraph, so it follows an empty line.
@@ -88,15 +88,15 @@ fn render_blocks(blocks: &[Block], separator: &str, parent_bullet: Option<char>,
                     Block::BulletList(items) => items.iter().map(|item| (None, item.as_slice())).collect(),
                     _ => unreachable!(),
                 };
-                render_list(&items, Some(marker), |_| marker.to_string(), titles)
+                render_list(&items, Some(marker), |_| marker.to_string(), link_texts)
             }
             Block::OrderedList { start, items } => {
                 let delim = if previous_delimiter == Some('.') { ')' } else { '.' };
                 delimiter = Some(delim);
                 let items: Vec<_> = items.iter().map(|item| (None, item.as_slice())).collect();
-                render_list(&items, None, |i| format!("{}{}", start + i as u64, delim), titles)
+                render_list(&items, None, |i| format!("{}{}", start + i as u64, delim), link_texts)
             }
-            Block::Table(rows) => render_table(rows, titles),
+            Block::Table(rows) => render_table(rows, link_texts),
             Block::HorizontalRule => "***".to_string(),
             Block::UnknownDirective { source } => source.clone(),
         };
@@ -132,7 +132,7 @@ fn render_list(
     items: &[(Option<bool>, &[Block])],
     bullet: Option<char>,
     marker: impl Fn(usize) -> String,
-    titles: Titles,
+    link_texts: LinkTexts,
 ) -> String {
     let tight = items.iter().all(|(_, item)| is_tight_item(item));
     let separator = if tight { "\n" } else { "\n\n" };
@@ -141,7 +141,7 @@ fn render_list(
         .enumerate()
         .map(|(i, (task, item))| {
             let marker = marker(i);
-            let mut body = render_blocks(item, separator, bullet, titles);
+            let mut body = render_blocks(item, separator, bullet, link_texts);
             if let Some(checked) = task {
                 let checkbox = if *checked { "[x]" } else { "[ ]" };
                 // The checkbox only counts in front of a paragraph, so an item
@@ -181,11 +181,11 @@ fn render_list(
 
 /// Renders a table as GitHub writes them: a header row, a row of dashes, and
 /// the other rows.
-fn render_table(rows: &[Row], titles: Titles) -> String {
+fn render_table(rows: &[Row], link_texts: LinkTexts) -> String {
     let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
     let mut lines: Vec<String> = Vec::new();
     for (i, row) in rows.iter().enumerate() {
-        lines.push(line(row.iter().map(|cell| render_cell(cell, titles)).collect()));
+        lines.push(line(row.iter().map(|cell| render_cell(cell, link_texts)).collect()));
         if i == 0 {
             lines.push(line(vec!["---".to_string(); row.len()]));
         }
@@ -197,8 +197,8 @@ fn render_table(rows: &[Row], titles: Titles) -> String {
 /// break is `<br>`, and every `|` is escaped so it does not end the cell,
 /// even inside code or a link address. Like a paragraph, it falls back to
 /// HTML tags for formatting the markers cannot express.
-fn render_cell(cell: &[Inline], titles: Titles) -> String {
-    let render = |html| render_inlines(cell, InlinePlace::Cell, html, titles).replace('|', "\\|");
+fn render_cell(cell: &[Inline], link_texts: LinkTexts) -> String {
+    let render = |html| render_inlines(cell, InlinePlace::Cell, html, link_texts).replace('|', "\\|");
     let markdown = render(false);
     let read = from_markdown(&format!("| {markdown} |\n| --- |"));
     if read == [Block::Table(vec![vec![cell.to_vec()]])] {
@@ -250,21 +250,21 @@ fn longest_run(text: &str, needle: char) -> usize {
 /// Renders a paragraph or heading. Markdown's emphasis markers only work next
 /// to certain characters (`**bold **x` does not parse as bold), so the result
 /// is read back and, if it does not match, written again with HTML tags.
-fn render_inline_block(block: &Block, titles: Titles) -> String {
-    let markdown = render_inline_block_with(block, false, titles);
+fn render_inline_block(block: &Block, link_texts: LinkTexts) -> String {
+    let markdown = render_inline_block_with(block, false, link_texts);
     if from_markdown(&markdown).as_slice() == std::slice::from_ref(block) {
         markdown
     } else {
-        render_inline_block_with(block, true, titles)
+        render_inline_block_with(block, true, link_texts)
     }
 }
 
-fn render_inline_block_with(block: &Block, html: bool, titles: Titles) -> String {
+fn render_inline_block_with(block: &Block, html: bool, link_texts: LinkTexts) -> String {
     match block {
-        Block::Paragraph(content) => render_inlines(content, InlinePlace::Paragraph, html, titles),
+        Block::Paragraph(content) => render_inlines(content, InlinePlace::Paragraph, html, link_texts),
         Block::Heading { level, content } => {
             let hashes = "#".repeat(*level as usize);
-            let inner = render_inlines(content, InlinePlace::Heading, html, titles);
+            let inner = render_inlines(content, InlinePlace::Heading, html, link_texts);
             if inner.is_empty() {
                 hashes
             } else {
@@ -333,7 +333,7 @@ enum InlinePlace {
     Cell,
 }
 
-fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Titles) -> String {
+fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, link_texts: LinkTexts) -> String {
     let mut out = String::new();
     let mut open: Vec<Mark> = Vec::new();
     let mut at_line_start = true;
@@ -371,10 +371,10 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
                 }
                 let (shown, address) = match inline {
                     Inline::PageLink { page_id } => {
-                        (titles(Linked::Page(page_id)).unwrap_or_default(), format!("{PAGE_ADDRESS_SCHEME}{page_id}"))
+                        (link_texts(Linked::Page(page_id)).unwrap_or_default(), format!("{PAGE_ADDRESS_SCHEME}{page_id}"))
                     }
                     Inline::Mention { person_id } => {
-                        let name = titles(Linked::Person(person_id)).unwrap_or_default();
+                        let name = link_texts(Linked::Person(person_id)).unwrap_or_default();
                         (format!("@{name}"), format!("{MEMBER_ADDRESS_SCHEME}{person_id}"))
                     }
                     _ => unreachable!("matched above"),
@@ -1443,7 +1443,7 @@ mod tests {
         let blocks = vec![para(vec![text("See "), page_link("a1b2"), text(" first.")])];
         let titles = |linked: Linked| (linked == Linked::Page("a1b2")).then(|| "Setup [draft] *v2*".to_string());
 
-        let markdown = to_markdown_with_titles(&blocks, &titles);
+        let markdown = to_markdown_with_link_texts(&blocks, &titles);
 
         assert_eq!(markdown, "See [Setup \\[draft\\] \\*v2\\*](turtle:a1b2) first.\n");
         assert_eq!(from_markdown(&markdown), blocks);
@@ -1453,7 +1453,7 @@ mod tests {
     fn a_page_link_whose_title_may_not_be_shown_has_no_text() {
         let blocks = vec![para(vec![page_link("a1b2")])];
 
-        assert_eq!(to_markdown_with_titles(&blocks, &|_| None), "[](turtle:a1b2)\n");
+        assert_eq!(to_markdown_with_link_texts(&blocks, &|_| None), "[](turtle:a1b2)\n");
         assert_eq!(to_markdown(&blocks), "[](turtle:a1b2)\n");
         assert_eq!(from_markdown("[](turtle:a1b2)"), blocks);
     }
@@ -1494,7 +1494,7 @@ mod tests {
         let blocks = vec![para(vec![text("Ask "), mention("m1"), text(".")])];
         let names = |linked: Linked| (linked == Linked::Person("m1")).then(|| "Ada [the] *first*".to_string());
 
-        let markdown = to_markdown_with_titles(&blocks, &names);
+        let markdown = to_markdown_with_link_texts(&blocks, &names);
 
         assert_eq!(markdown, "Ask [@Ada \\[the\\] \\*first\\*](turtle:member/m1).\n");
         assert_eq!(from_markdown(&markdown), blocks);
@@ -1851,7 +1851,7 @@ mod tests {
             let blocks = normalize(rng.blocks(0));
             // Page links shown with a title must read back the same as without one.
             let title = format!("t `x` ](y) <br> *z*\\ !{}", rng.text());
-            for markdown in [to_markdown(&blocks), to_markdown_with_titles(&blocks, &|_| Some(title.clone()))] {
+            for markdown in [to_markdown(&blocks), to_markdown_with_link_texts(&blocks, &|_| Some(title.clone()))] {
                 if from_markdown(&markdown) != blocks {
                     failures.push((seed, markdown));
                 }

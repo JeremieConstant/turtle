@@ -332,7 +332,7 @@ pub enum Inline {
     Break,
     /// One of the document's images.
     Image { path: String, alt: String },
-    /// A Mention, drawn as a badge with the person's name.
+    /// A Mention, drawn with the person's name in a rounded frame.
     Mention { name: String },
     /// A directive Turtle does not know, shown as a placeholder naming it.
     Unknown { name: String },

@@ -22,7 +22,7 @@ const Document = Node.create({
  * writes the same element and attribute names in `server/src/ydoc.rs`;
  * `web/scripts/editor-contract.test.ts` holds the two to each other.
  */
-export function contentExtensions(image: Partial<ImageOptions> = {}): Extensions {
+export function contentExtensions(image: Partial<ImageOptions> = {}, pageId: string | null = null): Extensions {
   return [
     // Underline is off because Markdown cannot express it (ADR-0006).
     // The trailing node is off because every open editor would append its
@@ -30,7 +30,7 @@ export function contentExtensions(image: Partial<ImageOptions> = {}): Extensions
     StarterKit.configure({ document: false, undoRedo: false, underline: false, trailingNode: false }),
     Document,
     PageLink,
-    Mention,
+    Mention.configure({ pageId }),
     TaskList,
     // A task may hold more than a line, as it can in Markdown.
     TaskItem.configure({ nested: true }),
