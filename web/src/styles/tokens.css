@@ -228,6 +228,9 @@
   /* How long an Agent's change stays marked before the mark fades. Not a
      duration of movement, so it holds under reduced motion too. */
   --delay-agent: 5s;
+  /* How long a passing state waits before it is shown, so one that resolves
+     at once never flashes. Not movement either. */
+  --delay-notice: 400ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --press-scale: 0.97;
