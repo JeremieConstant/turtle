@@ -9,6 +9,9 @@ import { call } from './ops'
 import { router } from './router.svelte'
 import { profileAddress } from './routes'
 
+/** The size of a Mention's Profile picture in pixels, as --size-mention-picture in tokens.css. */
+const MENTION_PICTURE = 20
+
 /** How a Mention is written as a link address: `turtle:member/` and the person's ID, as in its Markdown (ADR-0013). */
 export const SCHEME = 'turtle:member/'
 
@@ -176,7 +179,7 @@ export const Mention = Node.create<MentionOptions, MentionStorage>({
       })
       const showMark = (person: { name: string; picture: string | null } | null) => {
         if (mounted) void unmount(mounted)
-        mounted = person === null ? null : mount(ProfilePicture, { target: mark, props: { ...person, size: 20 } })
+        mounted = person === null ? null : mount(ProfilePicture, { target: mark, props: { ...person, size: MENTION_PICTURE } })
       }
       const stop = this.storage.people.watch(personId, person => {
         const appearance = appearanceOf(person)
