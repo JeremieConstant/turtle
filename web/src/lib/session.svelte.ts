@@ -3,6 +3,7 @@ import type { Member } from './operations.gen'
 
 let loaded = $state(false)
 let setupRequired = $state(false)
+let sendsMail = $state(false)
 let member = $state.raw<Member | null>(null)
 
 /** Who is signed in, and whether the installation still needs its first account. */
@@ -13,6 +14,10 @@ export const session = {
   get setupRequired() {
     return setupRequired
   },
+  /** Whether Turtle mails invitations and password reset links. */
+  get sendsMail() {
+    return sendsMail
+  },
   get member() {
     return member
   },
@@ -20,6 +25,7 @@ export const session = {
   async load() {
     const current = await call('get_session', {})
     setupRequired = current.setup_required
+    sendsMail = current.sends_mail
     member = current.member ?? null
     loaded = true
   },

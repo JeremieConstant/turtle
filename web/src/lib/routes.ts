@@ -3,6 +3,8 @@ export type Route =
   | { screen: 'home' }
   | { screen: 'setup' }
   | { screen: 'sign-in' }
+  /** Where a Member who forgot their password asks for a reset link by mail. */
+  | { screen: 'forgot-password' }
   | { screen: 'area'; id: string }
   | { screen: 'page'; id: string }
   /** The Profile of a Member or Guest. */
@@ -37,6 +39,7 @@ export function parseAddress(pathname: string, query = ''): Route {
   if (pathname === '/search') return { screen: 'search', query: new URLSearchParams(query).get('q') ?? '' }
   if (pathname === '/setup') return { screen: 'setup' }
   if (pathname === '/sign-in') return { screen: 'sign-in' }
+  if (pathname === '/forgot-password') return { screen: 'forgot-password' }
   if (pathname === '/authorize') return { screen: 'authorize', query }
   if (pathname === '/settings/connect-ai') return { screen: 'connect-ai' }
   if (pathname === '/settings/members') return { screen: 'members' }
@@ -114,7 +117,7 @@ function address(prefix: keyof typeof ADDRESSED, id: string, label: string): str
 }
 
 /** The screens that have no place in the shell: nobody is signed in on them, or need not be. */
-const OUTSIDE_SHELL: Route['screen'][] = ['setup', 'sign-in', 'invitation', 'password-reset', 'authorize']
+const OUTSIDE_SHELL: Route['screen'][] = ['setup', 'sign-in', 'forgot-password', 'invitation', 'password-reset', 'authorize']
 
 /** Whether a screen sits in the shell, beside the sidebar. */
 export function inShell(route: Route): boolean {

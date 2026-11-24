@@ -216,11 +216,12 @@ mod tests {
     /// The operations that only make sense in a browser, so they have no MCP
     /// tool. Written out on purpose: an operation gets onto this list by a
     /// deliberate change here, never by accident.
-    const BROWSER_ONLY: [&str; 13] = [
+    const BROWSER_ONLY: [&str; 14] = [
         "create_first_account",
         "sign_in",
         "sign_out",
         "accept_invitation",
+        "request_password_reset",
         "reset_password",
         "create_token",
         "list_tokens",

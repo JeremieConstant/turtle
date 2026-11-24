@@ -58,6 +58,7 @@ test('a built Page address leads back to the same Page', () => {
 test('the setup and sign-in screens have their own addresses', () => {
   expect(parseAddress('/setup')).toEqual({ screen: 'setup' })
   expect(parseAddress('/sign-in')).toEqual({ screen: 'sign-in' })
+  expect(parseAddress('/forgot-password')).toEqual({ screen: 'forgot-password' })
 })
 
 test('an Area address carries the ID and a readable name, which is optional', () => {
@@ -133,7 +134,7 @@ test('the screens of a signed-in person sit in the shell', () => {
 })
 
 test('setup, signing in and the links someone was given stay outside the shell', () => {
-  for (const address of ['/setup', '/sign-in', '/join/s3cret', '/reset-password/s3cret']) {
+  for (const address of ['/setup', '/sign-in', '/forgot-password', '/join/s3cret', '/reset-password/s3cret']) {
     expect(inShell(parseAddress(address)), address).toBe(false)
   }
 })

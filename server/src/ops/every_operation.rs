@@ -69,6 +69,8 @@ fn table() -> Vec<Row> {
             [REFUSED, REFUSED, REFUSED, REFUSED, OK],
         ),
         ("create_password_reset", |f| json!({"id": f.ken_id}), [REFUSED, REFUSED, REFUSED, REFUSED, OK]),
+        // Turtle here sends no mail, so nobody can ask for a reset link.
+        ("request_password_reset", |_| json!({"email": "member-ken@example.org"}), [REFUSED; 5]),
         ("reset_password", |_| json!({"secret": "made-up", "password": "long enough password"}), [REFUSED; 5]),
         ("get_profile", |f| json!({"id": f.ken_id}), [OK; 5]),
         ("list_profiles", |_| json!({}), [OK; 5]),

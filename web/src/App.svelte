@@ -17,6 +17,7 @@
   import AuthorizeScreen from './screens/AuthorizeScreen.svelte'
   import ConnectAiScreen from './screens/ConnectAiScreen.svelte'
   import DeletedAreasScreen from './screens/DeletedAreasScreen.svelte'
+  import ForgotPasswordScreen from './screens/ForgotPasswordScreen.svelte'
   import InvitationScreen from './screens/InvitationScreen.svelte'
   import MembersScreen from './screens/MembersScreen.svelte'
   import NotFoundScreen from './screens/NotFoundScreen.svelte'
@@ -45,8 +46,10 @@
     if (route.screen === 'setup') return session.member ? '/' : '/sign-in'
     // A link someone was given works whether or not anyone is signed in here.
     if (route.screen === 'invitation' || route.screen === 'password-reset') return null
-    if (!session.member) return route.screen === 'sign-in' ? null : '/sign-in'
-    if (route.screen === 'sign-in') return '/'
+    // Without mail, a reset link can only come from a Workspace Admin.
+    if (route.screen === 'forgot-password' && !session.sendsMail) return session.member ? '/' : '/sign-in'
+    if (!session.member) return route.screen === 'sign-in' || route.screen === 'forgot-password' ? null : '/sign-in'
+    if (route.screen === 'sign-in' || route.screen === 'forgot-password') return '/'
     return null
   }
 
@@ -127,6 +130,8 @@
     <SetupScreen />
   {:else if route.screen === 'sign-in'}
     <SignInScreen {returnTo} />
+  {:else if route.screen === 'forgot-password'}
+    <ForgotPasswordScreen />
   {:else if route.screen === 'invitation'}
     {#key route.secret}
       <InvitationScreen secret={route.secret} />

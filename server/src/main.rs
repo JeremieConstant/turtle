@@ -4,6 +4,7 @@ mod diff;
 mod directive;
 mod http_api;
 mod live;
+mod mail;
 mod markdown;
 mod mcp;
 mod model;
@@ -97,11 +98,18 @@ async fn main() -> anyhow::Result<()> {
         _ => None,
     };
 
+    // Invitations and password reset links are mailed when an SMTP server
+    // is set up; otherwise they are passed on by hand.
+    let smtp_url = std::env::var("TURTLE_SMTP_URL").ok();
+    let mail_from = std::env::var("TURTLE_MAIL_FROM").ok();
+    let mailer = mail::from_settings(smtp_url.as_deref(), mail_from.as_deref(), public_url.as_ref())?;
+
     // Opening the core brings the schema up to date.
     let db_path = store::database_in(&data_dir)?;
     let mut core = ops::Core::open(&db_path)?;
     core.set_attachment_limit(attachment_limit);
     core.set_public_url(public_url);
+    core.set_mailer(mailer.map(|smtp| Arc::new(smtp) as Arc<dyn mail::Mailer>));
     let core = Arc::new(core);
     // Whether Turtle looks reachable only from its intranet may take a name
     // lookup; it is found out now, off the async workers, so the Connect AI
