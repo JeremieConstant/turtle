@@ -3,7 +3,8 @@
    * The sidebar of every screen in the shell: the search, the Areas the
    * person can read with the tree of the open one beneath its name, ending in
    * its Trash for those who can see it, and at
-   * the foot the menu with the settings, the appearance and signing out.
+   * the foot the menu with one's own Profile, the settings, the appearance
+   * and signing out.
    */
   import { onDestroy, untrack } from 'svelte'
   import { APPEARANCES, appearance, chooseAppearance, type Appearance } from '../lib/appearance.svelte'
@@ -14,7 +15,7 @@
   import { call } from '../lib/ops'
   import type { Area, Kind } from '../lib/operations.gen'
   import { router } from '../lib/router.svelte'
-  import { areaAddress, pageAddress, trashAddress } from '../lib/routes'
+  import { areaAddress, pageAddress, profileAddress, trashAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
   import { reportFailure } from '../lib/toasts'
   import { createEntry, foldable } from '../lib/tree'
@@ -241,6 +242,11 @@
 </div>
 
 <div class="menu" role="menu" tabindex="-1" aria-label="Settings and signing out" popover bind:this={accountMenu} onkeydown={menuKeys}>
+  {#if session.member}
+    {@const own = profileAddress(session.member.id, session.member.name)}
+    <a class="menu-item" role="menuitem" href={own} onclick={event => go(event, own)}>Your Profile</a>
+    <hr />
+  {/if}
   {#if session.member?.workspace_admin}
     <a class="menu-item" role="menuitem" href="/settings/members" onclick={event => go(event, '/settings/members')}>Members</a>
     <a class="menu-item" role="menuitem" href="/settings/all-connected-apps" onclick={event => go(event, '/settings/all-connected-apps')}
