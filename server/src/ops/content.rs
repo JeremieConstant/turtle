@@ -22,7 +22,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         .changes = false;
     catalogue.add(
         "replace_page",
-        "Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role.",
+        "Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. A Status, a short coloured marker, is written `:status[ON TRACK]{color=green}`, in grey, blue, green, yellow, red or purple, and grey without a color. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role.",
         replace_page,
     );
     catalogue.add(
@@ -61,7 +61,7 @@ pub struct NewSection {
     pub page_id: String,
     /// The text of the Section's heading, without the leading `#`s, and with a
     /// Page link in it written as its title, as in "See Setup" for
-    /// `## See [Setup](turtle:ID)`.
+    /// `## See [Setup](turtle:ID)`, and a Status as its text.
     pub heading: String,
     /// Which of the Sections with this heading, counting from 1 at the top
     /// of the Page. Needed only when several Sections have this heading.
@@ -177,6 +177,7 @@ fn text_of(content: &[Inline], titles: &HashMap<String, String>) -> String {
             Inline::Image { alt, .. } => alt.as_str(),
             Inline::PageLink { page_id } => titles.get(page_id).map_or("", String::as_str),
             Inline::UnknownDirective { .. } => "",
+            Inline::Status { text, .. } => text.as_str(),
         })
         .collect();
     text.trim().to_string()

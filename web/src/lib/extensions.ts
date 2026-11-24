@@ -5,6 +5,7 @@ import { Callout } from './callout'
 import { TOP_BLOCK, UnknownDirective, UnknownDirectiveBlock } from './directive'
 import { Image, type ImageOptions } from './image'
 import { PageLink } from './pageLink'
+import { Status } from './status'
 import { TABLE_EXTENSIONS } from './table'
 
 /** A Page's content: blocks, and those that stand only at its top. */
@@ -34,6 +35,7 @@ export function contentExtensions(image: Partial<ImageOptions> = {}): Extensions
     Callout,
     ...TABLE_EXTENSIONS,
     Image.configure(image),
+    Status,
     UnknownDirective,
     UnknownDirectiveBlock,
   ]

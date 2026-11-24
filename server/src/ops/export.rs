@@ -297,7 +297,7 @@ fn point_into_export(blocks: &mut [Block], from: &[String], addresses: &Addresse
                 *inline = Inline::Text { text: title.clone(), marks };
             }
         }
-        Inline::Text { .. } | Inline::HardBreak | Inline::UnknownDirective { .. } => {}
+        Inline::Text { .. } | Inline::HardBreak | Inline::UnknownDirective { .. } | Inline::Status { .. } => {}
     });
 }
 
@@ -473,6 +473,20 @@ mod tests {
         let files = export_area(&core, &grace, &area_id);
 
         assert!(files["Board.md"].ends_with(&format!("---\n\n{content}")), "{}", files["Board.md"]);
+    }
+
+    #[test]
+    fn statuses_are_exported_as_directives() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let content = "| Task | State |\n| --- | --- |\n| Build | :status[On track]{color=green} |\n| Ship | :status[Idle] |\n";
+        page(&core, &grace, &area_id, None, "Board", content);
+
+        let files = export_area(&core, &grace, &area_id);
+
+        let expected = "| Task | State |\n| --- | --- |\n| Build | :status[On track]{color=green} |\n| Ship | :status[Idle]{color=grey} |\n";
+        assert!(files["Board.md"].ends_with(&format!("---\n\n{expected}")), "{}", files["Board.md"]);
     }
 
     /// The frontmatter line of a file that starts with the given key.

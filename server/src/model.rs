@@ -30,6 +30,57 @@ pub enum Inline {
     /// such as `:acme.demo[hi]{x=1}`. It is kept exactly as it was written,
     /// so a Page survives an installation that lacks the plugin it is from.
     UnknownDirective { source: String },
+    /// A Status: a short coloured marker, written `:status[ON TRACK]{color=green}`.
+    /// Its text is kept as typed and shown in uppercase. It takes no
+    /// formatting, stays on one line and holds no `|`, which would end a
+    /// table cell.
+    Status { text: String, color: StatusColor },
+}
+
+/// The colours a Status comes in. They are named in the content; each theme
+/// and the PDF give them their own shades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusColor {
+    #[default]
+    Grey,
+    Blue,
+    Green,
+    Yellow,
+    Red,
+    Purple,
+}
+
+impl StatusColor {
+    pub const ALL: [StatusColor; 6] = [Self::Grey, Self::Blue, Self::Green, Self::Yellow, Self::Red, Self::Purple];
+
+    /// The name the colour is written and stored by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Grey => "grey",
+            Self::Blue => "blue",
+            Self::Green => "green",
+            Self::Yellow => "yellow",
+            Self::Red => "red",
+            Self::Purple => "purple",
+        }
+    }
+
+    /// The colour by its name; any other name is grey.
+    pub fn named(name: &str) -> Self {
+        Self::ALL.into_iter().find(|c| c.name() == name).unwrap_or_default()
+    }
+}
+
+/// The name of the Status directive.
+const STATUS: &str = "status";
+
+/// A Status written as a directive.
+pub fn status_directive(text: &str, color: StatusColor) -> Directive {
+    Directive {
+        name: STATUS.to_string(),
+        label: Some(text.to_string()),
+        attributes: vec![("color".to_string(), color.name().to_string())],
+    }
 }
 
 /// How a Page link is written as a link address: `turtle:` and the Page's ID.
@@ -46,9 +97,21 @@ pub fn inline_directive(source: &str) -> Option<Inline> {
 
 /// The element one of Turtle's own directives in running text stands for.
 /// Their names are bare and reserved (ADR-0013); each is matched here by
-/// name. There is none yet: the Status will be the first.
-fn known_inline(_directive: &Directive) -> Option<Inline> {
-    None
+/// name. A namespaced one is never Turtle's.
+fn known_inline(directive: &Directive) -> Option<Inline> {
+    if directive.is_namespaced() {
+        return None;
+    }
+    match directive.name.as_str() {
+        STATUS => {
+            let color = directive.attributes.iter().find(|(key, _)| key == "color");
+            Some(Inline::Status {
+                text: directive.label.clone().unwrap_or_default(),
+                color: color.map(|(_, name)| StatusColor::named(name)).unwrap_or_default(),
+            })
+        }
+        _ => None,
+    }
 }
 
 /// Whether the source is exactly one block directive Turtle does not know.
@@ -258,6 +321,11 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
                 linked_page = None;
                 out.push(Inline::UnknownDirective { source })
             }
+            // A directive in running text stays on one line and holds no `|`.
+            Inline::Status { text, color } => {
+                linked_page = None;
+                out.push(Inline::Status { text: text.replace(['\n', '\r'], " ").replace('|', "/"), color })
+            }
             Inline::Image { src, alt } => {
                 linked_page = None;
                 out.push(Inline::Image {
@@ -348,6 +416,11 @@ pub fn plain_text(blocks: &[Block]) -> String {
                 Inline::PageLink { .. } => out.push(' '),
                 // What a directive Turtle does not know means is unknown.
                 Inline::UnknownDirective { .. } => out.push(' '),
+                Inline::Status { text, .. } => {
+                    out.push(' ');
+                    out.push_str(text);
+                    out.push(' ');
+                }
             }
         }
         out.push('\n');

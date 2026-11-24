@@ -66,6 +66,24 @@
   --color-callout-warning-soft: light-dark(rgb(161 92 7 / 0.08), rgb(240 166 74 / 0.1));
   --color-callout-danger: light-dark(#b42318, #ff8a80);
   --color-callout-danger-soft: light-dark(rgb(180 35 24 / 0.07), rgb(255 138 128 / 0.1));
+  /* Each colour of a Status: its fill, and its text, which meets WCAG AA
+     contrast on it (`web/src/lib/status.test.ts` checks). */
+  --color-status-grey: light-dark(#e9eaee, #3a3b3f);
+  --color-status-grey-text: light-dark(#3b3f48, #e4e5e9);
+  --color-status-blue: light-dark(#dce8fd, #1d3461);
+  --color-status-blue-text: light-dark(#0b4bb3, #b5cffb);
+  --color-status-green: light-dark(#dcf3e4, #173f29);
+  --color-status-green-text: light-dark(#1b6b3a, #a6e3bc);
+  --color-status-yellow: light-dark(#fcefc7, #4a3a10);
+  --color-status-yellow-text: light-dark(#7a4d00, #f5d98a);
+  --color-status-red: light-dark(#fde2e1, #5a1f1d);
+  --color-status-red-text: light-dark(#a8221c, #ffc2bd);
+  --color-status-purple: light-dark(#ede3fc, #3a2766);
+  --color-status-purple-text: light-dark(#5b2daf, #d9c6fb);
+  /* A Status's room around its text, in its own text size; wider without text. */
+  --pad-status-y: 0.1em;
+  --pad-status-x: 0.4em;
+  --pad-status-empty: 0.8em;
   /* What lies over the page behind a dialog and behind the drawer. */
   --color-backdrop: light-dark(rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.5));
   --color-scrim: light-dark(rgb(0 0 0 / 0.2), rgb(0 0 0 / 0.5));
@@ -130,6 +148,7 @@
   --tracking-display: -0.022em;
   --tracking-heading: -0.012em;
   --tracking-small: 0.01em;
+  --tracking-status: 0.03em;
   --weight-normal: 400;
   --weight-medium: 500;
   --weight-strong: 600;

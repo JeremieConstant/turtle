@@ -198,6 +198,16 @@
     background: var(--color-selected);
   }
 
+  /* A Status is changed with a click, while it can be edited. */
+  .editor:not(.readonly) :global(.tiptap .status) {
+    cursor: pointer;
+  }
+
+  .editor :global(.tiptap .status.ProseMirror-selectednode) {
+    outline: var(--line-thick) solid var(--color-focus);
+    outline-offset: var(--line);
+  }
+
   .editor :global(.tiptap code) {
     padding: var(--space-hair) var(--space-1);
     border-radius: var(--radius-s);

@@ -102,9 +102,32 @@
 // A directive Turtle does not know, shown as a grey placeholder naming it.
 #let unknown(name) = text(size: 0.86em, fill: muted, data.labels.unknown_element + ": " + name)
 
+// A Status: its text in a coloured marker, which breaks across lines
+// rather than run out of a narrow table cell. Each pair meets WCAG AA
+// text contrast on paper.
+#let status-colors = (
+  grey: (fill: rgb("#e9eaee"), text: rgb("#3b3f48")),
+  blue: (fill: rgb("#dce8fd"), text: rgb("#0b4bb3")),
+  green: (fill: rgb("#dcf3e4"), text: rgb("#1b6b3a")),
+  yellow: (fill: rgb("#fcefc7"), text: rgb("#7a4d00")),
+  red: (fill: rgb("#fde2e1"), text: rgb("#a8221c")),
+  purple: (fill: rgb("#ede3fc"), text: rgb("#5b2daf")),
+)
+#let status(x) = {
+  let colors = status-colors.at(x.color)
+  highlight(
+    fill: colors.fill,
+    radius: 2pt,
+    extent: 2pt,
+    text(size: 0.8em, weight: 700, tracking: 0.04em, fill: colors.text, x.text),
+  )
+}
+
 #let inline-of(x) = {
   if x.type == "break" {
     linebreak()
+  } else if x.type == "status" {
+    status(x)
   } else if x.type == "unknown" {
     box(fill: wash, stroke: 0.5pt + rule, radius: 3pt, inset: (x: 3pt), outset: (y: 2pt), unknown(x.name))
   } else if x.type == "image" {

@@ -1043,7 +1043,7 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
     }
     output: PageMarkdown
   }
-  /** Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
+  /** Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. A Status, a short coloured marker, is written `:status[ON TRACK]{color=green}`, in grey, blue, green, yellow, red or purple, and grey without a color. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
   replace_page: {
     input: {
       markdown: string
@@ -1056,7 +1056,7 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
     input: {
       /** The text of the Section's heading, without the leading `#`s, and with a
 Page link in it written as its title, as in "See Setup" for
-`## See [Setup](turtle:ID)`. */
+`## See [Setup](turtle:ID)`, and a Status as its text. */
       heading: string
       /** What replaces the Section, heading included. */
       markdown: string

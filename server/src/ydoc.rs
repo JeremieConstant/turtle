@@ -7,7 +7,7 @@
 //! fixtures in `tests/fixtures`.
 
 use crate::diff::{align, common_edges, text_hunks, Fit, Step};
-use crate::model::{normalize, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem};
+use crate::model::{normalize, Block, CalloutKind, Cell, Inline, Marks, Row, StatusColor, TaskItem};
 use std::collections::HashMap;
 use std::sync::Arc;
 use yrs::types::text::YChange;
@@ -40,6 +40,10 @@ const TABLE_CELL: &str = "tableCell";
 const UNKNOWN_DIRECTIVE: &str = "unknownDirective";
 const UNKNOWN_DIRECTIVE_BLOCK: &str = "unknownDirectiveBlock";
 const SOURCE: &str = "source";
+/// The element a Status is stored as, and its attributes.
+const STATUS: &str = "status";
+const STATUS_TEXT: &str = "text";
+const STATUS_COLOR: &str = "color";
 
 /// The content of a Page from its stored state.
 pub fn read_state(state: &[u8]) -> anyhow::Result<Vec<Block>> {
@@ -104,6 +108,7 @@ fn read_blocks<T: ReadTxn>(txn: &T, nodes: impl Iterator<Item = XmlOut>) -> Vec<
                         Inline::Image { .. } => String::new(),
                         Inline::PageLink { .. } => String::new(),
                         Inline::UnknownDirective { source } => source,
+                        Inline::Status { text, .. } => text,
                     })
                     .collect(),
             }),
@@ -214,10 +219,30 @@ fn read_inlines<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Inline> {
                     inlines.push(Inline::UnknownDirective { source });
                 }
             }
+            XmlOut::Element(child) if child.tag().as_ref() == STATUS => inlines.push(read_status(txn, &child)),
             _ => {}
         }
     }
     inlines
+}
+
+/// A Status as the editor stores it: a `status` element with its text and
+/// the name of its colour as attributes.
+fn read_status<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Inline {
+    Inline::Status {
+        text: string_attribute(txn, element, STATUS_TEXT).unwrap_or_default(),
+        color: string_attribute(txn, element, STATUS_COLOR).map(|name| StatusColor::named(&name)).unwrap_or_default(),
+    }
+}
+
+/// Gives a stored Status the text and colour it does not have yet.
+fn set_status(txn: &mut TransactionMut, element: &XmlElementRef, text: &str, color: StatusColor) {
+    if string_attribute(txn, element, STATUS_TEXT).as_deref() != Some(text) {
+        element.insert_attribute(txn, STATUS_TEXT, Any::from(text));
+    }
+    if string_attribute(txn, element, STATUS_COLOR).as_deref() != Some(color.name()) {
+        element.insert_attribute(txn, STATUS_COLOR, Any::from(color.name()));
+    }
 }
 
 /// An image as the editor stores it: an `image` element with its address and
@@ -374,6 +399,7 @@ fn plain_text(blocks: &[Block]) -> Vec<char> {
                 Inline::Image { alt, .. } => out.extend(alt.chars()),
                 Inline::PageLink { page_id } => out.extend(page_id.chars()),
                 Inline::UnknownDirective { source } => out.extend(source.chars()),
+                Inline::Status { text, .. } => out.extend(text.chars()),
             }
         }
     }
@@ -682,6 +708,7 @@ enum Part<'a> {
     Image { src: &'a str, alt: &'a str },
     PageLink(&'a str),
     UnknownDirective(&'a str),
+    Status { text: &'a str, color: StatusColor },
 }
 
 fn parts(inlines: &[Inline]) -> Vec<Part<'_>> {
@@ -692,6 +719,7 @@ fn parts(inlines: &[Inline]) -> Vec<Part<'_>> {
             (Inline::Image { src, alt }, _) => parts.push(Part::Image { src, alt }),
             (Inline::PageLink { page_id }, _) => parts.push(Part::PageLink(page_id)),
             (Inline::UnknownDirective { source }, _) => parts.push(Part::UnknownDirective(source)),
+            (Inline::Status { text, color }, _) => parts.push(Part::Status { text, color: *color }),
             (Inline::Text { text, marks }, Some(Part::Run(run))) => run.push((text, marks)),
             (Inline::Text { text, marks }, _) => parts.push(Part::Run(vec![(text, marks)])),
         }
@@ -711,6 +739,8 @@ enum Child {
     PageLink(Option<String>),
     /// A directive Turtle does not know, by its source.
     UnknownDirective(Option<String>),
+    /// A Status, changed in place when its text or colour changes.
+    Status(XmlElementRef),
     /// Something this version does not know. It is left alone.
     Other,
 }
@@ -723,7 +753,9 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
         .iter()
         .map(|part| match part {
             Part::Run(run) => run.iter().flat_map(|(text, _)| text.chars()).collect(),
-            Part::Break | Part::Image { .. } | Part::PageLink(_) | Part::UnknownDirective(_) => Vec::new(),
+            Part::Break | Part::Image { .. } | Part::PageLink(_) | Part::UnknownDirective(_) | Part::Status { .. } => {
+                Vec::new()
+            }
         })
         .collect();
     let children: Vec<Child> = element
@@ -742,6 +774,7 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
             XmlOut::Element(child) if child.tag().as_ref() == UNKNOWN_DIRECTIVE => {
                 Child::UnknownDirective(string_attribute(txn, &child, SOURCE))
             }
+            XmlOut::Element(child) if child.tag().as_ref() == STATUS => Child::Status(child),
             _ => Child::Other,
         })
         .collect();
@@ -761,6 +794,13 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
             }
             (Child::PageLink(Some(has)), Part::PageLink(wanted)) if has == wanted => Fit::Same(1),
             (Child::UnknownDirective(Some(has)), Part::UnknownDirective(wanted)) if has == wanted => Fit::Same(1),
+            (Child::Status(status), Part::Status { text, color }) => {
+                if read_status(txn, status) == (Inline::Status { text: text.to_string(), color: *color }) {
+                    Fit::Same(1)
+                } else {
+                    Fit::Similar(1)
+                }
+            }
             _ => Fit::No,
         },
         |i| matches!(children[i], Child::Other),
@@ -773,6 +813,9 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                 if let (Child::Text(text, Some(said)), Part::Run(run)) = (&children[i], &target[j])
                 {
                     diff_text(txn, text, said, run, &new_text[j]);
+                }
+                if let (Child::Status(status), Part::Status { text, color }) = (&children[i], &target[j]) {
+                    set_status(txn, status, text, *color);
                 }
                 at += 1;
             }
@@ -799,6 +842,10 @@ fn diff_inlines(txn: &mut TransactionMut, element: &XmlElementRef, target: &[Inl
                     Part::UnknownDirective(source) => {
                         let directive = element.insert(txn, at, XmlElementPrelim::empty(UNKNOWN_DIRECTIVE));
                         directive.insert_attribute(txn, SOURCE, Any::from(*source));
+                    }
+                    Part::Status { text, color } => {
+                        let status = element.insert(txn, at, XmlElementPrelim::empty(STATUS));
+                        set_status(txn, &status, text, *color);
                     }
                 }
                 at += 1;
@@ -1118,6 +1165,46 @@ mod tests {
         assert_eq!(string_attribute(&txn, &link, "pageId").as_deref(), Some("a1b2"));
         drop(txn);
         assert_eq!(read(&doc), blocks);
+    }
+
+    #[test]
+    fn a_status_is_stored_as_the_editors_status_with_its_text_and_colour() {
+        let blocks = from_markdown("| Task | State |\n| - | - |\n| Build | :status[On track]{color=green} |\n");
+        let doc = Doc::new();
+        write(&doc, &blocks);
+
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        let txn = doc.transact();
+        let status = (|| {
+            let XmlOut::Element(table) = fragment.get(&txn, 0)? else { return None };
+            let XmlOut::Element(row) = table.get(&txn, 1)? else { return None };
+            let XmlOut::Element(cell) = row.get(&txn, 1)? else { return None };
+            let XmlOut::Element(paragraph) = cell.get(&txn, 0)? else { return None };
+            let XmlOut::Element(status) = paragraph.get(&txn, 0)? else { return None };
+            Some(status)
+        })()
+        .expect("no status in the cell");
+        assert_eq!(status.tag().as_ref(), "status");
+        assert_eq!(string_attribute(&txn, &status, "text").as_deref(), Some("On track"));
+        assert_eq!(string_attribute(&txn, &status, "color").as_deref(), Some("green"));
+        drop(txn);
+        assert_eq!(read(&doc), blocks);
+    }
+
+    #[test]
+    fn a_status_changed_by_an_agent_keeps_what_a_person_types_beside_it() {
+        let server = Doc::new();
+        write(&server, &from_markdown("Build :status[On track]{color=green} now\n"));
+        let editor = replica(&server);
+
+        let typed = type_into(&editor, 0, "Build ".len() as u32, "it ");
+        let written = write(&server, &from_markdown("Build :status[Late]{color=red} now\n")).unwrap();
+        apply(&server, &typed);
+        apply(&editor, &written);
+
+        let expected = "Build it :status[Late]{color=red} now\n";
+        assert_eq!(to_markdown(&read(&server)), expected);
+        assert_eq!(to_markdown(&read(&editor)), expected);
     }
 
     #[test]

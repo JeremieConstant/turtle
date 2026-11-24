@@ -170,7 +170,11 @@ fn find_attachments(core: &Core, principal: &Principal, blocks: &[Block], found:
         Inline::Text { marks: Marks { link: Some(href), .. }, .. } => {
             referred.extend(attachment_id(href).map(String::from))
         }
-        Inline::Text { .. } | Inline::HardBreak | Inline::PageLink { .. } | Inline::UnknownDirective { .. } => {}
+        Inline::Text { .. }
+        | Inline::HardBreak
+        | Inline::PageLink { .. }
+        | Inline::UnknownDirective { .. }
+        | Inline::Status { .. } => {}
     });
     let mut files = Vec::new();
     {
@@ -356,6 +360,10 @@ impl Chapter<'_> {
                 Some(plain(title, link))
             }
             Inline::UnknownDirective { source } => Some(pdf::Inline::Unknown { name: directive_name(source) }),
+            // Shown in uppercase, as in the app.
+            Inline::Status { text, color } => {
+                (!text.trim().is_empty()).then(|| pdf::Inline::Status { text: text.to_uppercase(), color: color.name() })
+            }
         }
     }
 }
@@ -382,7 +390,7 @@ fn plain_text(inlines: &[pdf::Inline]) -> String {
     let text: String = inlines
         .iter()
         .map(|inline| match inline {
-            pdf::Inline::Text { text, .. } => text.as_str(),
+            pdf::Inline::Text { text, .. } | pdf::Inline::Status { text, .. } => text.as_str(),
             pdf::Inline::Break => " ",
             pdf::Inline::Image { .. } | pdf::Inline::Unknown { .. } => "",
         })
@@ -583,6 +591,21 @@ mod tests {
             pages[2],
             squashed("ENGINEERING Board Plan Unknown element: acme.demo today. Unknown element: acme.board 3")
         );
+    }
+
+    #[test]
+    fn a_status_is_shown_as_a_marker_in_uppercase() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let markdown = "## Build :status[on track]{color=green}\n\n| Task | State |\n| - | - |\n| Ship | :status[late] |\n";
+        page(&core, &grace, &area_id, None, "Board", markdown);
+
+        let pages = pages_of(&export_area(&core, &grace, &area_id));
+
+        // The contents name the Section by what it shows.
+        assert!(pages[1].contains(&squashed("Build ON TRACK")), "{}", pages[1]);
+        assert_eq!(pages[2], squashed("ENGINEERING Board Build ON TRACK TASK STATE Ship LATE 3"));
     }
 
     /// A PNG of one pixel.

@@ -334,6 +334,8 @@ pub enum Inline {
     Image { path: String, alt: String },
     /// A directive Turtle does not know, shown as a placeholder naming it.
     Unknown { name: String },
+    /// A Status, by the text it shows and the name of its colour.
+    Status { text: String, color: &'static str },
 }
 
 #[derive(Debug, Serialize)]

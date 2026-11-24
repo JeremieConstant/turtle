@@ -9,8 +9,8 @@
 
 use crate::directive;
 use crate::model::{
-    inline_directive, normalize, page_id_of, Block, CalloutKind, Cell, Inline, Marks, Row, TaskItem,
-    PAGE_ADDRESS_SCHEME,
+    inline_directive, normalize, page_id_of, status_directive, Block, CalloutKind, Cell, Inline, Marks, Row,
+    TaskItem, PAGE_ADDRESS_SCHEME,
 };
 use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 
@@ -349,6 +349,10 @@ fn render_inlines(inlines: &[Inline], place: InlinePlace, html: bool, titles: Ti
             // Like an image, it takes no formatting and leaves the marks around it open.
             Inline::UnknownDirective { source } => {
                 out.push_str(source);
+                at_line_start = false;
+            }
+            Inline::Status { text, color } => {
+                out.push_str(&status_directive(text, *color).to_inline_markdown());
                 at_line_start = false;
             }
             Inline::PageLink { page_id } => {
@@ -1036,7 +1040,7 @@ fn read_markdown(markdown: &str) -> Vec<Block> {
 
 #[cfg(test)]
 pub(crate) mod testing {
-    use crate::model::{Block, CalloutKind, Inline, Marks, TaskItem};
+    use crate::model::{Block, CalloutKind, Inline, Marks, StatusColor, TaskItem};
 
     /// Directives Turtle does not know, holding what Markdown would read otherwise.
     const INLINE_DIRECTIVES: &[&str] = &[
@@ -1088,6 +1092,11 @@ pub(crate) mod testing {
                         2 if self.next(3) == 0 => {
                             let source = INLINE_DIRECTIVES[self.next(INLINE_DIRECTIVES.len())].to_string();
                             return Inline::UnknownDirective { source };
+                        }
+                        3 if self.next(3) == 0 => {
+                            let color = StatusColor::ALL[self.next(StatusColor::ALL.len())];
+                            let text = if self.next(4) == 0 { String::new() } else { self.text() };
+                            return Inline::Status { text, color };
                         }
                         _ => {}
                     }
@@ -1174,6 +1183,7 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use super::testing::Rng;
+    use crate::model::StatusColor;
     use super::*;
 
     fn text(s: &str) -> Inline {
@@ -1705,6 +1715,64 @@ mod tests {
                 text(":::"),
             ])])]
         );
+    }
+
+    fn status(text: &str, color: StatusColor) -> Inline {
+        Inline::Status { text: text.into(), color }
+    }
+
+    #[test]
+    fn a_status_is_read_and_written_as_a_directive() {
+        let markdown = "Build :status[On track]{color=green} today.\n";
+
+        let blocks = from_markdown(markdown);
+
+        assert_eq!(blocks, vec![para(vec![text("Build "), status("On track", StatusColor::Green), text(" today.")])]);
+        assert_eq!(to_markdown(&blocks), markdown);
+    }
+
+    #[test]
+    fn a_status_without_a_known_colour_is_grey() {
+        assert_eq!(from_markdown(":status[Idle]"), vec![para(vec![status("Idle", StatusColor::Grey)])]);
+        assert_eq!(from_markdown(":status[Idle]{color=orange}"), vec![para(vec![status("Idle", StatusColor::Grey)])]);
+        assert_eq!(to_markdown(&[para(vec![status("Idle", StatusColor::Grey)])]), ":status[Idle]{color=grey}\n");
+        for color in ["grey", "blue", "green", "yellow", "red", "purple"] {
+            let markdown = format!(":status[x]{{color={color}}}\n");
+            assert_eq!(to_markdown(&from_markdown(&markdown)), markdown);
+        }
+    }
+
+    #[test]
+    fn a_status_stands_wherever_running_text_does() {
+        let markdown = "# Plan :status[Draft]{color=blue}\n\n| Task | State |\n| --- | --- |\n| Build | **:status[Late]{color=red}** |\n";
+
+        let blocks = from_markdown(markdown);
+
+        assert_eq!(
+            blocks,
+            vec![
+                Block::Heading { level: 1, content: vec![text("Plan "), status("Draft", StatusColor::Blue)] },
+                Block::Table(vec![
+                    vec![vec![text("Task")], vec![text("State")]],
+                    vec![vec![text("Build")], vec![status("Late", StatusColor::Red)]],
+                ]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_status_keeps_its_text_as_typed() {
+        for typed in ["on Track", "a [b] c\\d", "*not bold* `x`", "50% & <ok>", "", "  spaced  "] {
+            assert_round_trip(vec![para(vec![text("x "), status(typed, StatusColor::Purple)])]);
+            assert_eq!(normalize(vec![para(vec![status(typed, StatusColor::Purple)])]), vec![para(vec![status(typed, StatusColor::Purple)])]);
+        }
+        // A directive in running text stays on one line and holds no `|`, which would end a table cell.
+        assert_eq!(
+            normalize(vec![para(vec![status("a|b\nc", StatusColor::Green)])]),
+            vec![para(vec![status("a/b c", StatusColor::Green)])]
+        );
+        // Another's directive of the same name is not a Status.
+        assert_eq!(from_markdown(":acme.status[x]"), vec![para(vec![unknown(":acme.status[x]")])]);
     }
 
     const SEEDS: u64 = 20_000;

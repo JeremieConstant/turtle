@@ -7,6 +7,8 @@ With ![Logo](<logo.png>) inline.
 
 A :acme.demo[hi]{x=1} kept.
 
+Now :status[On track]{color=green}.
+
 :::acme.board{x=1}
 - a
 :::

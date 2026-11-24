@@ -20,13 +20,11 @@ pub struct Directive {
 impl Directive {
     /// Whether the name carries a namespace, as every directive that is not
     /// Turtle's own must.
-    #[allow(dead_code)] // The first of Turtle's own directives, the Status, reads it.
     pub fn is_namespaced(&self) -> bool {
         self.name.contains('.')
     }
 
     /// The directive written for running text.
-    #[allow(dead_code)] // Turtle's own directives, starting with the Status, write themselves with it.
     pub fn to_inline_markdown(&self) -> String {
         let mut out = format!(":{}", self.name);
         if let Some(label) = &self.label {

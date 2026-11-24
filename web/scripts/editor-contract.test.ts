@@ -59,6 +59,7 @@ const CONTENT = {
     ),
     paragraph(text('With '), { type: 'image', attrs: { src: 'logo.png', alt: 'Logo' } }, text(' inline.')),
     paragraph(text('A '), { type: 'unknownDirective', attrs: { source: ':acme.demo[hi]{x=1}' } }, text(' kept.')),
+    paragraph(text('Now '), { type: 'status', attrs: { text: 'On track', color: 'green' } }, text('.')),
     { type: 'unknownDirectiveBlock', attrs: { source: ':::acme.board{x=1}\n- a\n:::' } },
     {
       type: 'bulletList',

@@ -6,10 +6,21 @@
    * away from the text.
    */
   import type { Editor } from '@tiptap/core'
+  import type { Transaction } from '@tiptap/pm/state'
+  import { tick } from 'svelte'
   import { BLOCKS, CALLOUTS, LISTS, MARKS, STYLES, shortcut, type Format } from '../lib/format'
   import { liveSearch } from '../lib/liveSearch.svelte'
   import { menuKeys, openMenu } from '../lib/menu'
   import { pageIdOf } from '../lib/pageLink'
+  import {
+    EDIT_STATUS,
+    NEW_STATUS,
+    STATUS_COLORS,
+    statusColor,
+    statusText,
+    type EditStatus,
+    type StatusColor,
+  } from '../lib/status'
   import { allowedTableEdits, clampSize, insertTable, TABLE_EDITS, TABLE_SIZE } from '../lib/table'
   import Icon from './Icon.svelte'
 
@@ -150,6 +161,82 @@
     if (first) linkPage(first.page_id)
   }
 
+  /* A Status is inserted with a text of its own to type over, and changed
+     in a popover beside it whenever it is clicked. */
+  let statusPopover = $state<HTMLDivElement>()
+  let statusInput = $state<HTMLInputElement>()
+  /** Where the Status being changed stands, kept up with edits around it; null while none is. */
+  let statusAt: number | null = null
+  let statusShown = $state<{ text: string; color: StatusColor }>({ text: '', color: 'grey' })
+
+  const STATUS: Format = {
+    id: 'status',
+    label: 'Status',
+    icon: 'status',
+    run: e => {
+      const at = e.state.selection.from
+      e.chain().focus().insertContent({ type: 'status', attrs: { text: NEW_STATUS, color: 'grey' } }).run()
+      const element = e.view.nodeDOM(at)
+      if (element instanceof HTMLElement) editStatus(at, element)
+    },
+  }
+
+  function editStatus(at: number, element: HTMLElement) {
+    const node = editor.state.doc.nodeAt(at)
+    if (node?.type.name !== 'status' || !statusPopover) return
+    statusAt = at
+    statusShown = { text: String(node.attrs.text), color: statusColor(node.attrs.color) }
+    openMenu(statusPopover, element)
+    statusInput?.focus()
+    // Once the field shows the text, all of it is selected to type over.
+    void tick().then(() => statusInput?.select())
+  }
+
+  $effect(() => {
+    const watched = editor
+    const clicked = (event: Event) => {
+      const { pos, element } = (event as EditStatus).detail
+      editStatus(pos, element)
+    }
+    // Edits by anyone move the Status; one deleted meanwhile has nothing left to change.
+    const follow = ({ transaction }: { transaction: Transaction }) => {
+      if (statusAt === null) return
+      // Held to its start, so changing the Status itself leaves it where it is.
+      const moved = transaction.mapping.map(statusAt, -1)
+      statusAt = transaction.doc.nodeAt(moved)?.type.name === 'status' ? moved : null
+      if (statusAt === null) statusPopover?.hidePopover()
+    }
+    watched.view.dom.addEventListener(EDIT_STATUS, clicked)
+    watched.on('transaction', follow)
+    return () => {
+      watched.view.dom.removeEventListener(EDIT_STATUS, clicked)
+      watched.off('transaction', follow)
+    }
+  })
+
+  function changeStatus(change: Partial<{ text: string; color: StatusColor }>) {
+    statusShown = { ...statusShown, ...change, text: statusText(change.text ?? statusShown.text) }
+    const at = statusAt
+    if (at === null || editor.state.doc.nodeAt(at)?.type.name !== 'status') return
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, { ...statusShown }))
+  }
+
+  /** Enter is done: the cursor goes on after the Status. */
+  function finishStatus(event: SubmitEvent) {
+    event.preventDefault()
+    const at = statusAt
+    statusPopover?.hidePopover()
+    if (at !== null) editor.chain().focus().setTextSelection(at + 1).run()
+  }
+
+  function closedStatus(event: ToggleEvent) {
+    if (event.newState !== 'closed') return
+    statusAt = null
+    if (!editor.isFocused) editor.commands.focus()
+  }
+
+  const named = (color: StatusColor) => color[0].toUpperCase() + color.slice(1)
+
   function setLink(event: SubmitEvent) {
     event.preventDefault()
     const href = address.trim()
@@ -243,6 +330,7 @@
   {#each MARKS as f (f.id)}{@render button(f)}{/each}
   {@render button(LINK)}
   {@render button(PAGE_LINK)}
+  {@render button(STATUS)}
   <span class="separator" aria-hidden="true"></span>
   {#each LISTS as f (f.id)}{@render button(f)}{/each}
   <span class="separator" aria-hidden="true"></span>
@@ -301,6 +389,32 @@
       </button>
     {/each}
   </div>
+</div>
+
+<div class="status-editor" popover bind:this={statusPopover} ontoggle={closedStatus}>
+  <form onsubmit={finishStatus}>
+    <label for="status-text">Status</label>
+    <input
+      id="status-text"
+      bind:this={statusInput}
+      value={statusShown.text}
+      oninput={event => changeStatus({ text: event.currentTarget.value })}
+      autocomplete="off"
+    />
+    <div class="swatches" role="radiogroup" aria-label="Colour">
+      {#each STATUS_COLORS as color (color)}
+        <button
+          type="button"
+          class="status-swatch status-{color}"
+          role="radio"
+          aria-checked={statusShown.color === color}
+          aria-label={named(color)}
+          title={named(color)}
+          onclick={() => changeStatus({ color })}
+        ></button>
+      {/each}
+    </div>
+  </form>
 </div>
 
 <dialog bind:this={tableDialog} closedby="any" onclose={closeTableDialog}>
@@ -593,6 +707,16 @@
     font-size: var(--text-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .status-editor {
+    position: fixed;
+    width: min(var(--width-form), var(--width-floating-max));
+  }
+
+  .swatches {
+    display: flex;
+    gap: var(--space-2);
   }
 
   .actions {
