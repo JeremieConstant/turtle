@@ -2,7 +2,9 @@
 //!
 //! This is the common ground between the collaborative document (see `ydoc`)
 //! and Markdown (see `markdown`). It can only hold what Markdown can express
-//! (ADR-0006).
+//! (ADR-0006), extended by directives (ADR-0013).
+
+use crate::directive::{self, Directive};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Marks {
@@ -24,10 +26,35 @@ pub enum Inline {
     /// the Page's current title, so renaming or moving the Page never breaks
     /// it, and with nothing to someone who may not read the Page.
     PageLink { page_id: String },
+    /// A directive in the running text that Turtle does not know (ADR-0013),
+    /// such as `:acme.demo[hi]{x=1}`. It is kept exactly as it was written,
+    /// so a Page survives an installation that lacks the plugin it is from.
+    UnknownDirective { source: String },
 }
 
 /// How a Page link is written as a link address: `turtle:` and the Page's ID.
 pub const PAGE_ADDRESS_SCHEME: &str = "turtle:";
+
+/// The inline element a directive written in running text stands for: one
+/// of Turtle's own, or one it does not know, kept as written. Nothing when
+/// the source is not exactly one directive.
+pub fn inline_directive(source: &str) -> Option<Inline> {
+    let (directive, len) = directive::inline_at(source)?;
+    (len == source.len())
+        .then(|| known_inline(&directive).unwrap_or_else(|| Inline::UnknownDirective { source: source.to_string() }))
+}
+
+/// The element one of Turtle's own directives in running text stands for.
+/// Their names are bare and reserved (ADR-0013); each is matched here by
+/// name. There is none yet: the Status will be the first.
+fn known_inline(_directive: &Directive) -> Option<Inline> {
+    None
+}
+
+/// Whether the source is exactly one block directive Turtle does not know.
+pub fn is_unknown_block_directive(source: &str) -> bool {
+    directive::block_at(source).is_some_and(|(_, len)| len == source.len())
+}
 
 /// The ID of the Page a link address points at, when it is a Page link.
 pub fn page_id_of(address: &str) -> Option<&str> {
@@ -56,6 +83,11 @@ pub enum Block {
     /// number of cells, and a cell holds inline content only.
     Table(Vec<Row>),
     HorizontalRule,
+    /// A block directive Turtle does not know (ADR-0013), from its opening
+    /// line such as `:::acme.board{x=1}` to its closing `:::`, kept exactly
+    /// as it was written. It stands only at the top of a Page's content,
+    /// never inside a list, quote or Callout.
+    UnknownDirective { source: String },
 }
 
 /// The cells of a table row, left to right.
@@ -104,11 +136,31 @@ pub struct TaskItem {
 /// empty paragraphs, line breaks at the edge of a block or inside a heading,
 /// and formatting combined with inline code.
 pub fn normalize(blocks: Vec<Block>) -> Vec<Block> {
-    blocks.into_iter().filter_map(normalize_block).collect()
+    blocks.into_iter().filter_map(|block| normalize_block(block, true)).collect()
 }
 
-fn normalize_block(block: Block) -> Option<Block> {
+/// As `normalize`, for the blocks inside a list, quote or Callout.
+fn normalize_nested(blocks: Vec<Block>) -> Vec<Block> {
+    blocks.into_iter().filter_map(|block| normalize_block(block, false)).collect()
+}
+
+fn normalize_block(block: Block, at_top: bool) -> Option<Block> {
     Some(match block {
+        // Markdown can only hold a block directive at the top of the content,
+        // so anywhere else, or when it is not one, its lines are kept as text.
+        Block::UnknownDirective { source } if at_top && is_unknown_block_directive(&source) => {
+            Block::UnknownDirective { source }
+        }
+        Block::UnknownDirective { source } => {
+            let mut lines = Vec::new();
+            for line in source.lines() {
+                if !lines.is_empty() {
+                    lines.push(Inline::HardBreak);
+                }
+                lines.push(Inline::Text { text: line.to_string(), marks: Marks::default() });
+            }
+            return normalize_block(Block::Paragraph(lines), at_top);
+        }
         Block::Paragraph(content) => {
             let content = normalize_inlines(content, false);
             if content.is_empty() {
@@ -126,13 +178,13 @@ fn normalize_block(block: Block) -> Option<Block> {
                 .filter(|l| !l.is_empty()),
             text: text.replace("\r\n", "\n").replace('\r', "\n"),
         },
-        Block::Blockquote(children) => Block::Blockquote(normalize(children)),
-        Block::Callout { kind, content } => Block::Callout { kind, content: normalize(content) },
+        Block::Blockquote(children) => Block::Blockquote(normalize_nested(children)),
+        Block::Callout { kind, content } => Block::Callout { kind, content: normalize_nested(content) },
         Block::BulletList(items) => {
             if items.is_empty() {
                 return None;
             }
-            Block::BulletList(items.into_iter().map(normalize).collect())
+            Block::BulletList(items.into_iter().map(normalize_nested).collect())
         }
         Block::OrderedList { start, items } => {
             if items.is_empty() {
@@ -140,7 +192,7 @@ fn normalize_block(block: Block) -> Option<Block> {
             }
             Block::OrderedList {
                 start: start.min(999_999_999),
-                items: items.into_iter().map(normalize).collect(),
+                items: items.into_iter().map(normalize_nested).collect(),
             }
         }
         Block::TaskList(items) => {
@@ -150,7 +202,7 @@ fn normalize_block(block: Block) -> Option<Block> {
             Block::TaskList(
                 items
                     .into_iter()
-                    .map(|item| TaskItem { checked: item.checked, content: normalize(item.content) })
+                    .map(|item| TaskItem { checked: item.checked, content: normalize_nested(item.content) })
                     .collect(),
             )
         }
@@ -187,6 +239,10 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
                 text: " ".into(),
                 marks: Marks::default(),
             },
+            // What is not exactly one directive is the text it says.
+            Inline::UnknownDirective { source } => {
+                inline_directive(&source).unwrap_or(Inline::Text { text: source, marks: Marks::default() })
+            }
             other => other,
         };
         match inline {
@@ -197,6 +253,10 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
             Inline::PageLink { page_id } => {
                 linked_page = None;
                 out.push(Inline::PageLink { page_id })
+            }
+            Inline::UnknownDirective { source } => {
+                linked_page = None;
+                out.push(Inline::UnknownDirective { source })
             }
             Inline::Image { src, alt } => {
                 linked_page = None;
@@ -266,7 +326,7 @@ pub fn linked_pages(blocks: &[Block]) -> Vec<String> {
                 }
                 Block::TaskList(items) => items.iter().for_each(|item| collect(&item.content, out)),
                 Block::Table(rows) => rows.iter().flatten().for_each(|cell| inlines(cell, out)),
-                Block::CodeBlock { .. } | Block::HorizontalRule => {}
+                Block::CodeBlock { .. } | Block::HorizontalRule | Block::UnknownDirective { .. } => {}
             }
         }
     }
@@ -286,6 +346,8 @@ pub fn plain_text(blocks: &[Block]) -> String {
                 Inline::Image { alt, .. } => out.push_str(alt),
                 // The linked Page's title is not this Page's to give away.
                 Inline::PageLink { .. } => out.push(' '),
+                // What a directive Turtle does not know means is unknown.
+                Inline::UnknownDirective { .. } => out.push(' '),
             }
         }
         out.push('\n');
@@ -310,7 +372,7 @@ pub fn plain_text(blocks: &[Block]) -> String {
                     }
                 }
                 Block::Table(rows) => rows.iter().flatten().for_each(|cell| inlines(cell, out)),
-                Block::HorizontalRule => {}
+                Block::HorizontalRule | Block::UnknownDirective { .. } => {}
             }
         }
     }

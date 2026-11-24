@@ -5,6 +5,12 @@ Next line, and [](turtle:a1b2).
 
 With ![Logo](<logo.png>) inline.
 
+A :acme.demo[hi]{x=1} kept.
+
+:::acme.board{x=1}
+- a
+:::
+
 - one
 - two
   1. nested
