@@ -326,6 +326,8 @@ pub enum Inline {
     Break,
     /// One of the document's images.
     Image { path: String, alt: String },
+    /// A Mention, drawn as a badge with the person's name.
+    Mention { name: String },
 }
 
 #[derive(Debug, Serialize)]

@@ -3,6 +3,7 @@ import { TaskItem, TaskList } from '@tiptap/extension-list'
 import StarterKit from '@tiptap/starter-kit'
 import { Callout } from './callout'
 import { Image, type ImageOptions } from './image'
+import { Mention } from './mention'
 import { PageLink } from './pageLink'
 import { TABLE_EXTENSIONS } from './table'
 
@@ -19,6 +20,7 @@ export function contentExtensions(image: Partial<ImageOptions> = {}): Extensions
     // own empty paragraph at the same moment, and they would pile up.
     StarterKit.configure({ undoRedo: false, underline: false, trailingNode: false }),
     PageLink,
+    Mention,
     TaskList,
     // A task may hold more than a line, as it can in Markdown.
     TaskItem.configure({ nested: true }),

@@ -77,6 +77,7 @@ pub fn export_pdf(core: &Core, principal: &Principal, input: ToExportPdf) -> OpR
     let mut found = Found {
         in_pdf,
         outside: links::linked_titles(core, principal, &all_blocks)?,
+        names: links::mentioned_names(core, &all_blocks)?,
         public_url: core.public_url().map(|url| url.as_str().to_string()),
         attachment_names: HashMap::new(),
         images: HashMap::new(),
@@ -149,6 +150,8 @@ struct Found {
     /// The titles of other Pages the content links to that the exporter can read.
     outside: HashMap<String, String>,
     public_url: Option<String>,
+    /// The current names of the people the content mentions.
+    names: HashMap<String, String>,
     /// The names of the Attachments the content refers to that the exporter can read.
     attachment_names: HashMap<String, String>,
     /// Of those, the images the PDF can show, by their path in the document.
@@ -169,7 +172,7 @@ fn find_attachments(core: &Core, principal: &Principal, blocks: &[Block], found:
         Inline::Text { marks: Marks { link: Some(href), .. }, .. } => {
             referred.extend(attachment_id(href).map(String::from))
         }
-        Inline::Text { .. } | Inline::HardBreak | Inline::PageLink { .. } => {}
+        Inline::Text { .. } | Inline::HardBreak | Inline::PageLink { .. } | Inline::Mention { .. } => {}
     });
     let mut files = Vec::new();
     {
@@ -353,6 +356,11 @@ impl Chapter<'_> {
                 let link = found.public_url.as_ref().map(|base| pdf::Link::Url(format!("{base}/p/{page_id}")));
                 Some(plain(title, link))
             }
+            // A badge with the name alone: the PDF shows no pictures of
+            // people and leads to no Profile (ADR-0012).
+            Inline::Mention { person_id } => {
+                found.names.get(person_id).map(|name| pdf::Inline::Mention { name: name.clone() })
+            }
         }
     }
 }
@@ -377,6 +385,7 @@ fn plain_text(inlines: &[pdf::Inline]) -> String {
             pdf::Inline::Text { text, .. } => text.as_str(),
             pdf::Inline::Break => " ",
             pdf::Inline::Image { .. } => "",
+            pdf::Inline::Mention { name } => name.as_str(),
         })
         .collect();
     text.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -685,6 +694,22 @@ mod tests {
             link_targets(&exported),
             [format!("https://turtle.example.org/p/{overview}").as_str(), "page 3", "page 4"]
         );
+    }
+
+    #[test]
+    fn a_mention_is_a_badge_with_the_current_name_and_no_link() {
+        let mut core = fresh();
+        core.core.set_public_url(Some(crate::public_url::PublicUrl::parse("https://turtle.example.org").unwrap()));
+        let grace = member(&core, "Grace", false);
+        member(&core, "Ken", false);
+        let area_id = area(&core, &grace, "Engineering");
+        page(&core, &grace, &area_id, None, "Runbook", "Ask [@Kenneth](turtle:member/member-ken) or [@x](turtle:member/nobody).");
+
+        let exported = export_area(&core, &grace, &area_id);
+
+        assert_eq!(pages_of(&exported)[2], squashed("ENGINEERING Runbook Ask Ken or . 3"));
+        assert!(link_targets(&exported).iter().all(|target| target.starts_with("page ")));
+        assert_eq!(images_in(&exported), 0);
     }
 
     #[test]

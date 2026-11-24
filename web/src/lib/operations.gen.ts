@@ -267,6 +267,20 @@ export type MembersTokenList = {
   tokens: MembersToken[]
 }
 
+export type MentionedPeople = {
+  /** The Members and Guests among those asked for, in the order asked, each once. */
+  people: MentionedPerson[]
+}
+
+export type MentionedPerson = {
+  id: string
+  /** Their current name, which a Mention shows to everyone. */
+  name: string
+  /** Their Profile, when the caller may see it; otherwise a Mention shows
+the name alone. */
+  profile?: Profile | null
+}
+
 export type MovedEntry = {
   /** The Area it is in now. */
   area: Area
@@ -767,6 +781,14 @@ export type Operations = {
     input: Record<string, never>
     output: ProfileList
   }
+  /** Gets the current names of the Members and Guests that Mentions name, by ID, as Mentions show them: everyone is told the name, and the Profile only when the caller may see it. An ID that names no Member or Guest, such as an Agent's, is left out. */
+  get_mentioned_people: {
+    input: {
+      /** The IDs of the Members and Guests, as Mentions name them. Only the first 500 count. */
+      person_ids: string[]
+    }
+    output: MentionedPeople
+  }
   /** Creates an Area. The caller becomes its Admin and is the only one with access. A standalone Agent, and a Token limited to chosen Areas, cannot. */
   create_area: {
     input: {
@@ -1036,14 +1058,14 @@ in "deploy #runbook"; a Tag with spaces is written with hyphens. */
     }
     output: MovedEntry
   }
-  /** Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. Needs the Read Role. */
+  /** Gets the content of a Page as Markdown. A link to another Page is written as a link to `turtle:` followed by that Page's ID, with the Page's current title as its text, or no text when the caller cannot read that Page. A Mention of a Member or Guest is written as [@Name](turtle:member/ID), with their current name. Needs the Read Role. */
   get_page_markdown: {
     input: {
       page_id: string
     }
     output: PageMarkdown
   }
-  /** Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
+  /** Makes the content of a Page say what the given Markdown says. A link to `turtle:` followed by a Page's ID, as in [Setup](turtle:ID), is a link to that Page; its text is not kept, since the link always shows the Page's current title. Likewise [@Name](turtle:member/ID) mentions the Member or Guest with that ID, as list_profiles gives it, and always shows their current name. Only what differs is changed, so people editing at that moment keep their work, and they see the change at once. Recorded as a Version of its own. Needs the Write Role. */
   replace_page: {
     input: {
       markdown: string

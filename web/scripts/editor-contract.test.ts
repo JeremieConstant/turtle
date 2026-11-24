@@ -20,7 +20,7 @@ import { expect, test, vi } from 'vitest'
 import * as Y from 'yjs'
 import { contentExtensions } from '../src/lib/extensions'
 
-// A Page link is followed through the router, which reads the address bar as
+// A Page link and a Mention are followed through the router, which reads the address bar as
 // it loads; the schema this test needs never follows one.
 vi.mock('../src/lib/router.svelte', () => ({ router: {} }))
 
@@ -82,7 +82,7 @@ const CONTENT = {
       type: 'table',
       content: [
         row('tableHeader', [text('Name')], [text('Role', { type: 'bold' })]),
-        row('tableCell', [text('a | b')], []),
+        row('tableCell', [text('a | b')], [{ type: 'mention', attrs: { personId: 'm1' } }]),
       ],
     },
     { type: 'codeBlock', attrs: { language: 'rust' }, content: [text('fn main() {}')] },

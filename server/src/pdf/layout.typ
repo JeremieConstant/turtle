@@ -104,6 +104,15 @@
     linebreak()
   } else if x.type == "image" {
     fitted-image(x.path, x.alt)
+  } else if x.type == "mention" {
+    box(
+      fill: wash,
+      stroke: 0.5pt + rule,
+      radius: 0.7em,
+      inset: (x: 0.45em),
+      outset: (y: 2pt),
+      text(weight: 500, fill: ink-strong, [#x.name]),
+    )
   } else {
     let shown = if x.code {
       box(

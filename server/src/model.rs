@@ -24,16 +24,38 @@ pub enum Inline {
     /// the Page's current title, so renaming or moving the Page never breaks
     /// it, and with nothing to someone who may not read the Page.
     PageLink { page_id: String },
+    /// A Mention of a Member or Guest by their ID. Like a Page link it holds
+    /// no text: it is shown with the person's current name.
+    Mention { person_id: String },
 }
 
 /// How a Page link is written as a link address: `turtle:` and the Page's ID.
 pub const PAGE_ADDRESS_SCHEME: &str = "turtle:";
 
+/// How a Mention is written as a link address: `turtle:member/` and the
+/// person's ID (ADR-0013).
+pub const MEMBER_ADDRESS_SCHEME: &str = "turtle:member/";
+
 /// The ID of the Page a link address points at, when it is a Page link.
 pub fn page_id_of(address: &str) -> Option<&str> {
-    let id = address.strip_prefix(PAGE_ADDRESS_SCHEME)?;
-    let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    valid.then_some(id)
+    address.strip_prefix(PAGE_ADDRESS_SCHEME).filter(|id| is_id(id))
+}
+
+/// The ID of the person a link address mentions, when it is a Mention.
+pub fn person_id_of(address: &str) -> Option<&str> {
+    address.strip_prefix(MEMBER_ADDRESS_SCHEME).filter(|id| is_id(id))
+}
+
+/// The Page link or Mention a link address stands for, if it is either.
+pub fn turtle_link_of(address: &str) -> Option<Inline> {
+    if let Some(person_id) = person_id_of(address) {
+        return Some(Inline::Mention { person_id: person_id.to_string() });
+    }
+    page_id_of(address).map(|page_id| Inline::PageLink { page_id: page_id.to_string() })
+}
+
+fn is_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 // The variants are named as Markdown and the editor name them, so a code
@@ -178,9 +200,9 @@ fn normalize_block(block: Block) -> Option<Block> {
 
 fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
     let mut out: Vec<Inline> = Vec::new();
-    // The Page that the text just before links to, so one link stays one
-    // Page link where its formatting changes partway.
-    let mut linked_page: Option<String> = None;
+    // The Page link or Mention that the text just before links to, so one
+    // link stays one where its formatting changes partway.
+    let mut linked: Option<Inline> = None;
     for inline in inlines {
         let inline = match inline {
             Inline::HardBreak if in_heading => Inline::Text {
@@ -191,15 +213,15 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
         };
         match inline {
             Inline::HardBreak => {
-                linked_page = None;
+                linked = None;
                 out.push(Inline::HardBreak)
             }
-            Inline::PageLink { page_id } => {
-                linked_page = None;
-                out.push(Inline::PageLink { page_id })
+            link @ (Inline::PageLink { .. } | Inline::Mention { .. }) => {
+                linked = None;
+                out.push(link)
             }
             Inline::Image { src, alt } => {
-                linked_page = None;
+                linked = None;
                 out.push(Inline::Image {
                     src: src.replace(['\n', '\r'], ""),
                     alt: alt.replace(['\n', '\r'], " "),
@@ -216,16 +238,17 @@ fn normalize_inlines(inlines: Vec<Inline>, in_heading: bool) -> Vec<Inline> {
                         ..Marks::default()
                     };
                 }
-                // Text linked to a Page is that Page link, however it is
-                // formatted; its words give way to the Page's title.
-                if let Some(page_id) = marks.link.as_deref().and_then(page_id_of) {
-                    if linked_page.as_deref() != Some(page_id) {
-                        out.push(Inline::PageLink { page_id: page_id.to_string() });
-                        linked_page = Some(page_id.to_string());
+                // Text linked to a Page or person is that Page link or
+                // Mention, however it is formatted; its words give way to the
+                // Page's title or the person's name.
+                if let Some(link) = marks.link.as_deref().and_then(turtle_link_of) {
+                    if linked.as_ref() != Some(&link) {
+                        out.push(link.clone());
+                        linked = Some(link);
                     }
                     continue;
                 }
-                linked_page = None;
+                linked = None;
                 match out.last_mut() {
                     Some(Inline::Text {
                         text: prev,
@@ -275,6 +298,35 @@ pub fn linked_pages(blocks: &[Block]) -> Vec<String> {
     out
 }
 
+/// The IDs of the people the content mentions, each once, in order.
+pub fn mentioned_people(blocks: &[Block]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for_each_inline(blocks, &mut |inline| {
+        if let Inline::Mention { person_id } = inline {
+            if !out.contains(person_id) {
+                out.push(person_id.clone());
+            }
+        }
+    });
+    out
+}
+
+/// Calls `visit` with every inline element of the content, in order.
+fn for_each_inline(blocks: &[Block], visit: &mut dyn FnMut(&Inline)) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(content) | Block::Heading { content, .. } => content.iter().for_each(&mut *visit),
+            Block::Blockquote(children) | Block::Callout { content: children, .. } => for_each_inline(children, visit),
+            Block::BulletList(items) | Block::OrderedList { items, .. } => {
+                items.iter().for_each(|item| for_each_inline(item, visit))
+            }
+            Block::TaskList(items) => items.iter().for_each(|item| for_each_inline(&item.content, visit)),
+            Block::Table(rows) => rows.iter().flatten().flatten().for_each(&mut *visit),
+            Block::CodeBlock { .. } | Block::HorizontalRule => {}
+        }
+    }
+}
+
 /// The words of the content without any formatting, one line per paragraph,
 /// heading, list item or line of code. Search indexes this.
 pub fn plain_text(blocks: &[Block]) -> String {
@@ -284,8 +336,9 @@ pub fn plain_text(blocks: &[Block]) -> String {
                 Inline::Text { text, .. } => out.push_str(text),
                 Inline::HardBreak => out.push('\n'),
                 Inline::Image { alt, .. } => out.push_str(alt),
-                // The linked Page's title is not this Page's to give away.
-                Inline::PageLink { .. } => out.push(' '),
+                // The linked Page's title is not this Page's to give away,
+                // and searching by mentioned person is not offered.
+                Inline::PageLink { .. } | Inline::Mention { .. } => out.push(' '),
             }
         }
         out.push('\n');

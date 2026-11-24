@@ -24,6 +24,13 @@ pub(super) fn register(catalogue: &mut Catalogue) {
             list_profiles,
         )
         .changes = false;
+    catalogue
+        .add(
+            "get_mentioned_people",
+            "Gets the current names of the Members and Guests that Mentions name, by ID, as Mentions show them: everyone is told the name, and the Profile only when the caller may see it. An ID that names no Member or Guest, such as an Agent's, is left out.",
+            get_mentioned_people,
+        )
+        .changes = false;
 }
 
 /// What Turtle shows others about a Member or Guest.
@@ -75,6 +82,48 @@ pub fn list_profiles(core: &Core, principal: &Principal, _: Nothing) -> OpResult
         }
     }
     Ok(ProfileList { profiles }.into())
+}
+
+/// The most people one call asks about, a generous number for one Page's Mentions.
+const MAX_PEOPLE: usize = 500;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PeopleToName {
+    /// The IDs of the Members and Guests, as Mentions name them. Only the first 500 count.
+    pub person_ids: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct MentionedPeople {
+    /// The Members and Guests among those asked for, in the order asked, each once.
+    pub people: Vec<MentionedPerson>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct MentionedPerson {
+    pub id: String,
+    /// Their current name, which a Mention shows to everyone.
+    pub name: String,
+    /// Their Profile, when the caller may see it; otherwise a Mention shows
+    /// the name alone.
+    pub profile: Option<Profile>,
+}
+
+pub fn get_mentioned_people(core: &Core, principal: &Principal, input: PeopleToName) -> OpResult<MentionedPeople> {
+    let db = core.db();
+    let sight = Sight::of(&db, principal)?;
+    let mut people: Vec<MentionedPerson> = Vec::new();
+    for id in input.person_ids.into_iter().take(MAX_PEOPLE) {
+        if people.iter().any(|person| person.id == id) {
+            continue;
+        }
+        // A name is given for any ID, since Mentions show it to every reader
+        // of the content; IDs are random, so only that content tells one.
+        let Some(person) = read_profile(&db, &id)? else { continue };
+        let profile = sight.sees(&db, principal, &person)?.then(|| person.clone());
+        people.push(MentionedPerson { id, name: person.name, profile });
+    }
+    Ok(MentionedPeople { people }.into())
 }
 
 /// Whose Profiles a caller sees. This one rule decides both a single
@@ -140,6 +189,11 @@ fn profile_row(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
         workspace_admin: row.get(4)?,
         active: row.get(5)?,
     })
+}
+
+/// The current name of a Member or Guest, deactivated or not, whoever asks.
+pub(super) fn name_of(db: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    Ok(read_profile(db, id)?.map(|profile| profile.name))
 }
 
 fn no_such_person() -> OpError {
@@ -349,5 +403,49 @@ mod tests {
         give(&core, &ada, &sales, holder(&gus));
 
         assert_eq!(names(&core, &gus), ["Ada", "Gus", "Wanda"]);
+    }
+
+    fn mentioned(core: &Core, reader: &Principal, ids: &[&str]) -> Vec<MentionedPerson> {
+        let input = PeopleToName { person_ids: ids.iter().map(|id| id.to_string()).collect() };
+        get_mentioned_people(core, reader, input).unwrap().output.people
+    }
+
+    #[test]
+    fn a_mention_shows_everyone_the_name_and_the_profile_only_to_whoever_sees_it() {
+        let core = fresh();
+        let ada = member(&core, "Ada", false);
+        let ken = member(&core, "Ken", false);
+        let wanda = member(&core, "Wanda", true);
+        let gus = guest(&core, "Gus");
+        let reviewer = create_agent(&core, &wanda, NewAgent { name: "Reviewer".into() }).unwrap().output;
+        let sales = area(&core, &ada, "Sales");
+        give(&core, &ada, &sales, holder(&gus));
+        deactivate_member(&core, &wanda, MemberId { id: id_of(&ken) }).unwrap();
+
+        let ids = ["member-ken", "member-ada", "member-ken", "nobody", reviewer.id.as_str()];
+        let as_gus = mentioned(&core, &gus, &ids);
+        assert_eq!(
+            as_gus,
+            [
+                MentionedPerson { id: "member-ken".into(), name: "Ken".into(), profile: None },
+                MentionedPerson {
+                    id: "member-ada".into(),
+                    name: "Ada".into(),
+                    profile: Some(profile(&core, &gus, &ada).unwrap()),
+                },
+            ]
+        );
+        let as_ada = mentioned(&core, &ada, &ids);
+        let ken_seen = as_ada[0].profile.as_ref().unwrap();
+        assert_eq!((ken_seen.name.as_str(), ken_seen.active), ("Ken", false));
+    }
+
+    #[test]
+    fn nobody_signed_in_is_told_no_names() {
+        let core = fresh();
+        member(&core, "Ada", false);
+        let error = get_mentioned_people(&core, &Principal::Anonymous, PeopleToName { person_ids: vec!["member-ada".into()] })
+            .unwrap_err();
+        assert_eq!(error.kind(), "not_permitted");
     }
 }

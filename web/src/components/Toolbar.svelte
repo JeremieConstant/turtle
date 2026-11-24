@@ -9,9 +9,11 @@
   import { BLOCKS, CALLOUTS, LISTS, MARKS, STYLES, shortcut, type Format } from '../lib/format'
   import { liveSearch } from '../lib/liveSearch.svelte'
   import { menuKeys, openMenu } from '../lib/menu'
+  import { personIdOf } from '../lib/mention'
   import { pageIdOf } from '../lib/pageLink'
   import { allowedTableEdits, clampSize, insertTable, TABLE_EDITS, TABLE_SIZE } from '../lib/table'
   import Icon from './Icon.svelte'
+  import MentionPicker from './MentionPicker.svelte'
 
   const {
     editor,
@@ -158,6 +160,9 @@
     // An address of a Page is a Page link, as it would be once read back from Markdown.
     const pageId = pageIdOf(href)
     if (pageId) return linkPage(pageId)
+    // And the address of a person is a Mention.
+    const personId = personIdOf(href)
+    if (personId) return void editor.chain().focus().insertContent({ type: 'mention', attrs: { personId } }).run()
     // A bare "example.org" is meant as a web address, not a path inside Turtle.
     const full = /^([a-z][a-z0-9+.-]*:|\/|#)/i.test(href) ? href : `https://${href}`
     if (editor.state.selection.empty) {
@@ -336,6 +341,8 @@
     </div>
   </form>
 </dialog>
+
+<MentionPicker {editor} />
 
 <dialog bind:this={pageLinkDialog} closedby="any" onclose={() => editor.commands.focus()}>
   <form onsubmit={linkFirstPage}>
