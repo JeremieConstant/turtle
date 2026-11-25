@@ -74,6 +74,10 @@ _Avoid_: Upload, asset, media
 An Area or Subtree as a ZIP of Markdown files that is readable without Turtle: directories mirror the tree, every Page and Folder is a file named after its title with what an import needs as frontmatter, a Page's Attachments sit in its directory apart from its Pages, and Page links between its files are relative paths.
 _Avoid_: Backup, download, dump
 
+**Import**:
+Pages, Folders and Attachments brought into an Area, or beneath a Page or Folder, from a ZIP: an Export, or any folder of Markdown files, whose relative links become Page links. What cannot come across is reported file by file, and the rest comes in.
+_Avoid_: Upload, ingest
+
 **PDF Export**:
 An Area, Subtree or Page typeset as one PDF for reading and handing on: a cover, a table of contents with page numbers, the Pages as chapters in tree order and the Folders as groups, laid out by a PDF Style. Unlike an Export it is not read back by an import.
 _Avoid_: Print, PDF download, report

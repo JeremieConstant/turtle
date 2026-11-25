@@ -105,8 +105,14 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
     // Access is checked before the input, so an unreadable Page stays hidden
     // whatever is sent.
     tree::page_to_change(core, principal, &input.page_id)?;
-    let name = valid_name(&input.name)?;
     let content = decode_content(&input.content)?;
+    attach(core, principal, input.page_id, &input.name, content)
+}
+
+/// Attaches a file, given as its bytes, to a Page the principal may change.
+pub(super) fn attach(core: &Core, principal: &Principal, page_id: String, name: &str, content: Vec<u8>) -> OpResult<Attachment> {
+    tree::page_to_change(core, principal, &page_id)?;
+    let name = valid_name(name)?;
     let limit = core.attachment_limit();
     if content.len() as u64 > limit {
         return Err(OpError::InvalidInput(format!(
@@ -120,7 +126,7 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
     let attachment = Attachment {
         id: random_hex(16)?,
         url: String::new(),
-        page_id: input.page_id,
+        page_id,
         content_type: content_type_of(&name).into(),
         shown_as_image: false,
         name,

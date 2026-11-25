@@ -155,6 +155,8 @@ fn table() -> Vec<Row> {
         ("get_page_titles", |_| json!({"page_ids": ["made-up"]}), [OK; 5]),
         ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("export", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
+        // An empty ZIP: what is checked is who may import, not what.
+        ("import", |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("export_pdf", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         // Every Workspace has the PDF Style "standard", its default.
         ("list_pdf_styles", |_| json!({}), [OK; 5]),

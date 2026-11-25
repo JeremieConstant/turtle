@@ -2,7 +2,7 @@
   /*
    * The menu of an Entry, shared by the sidebar's tree and the Area screen:
    * a new Page or Folder beneath it, renaming it, moving it elsewhere,
-   * copying its link, exporting it as a PDF or as Markdown, and moving it to the Trash. What
+   * importing Markdown beneath it, copying its link, exporting it as a PDF or as Markdown, and moving it to the Trash. What
    * it offers depends on the Role held on the Area (entryMenuItems). Creating
    * and renaming ask for the name in a dialog, then load the Area's tree
    * again, which both the sidebar and the Area screen show.
@@ -10,6 +10,7 @@
   import { tick } from 'svelte'
   import { copyLink, entryMenuItems, type EntryMenuItem } from '../lib/entryMenu'
   import { exportToFile } from '../lib/exporting'
+  import { chooseZip, importFromFile } from '../lib/importing'
   import { menuKeys, openMenu } from '../lib/menu'
   import { navigation } from '../lib/navigation.svelte'
   import type { Area, Entry, Kind } from '../lib/operations.gen'
@@ -28,6 +29,7 @@
     'new-folder': 'New Folder beneath…',
     rename: 'Rename…',
     move: 'Move…',
+    'import-markdown': 'Import Markdown…',
     'copy-link': 'Copy link',
     'export-pdf': 'Export as PDF…',
     'export-markdown': 'Export as Markdown',
@@ -42,7 +44,7 @@
   /** The Entry the menu is open for, and the Area it is in. */
   let target = $state.raw<{ entry: Entry; area: Area } | null>(null)
   let pdfDialog: PdfExportDialog
-  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'copy-link' | 'export-pdf' | 'export-markdown' | 'trash'>
+  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'import-markdown' | 'copy-link' | 'export-pdf' | 'export-markdown' | 'trash'>
   /** What the dialog asks for, what its button says, and what it creates. */
   const DIALOGS: Record<DialogPurpose, { label: (title: string) => string; action: string; kind?: Kind }> = {
     'new-page': { label: title => `Title of the new Page beneath ${title}`, action: 'Create Page', kind: 'page' },
@@ -82,6 +84,10 @@
       void exportToFile({ area_id: area.id, entry_id: entry.id }, entry.title)
       return
     }
+    if (item === 'import-markdown') {
+      void importBeneath(target.entry, target.area)
+      return
+    }
     if (item === 'move') {
       moveDialog.open(target.entry, target.area)
       return
@@ -109,6 +115,18 @@
       reportFailure(caught, 'The change was saved, but the tree could not be loaded again. Reload the page to see it.')
     }
     if (created?.kind === 'page') router.navigate(pageAddress(created.id, created.title))
+  }
+
+  /** Imports a ZIP the person chooses beneath an Entry, and shows it there. */
+  async function importBeneath(entry: Entry, area: Area) {
+    const file = await chooseZip()
+    if (!file || !(await importFromFile({ area_id: area.id, parent_id: entry.id }, file, entry.title))) return
+    collapsed.delete(entry.id)
+    try {
+      await navigation.loadTree(area.id)
+    } catch (caught) {
+      reportFailure(caught, 'The import was saved, but the tree could not be loaded again. Reload the page to see it.')
+    }
   }
 
   /** Moves an Entry to the Trash; a Page on the screen that went with it gives way to its Area. */

@@ -17,6 +17,7 @@ pub mod fonts;
 #[cfg(test)]
 mod every_operation;
 pub mod grants;
+pub mod import;
 pub mod intranet;
 pub mod links;
 pub mod members;
@@ -579,6 +580,7 @@ pub fn catalogue() -> Catalogue {
     moves::register(&mut catalogue);
     content::register(&mut catalogue);
     export::register(&mut catalogue);
+    import::register(&mut catalogue);
     pdf_export::register(&mut catalogue);
     pdf_styles::register(&mut catalogue);
     fonts::register(&mut catalogue);
