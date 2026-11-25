@@ -14,6 +14,8 @@ cd "$(dirname "$0")/.."
 base="http://127.0.0.1:${TURTLE_PORT:-4100}"
 data="${TURTLE_DATA:-turtle-data-dev}"
 account="$data/seed-account.txt"
+# The same, as the input of the sign_in operation, to send as it is.
+sign_in="$data/seed-account.json"
 email="ada@example.test"
 password=$(head -c 24 /dev/urandom | base64 | tr -d '/+=')
 cookies=$(mktemp)
@@ -40,7 +42,8 @@ if [ ! -d "$data" ]; then
   echo "There is no data directory at $data. Run with the TURTLE_DATA that Turtle was started with." >&2
   exit 1
 fi
-(umask 077 && printf 'Email: %s\nPassword: %s\n' "$email" "$password" >"$account")
+(umask 077 && printf 'Email: %s\nPassword: %s\n' "$email" "$password" >"$account" \
+  && jq -n --arg email "$email" --arg password "$password" '{email: $email, password: $password}' >"$sign_in")
 op create_first_account "$(jq -n --arg email "$email" --arg password "$password" \
   '{email: $email, name: "Ada Example", password: $password}')" >/dev/null
 
@@ -74,4 +77,6 @@ write "$rollback" "$(printf 'Go back to [](turtle:%s) and release the previous v
 op add_tag "$(jq -n --arg page "$deploying" '{page_id: $page, tag: "ops"}')" >/dev/null
 
 echo "Seeded $base. The email and password to sign in with are in $account."
+echo "To sign in from a script or the browser console, send $sign_in as it is to POST /api/sign_in."
+echo "The Pages, Folder and Attachment are in the Area Platform; the Area Handbook is empty."
 echo "A Page to open once signed in: $base/p/$glossary"
