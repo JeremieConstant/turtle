@@ -1,0 +1,35 @@
+name: Deny
+
+# Checks the server's dependencies with cargo-deny against server/deny.toml:
+# known vulnerabilities, yanked crates, licenses and sources. It needs the
+# network and can fail without a code change when a new advisory is published,
+# so it runs here, apart from scripts/check.sh: on dependency changes, on main,
+# and weekly.
+on:
+  pull_request:
+    paths:
+      - server/Cargo.toml
+      - server/Cargo.lock
+      - server/deny.toml
+      - .github/workflows/deny.yml
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: server/Cargo.toml
+          command: check advisories bans licenses sources
