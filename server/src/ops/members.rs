@@ -6,7 +6,7 @@ use super::accounts::{
     check_password, digest, hash_password, random_hex, read_member, start_session, valid_email, valid_name,
     Member, Nothing,
 };
-use super::{profiles, Catalogue, Core, OpError, OpResult, Principal, Reply, SessionChange};
+use super::{attempts, profiles, Catalogue, Client, Core, OpError, OpResult, Principal, Reply, SessionChange};
 use crate::mail::Mail;
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
@@ -19,7 +19,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         invite_member,
     );
     catalogue
-        .add(
+        .add_from_client(
             "accept_invitation",
             "Accepts an invitation: the invited person sets name and password, becomes a Member and is signed in.",
             accept_invitation,
@@ -55,7 +55,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         )
         .browser_only = true;
     catalogue
-        .add(
+        .add_from_client(
             "reset_password",
             "Sets a new password through a reset link, ends the Member's other sessions and signs them in.",
             reset_password,
@@ -244,9 +244,10 @@ pub fn invite_member(core: &Core, principal: &Principal, input: Invite) -> OpRes
     Ok(deliver(core, issued, mail)?.into())
 }
 
-pub fn accept_invitation(core: &Core, _: &Principal, input: Joining) -> OpResult<Member> {
+pub fn accept_invitation(core: &Core, _: &Principal, client: Client, input: Joining) -> OpResult<Member> {
     let name = valid_name(&input.name)?;
     check_password(&input.password)?;
+    usable_link(core, client, &input.secret, "invitation")?;
     // Hashing is slow on purpose; it runs without holding the database.
     let password_hash = hash_password(&input.password)?;
     let id = random_hex(16)?;
@@ -389,8 +390,9 @@ fn reset_mail(to: &str, link: &str) -> Mail {
     }
 }
 
-pub fn reset_password(core: &Core, _: &Principal, input: NewPassword) -> OpResult<Member> {
+pub fn reset_password(core: &Core, _: &Principal, client: Client, input: NewPassword) -> OpResult<Member> {
     check_password(&input.password)?;
+    usable_link(core, client, &input.secret, "password_reset")?;
     // Hashing is slow on purpose; it runs without holding the database.
     let password_hash = hash_password(&input.password)?;
 
@@ -508,6 +510,27 @@ fn issue_link(core: &Core, db: &Connection, about: LinkFor) -> Result<IssuedLink
     })
 }
 
+/// Turns away a link of this kind that cannot be used, and anyone who has
+/// tried too many such links lately, before a new password is hashed, so
+/// made-up links cost no slow hash. Using the link checks it again.
+fn usable_link(core: &Core, client: Client, secret: &str, kind: &str) -> Result<(), OpError> {
+    let attempt = attempts::begin(core, client, None)?;
+    let usable = core
+        .db()
+        .query_row(
+            "SELECT 1 FROM single_use_links WHERE id = ?1 AND kind = ?2 AND expires_at > ?3",
+            rusqlite::params![digest(secret), kind, core.now()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !usable {
+        return Err(unusable_link());
+    }
+    attempt.succeeded();
+    Ok(())
+}
+
 fn unusable_link() -> OpError {
     OpError::NotPermitted(
         "This link has already been used or has expired. Ask a Workspace Admin for a new one.".into(),
@@ -576,7 +599,7 @@ mod tests {
         assert!(link.address.as_deref().unwrap().starts_with("/join/"), "{link:?}");
         assert_eq!(link.mailed_to, None);
 
-        let joined = accept_invitation(&core, &Principal::Anonymous, joining(&link, "Grace Hopper")).unwrap();
+        let joined = accept_invitation(&core, &Principal::Anonymous, None, joining(&link, "Grace Hopper")).unwrap();
         assert_eq!(joined.output.name, "Grace Hopper");
         assert_eq!(joined.output.email, "grace@example.org");
         assert!(!joined.output.workspace_admin);
@@ -594,17 +617,17 @@ mod tests {
         };
 
         let used = invite("grace@example.org");
-        accept_invitation(&core, &Principal::Anonymous, joining(&used, "Grace")).unwrap();
-        let again = accept_invitation(&core, &Principal::Anonymous, joining(&used, "Mallory")).unwrap_err();
+        accept_invitation(&core, &Principal::Anonymous, None, joining(&used, "Grace")).unwrap();
+        let again = accept_invitation(&core, &Principal::Anonymous, None, joining(&used, "Mallory")).unwrap_err();
         assert_eq!(again.kind(), "not_permitted");
 
         let late = invite("linus@example.org");
         core.advance(INVITATION_LIFETIME + 1);
-        let expired = accept_invitation(&core, &Principal::Anonymous, joining(&late, "Linus")).unwrap_err();
+        let expired = accept_invitation(&core, &Principal::Anonymous, None, joining(&late, "Linus")).unwrap_err();
         assert_eq!(expired.kind(), "not_permitted");
 
         let made_up = SingleUseLink { address: Some("/join/0123".into()), mailed_to: None, expires_at: 0 };
-        let unknown = accept_invitation(&core, &Principal::Anonymous, joining(&made_up, "Eve")).unwrap_err();
+        let unknown = accept_invitation(&core, &Principal::Anonymous, None, joining(&made_up, "Eve")).unwrap_err();
         assert_eq!(unknown.kind(), "not_permitted");
     }
 
@@ -682,7 +705,7 @@ mod tests {
         let link = invite_member(core, admin, Invite { email: "grace@example.org".into() })
             .unwrap()
             .output;
-        accept_invitation(core, &Principal::Anonymous, joining(&link, "Grace")).unwrap()
+        accept_invitation(core, &Principal::Anonymous, None, joining(&link, "Grace")).unwrap()
     }
 
     fn grace_signs_in(core: &Core) -> Result<Reply<Member>, OpError> {
@@ -690,7 +713,7 @@ mod tests {
             email: "grace@example.org".into(),
             password: "a long enough password".into(),
         };
-        sign_in(core, &Principal::Anonymous, credentials)
+        sign_in(core, &Principal::Anonymous, None, credentials)
     }
 
     #[test]
@@ -775,7 +798,7 @@ mod tests {
             .unwrap()
             .output;
         assert!(link.address.as_deref().unwrap().starts_with("/reset-password/"), "{link:?}");
-        let reset = reset_password(&core, &Principal::Anonymous, new_password(&link)).unwrap();
+        let reset = reset_password(&core, &Principal::Anonymous, None, new_password(&link)).unwrap();
 
         assert_eq!(reset.output, joined.output);
         assert_ne!(signed_in(&core, &reset), Principal::Anonymous);
@@ -786,7 +809,7 @@ mod tests {
             email: "grace@example.org".into(),
             password: "an even better password".into(),
         };
-        assert!(sign_in(&core, &Principal::Anonymous, credentials).is_ok());
+        assert!(sign_in(&core, &Principal::Anonymous, None, credentials).is_ok());
     }
 
     #[test]
@@ -801,14 +824,79 @@ mod tests {
         };
 
         let used = reset_link();
-        reset_password(&core, &Principal::Anonymous, new_password(&used)).unwrap();
-        let again = reset_password(&core, &Principal::Anonymous, new_password(&used)).unwrap_err();
+        reset_password(&core, &Principal::Anonymous, None, new_password(&used)).unwrap();
+        let again = reset_password(&core, &Principal::Anonymous, None, new_password(&used)).unwrap_err();
         assert_eq!(again.kind(), "not_permitted");
 
         let late = reset_link();
         core.advance(PASSWORD_RESET_LIFETIME + 1);
-        let expired = reset_password(&core, &Principal::Anonymous, new_password(&late)).unwrap_err();
+        let expired = reset_password(&core, &Principal::Anonymous, None, new_password(&late)).unwrap_err();
         assert_eq!(expired.kind(), "not_permitted");
+    }
+
+    fn from(address: &str) -> Option<std::net::IpAddr> {
+        Some(address.parse().unwrap())
+    }
+
+    fn made_up(path: &str, number: usize) -> SingleUseLink {
+        SingleUseLink { address: Some(format!("/{path}/{number:064x}")), mailed_to: None, expires_at: 0 }
+    }
+
+    #[test]
+    fn after_twenty_made_up_invitation_links_from_a_client_even_a_real_one_is_refused_for_a_while() {
+        let core = fresh();
+        let admin = member(&core, "Ada", true);
+        let real = invite_member(&core, &admin, Invite { email: "grace@example.org".into() }).unwrap().output;
+        for number in 0..20 {
+            let guess = joining(&made_up("join", number), "Eve");
+            let failed = accept_invitation(&core, &Principal::Anonymous, from("203.0.113.7"), guess).unwrap_err();
+            assert_eq!(failed.message(), unusable_link().message());
+        }
+
+        let refused =
+            accept_invitation(&core, &Principal::Anonymous, from("203.0.113.7"), joining(&real, "Grace")).unwrap_err();
+        assert_eq!(refused.kind(), "not_permitted");
+        assert_eq!(refused.message(), "Too many attempts failed. Try again in 15 minutes.");
+        // Another client is not held up, and the link still works later.
+        let other = invite_member(&core, &admin, Invite { email: "linus@example.org".into() }).unwrap().output;
+        accept_invitation(&core, &Principal::Anonymous, from("203.0.113.8"), joining(&other, "Linus")).unwrap();
+        core.advance(15 * 60);
+        accept_invitation(&core, &Principal::Anonymous, from("203.0.113.7"), joining(&real, "Grace")).unwrap();
+    }
+
+    #[test]
+    fn after_twenty_made_up_reset_links_from_a_client_even_a_real_one_is_refused_for_a_while() {
+        let core = fresh();
+        let admin = member(&core, "Ada", true);
+        let joined = grace_joins(&core, &admin);
+        let real = create_password_reset(&core, &admin, MemberId { id: joined.output.id.clone() }).unwrap().output;
+        for number in 0..20 {
+            let guess = new_password(&made_up(RESET_PATH, number));
+            let failed = reset_password(&core, &Principal::Anonymous, from("203.0.113.7"), guess).unwrap_err();
+            assert_eq!(failed.message(), unusable_link().message());
+        }
+
+        let refused = reset_password(&core, &Principal::Anonymous, from("203.0.113.7"), new_password(&real)).unwrap_err();
+        assert_eq!(refused.message(), "Too many attempts failed. Try again in 15 minutes.");
+        reset_password(&core, &Principal::Anonymous, from("203.0.113.8"), new_password(&real)).unwrap();
+    }
+
+    #[test]
+    fn using_a_link_successfully_does_not_count_as_a_failure() {
+        let core = fresh();
+        let admin = member(&core, "Ada", true);
+        for number in 0..19 {
+            let guess = joining(&made_up("join", number), "Eve");
+            accept_invitation(&core, &Principal::Anonymous, from("203.0.113.7"), guess).unwrap_err();
+        }
+        for name in ["Grace", "Linus", "Ken"] {
+            let link = invite_member(&core, &admin, Invite { email: format!("{name}@example.org") }).unwrap().output;
+            accept_invitation(&core, &Principal::Anonymous, from("203.0.113.7"), joining(&link, name)).unwrap();
+        }
+
+        let twentieth = joining(&made_up("join", 99), "Eve");
+        let failed = accept_invitation(&core, &Principal::Anonymous, from("203.0.113.7"), twentieth).unwrap_err();
+        assert_eq!(failed.message(), unusable_link().message());
     }
 
     #[test]
@@ -818,7 +906,7 @@ mod tests {
         let invitation = invite_member(&core, &admin, Invite { email: "grace@example.org".into() })
             .unwrap()
             .output;
-        let refused = reset_password(&core, &Principal::Anonymous, new_password(&invitation)).unwrap_err();
+        let refused = reset_password(&core, &Principal::Anonymous, None, new_password(&invitation)).unwrap_err();
         assert_eq!(refused.kind(), "not_permitted");
     }
 
@@ -865,8 +953,8 @@ mod tests {
         let first = create_password_reset(&core, &admin, MemberId { id: id.id.clone() }).unwrap().output;
         let second = create_password_reset(&core, &admin, id).unwrap().output;
 
-        reset_password(&core, &Principal::Anonymous, new_password(&second)).unwrap();
-        let refused = reset_password(&core, &Principal::Anonymous, new_password(&first)).unwrap_err();
+        reset_password(&core, &Principal::Anonymous, None, new_password(&second)).unwrap();
+        let refused = reset_password(&core, &Principal::Anonymous, None, new_password(&first)).unwrap_err();
         assert_eq!(refused.kind(), "not_permitted");
     }
 
@@ -887,7 +975,7 @@ mod tests {
         assert!(sent[0].body.contains("Ada"), "the mail says who invites: {}", sent[0].body);
         let link = link_in(&sent[0]);
         assert!(link.address.as_deref().unwrap().starts_with("/join/"), "{link:?}");
-        let joined = accept_invitation(&core, &Principal::Anonymous, joining(&link, "Grace")).unwrap();
+        let joined = accept_invitation(&core, &Principal::Anonymous, None, joining(&link, "Grace")).unwrap();
         assert_eq!(joined.output.email, "grace@example.org");
     }
 
@@ -905,7 +993,7 @@ mod tests {
         let sent = mailer.sent();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].to, "member-ken@example.org");
-        let done = reset_password(&core, &Principal::Anonymous, new_password(&link_in(&sent[0]))).unwrap();
+        let done = reset_password(&core, &Principal::Anonymous, None, new_password(&link_in(&sent[0]))).unwrap();
         assert_eq!(done.output.id, *id);
     }
 
@@ -918,7 +1006,7 @@ mod tests {
         assert_eq!(failed.kind(), "internal");
         // Were the mail delivered after all, its link would not work.
         let attempted = mailer.sent();
-        let refused = accept_invitation(&core, &Principal::Anonymous, joining(&link_in(&attempted[0]), "Grace")).unwrap_err();
+        let refused = accept_invitation(&core, &Principal::Anonymous, None, joining(&link_in(&attempted[0]), "Grace")).unwrap_err();
         assert_eq!(refused.kind(), "not_permitted");
     }
 
@@ -935,7 +1023,7 @@ mod tests {
 
         let sent = mailer.wait_for(1);
         assert_eq!(sent[0].to, "member-ken@example.org");
-        let done = reset_password(&core, &Principal::Anonymous, new_password(&link_in(&sent[0]))).unwrap();
+        let done = reset_password(&core, &Principal::Anonymous, None, new_password(&link_in(&sent[0]))).unwrap();
         assert_eq!(done.output.id, "member-ken");
     }
 

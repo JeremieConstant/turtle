@@ -38,6 +38,8 @@ struct Settings {
     public_url: Option<String>,
     /// `TURTLE_HOST`.
     host: Option<String>,
+    /// `TURTLE_CLIENT_ADDRESS_HEADER`.
+    client_address_header: Option<String>,
     demo: DemoEnv,
 }
 
@@ -90,6 +92,13 @@ impl TestServer {
     /// refuse to start, and returns what it wrote to its standard error.
     pub async fn refuses_to_start_listening_on(host: &str) -> String {
         TestServer::refuses_to_start(Settings { host: Some(host.to_string()), ..Settings::default() }).await
+    }
+
+    /// Starts a server that takes the client's address from this header,
+    /// as one behind a reverse proxy would (`TURTLE_CLIENT_ADDRESS_HEADER`).
+    pub async fn start_with_client_address_header(name: &str) -> TestServer {
+        let settings = Settings { client_address_header: Some(name.to_string()), ..Settings::default() };
+        TestServer::start_with(None, settings).await
     }
 
     /// Starts a server with these demo settings.
@@ -288,6 +297,7 @@ fn command(data_dir: &Path, saves: Option<&Arc<Mutex<Vec<Save>>>>, settings: &Se
     let given = [
         ("TURTLE_PUBLIC_URL", settings.public_url.clone()),
         ("TURTLE_HOST", settings.host.clone()),
+        ("TURTLE_CLIENT_ADDRESS_HEADER", settings.client_address_header.clone()),
         ("TURTLE_MAX_ATTACHMENT_MB", settings.attachment_limit_mb.map(|mb| mb.to_string())),
         ("TURTLE_DEMO_EMAIL", settings.demo.email.clone()),
         ("TURTLE_DEMO_PASSWORD", settings.demo.password.clone()),

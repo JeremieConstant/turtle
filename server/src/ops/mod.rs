@@ -7,6 +7,7 @@
 
 pub mod accounts;
 pub mod agents;
+pub mod attempts;
 pub mod attachments;
 pub mod areas;
 pub mod connections;
@@ -83,6 +84,8 @@ pub struct Core {
     /// Whether the operator has been told, this start, that the demo
     /// Member is a Workspace Admin and so is not shown.
     demo_warning: std::sync::Once,
+    /// Recent failed attempts at signing in and at using single-use links.
+    attempts: attempts::Attempts,
 }
 
 impl Core {
@@ -116,6 +119,7 @@ impl Core {
             mailer: None,
             demo: None,
             demo_warning: std::sync::Once::new(),
+            attempts: attempts::Attempts::default(),
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -265,6 +269,11 @@ impl Core {
         self.search.close()
     }
 
+    /// Recent failed attempts at signing in and at using single-use links.
+    pub fn attempts(&self) -> &attempts::Attempts {
+        &self.attempts
+    }
+
     /// Seconds since the Unix epoch.
     pub fn now(&self) -> i64 {
         (self.clock)()
@@ -408,7 +417,11 @@ impl<T> From<T> for Reply<T> {
 
 pub type OpResult<T> = Result<Reply<T>, OpError>;
 
-type Run = Box<dyn Fn(&Core, &Principal, Value) -> OpResult<Value> + Send + Sync>;
+/// The address a request came from, when the adapter knows it. Only the
+/// operations that count failed attempts read it.
+pub type Client = Option<std::net::IpAddr>;
+
+type Run = Box<dyn Fn(&Core, &Principal, Client, Value) -> OpResult<Value> + Send + Sync>;
 
 /// One entry of the catalogue.
 pub struct Operation {
@@ -454,11 +467,18 @@ impl Catalogue {
         serde_json::json!({ "operations": operations })
     }
 
+    /// Runs an operation by name with JSON input, from a client whose
+    /// address is not known.
+    pub fn call(&self, core: &Core, principal: &Principal, name: &str, input: Value) -> OpResult<Value> {
+        self.call_from(core, principal, None, name, input)
+    }
+
     /// Runs an operation by name with JSON input, as the adapters do.
-    pub fn call(
+    pub fn call_from(
         &self,
         core: &Core,
         principal: &Principal,
+        client: Client,
         name: &str,
         input: Value,
     ) -> OpResult<Value> {
@@ -481,7 +501,7 @@ impl Catalogue {
                 ));
             }
         }
-        (operation.run)(core, principal, input)
+        (operation.run)(core, principal, client, input)
     }
 
     fn add<I, O>(
@@ -489,6 +509,20 @@ impl Catalogue {
         name: &'static str,
         description: &'static str,
         run: fn(&Core, &Principal, I) -> OpResult<O>,
+    ) -> &mut Operation
+    where
+        I: DeserializeOwned + JsonSchema + 'static,
+        O: Serialize + JsonSchema + 'static,
+    {
+        self.add_from_client::<I, O>(name, description, move |core, principal, _, input| run(core, principal, input))
+    }
+
+    /// Adds an operation that is told the address the request came from.
+    fn add_from_client<I, O>(
+        &mut self,
+        name: &'static str,
+        description: &'static str,
+        run: impl Fn(&Core, &Principal, Client, I) -> OpResult<O> + Send + Sync + 'static,
     ) -> &mut Operation
     where
         I: DeserializeOwned + JsonSchema + 'static,
@@ -505,10 +539,10 @@ impl Catalogue {
             changes: true,
             input_schema: schemars::schema_for!(I).to_value(),
             output_schema: schemars::schema_for!(O).to_value(),
-            run: Box::new(move |core, principal, input| {
+            run: Box::new(move |core, principal, client, input| {
                 let input: I = serde_json::from_value(input)
                     .map_err(|error| OpError::InvalidInput(error.to_string()))?;
-                let reply = run(core, principal, input)?;
+                let reply = run(core, principal, client, input)?;
                 Ok(Reply {
                     output: serde_json::to_value(reply.output).map_err(anyhow::Error::from)?,
                     session: reply.session,
