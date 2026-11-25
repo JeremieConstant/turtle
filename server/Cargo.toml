@@ -40,3 +40,9 @@ pdf-extract = "0.12.1"
 tempfile = "3.27.0"
 tokio-tungstenite = "0.29.0"
 tower = { version = "0.5.3", features = ["util"] }
+
+[lints.clippy]
+# An async block holding a large value, such as a buffer, makes every future
+# that awaits it that large, until a test's stack overflows far from the
+# cause. This names the line instead.
+large_futures = "warn"
