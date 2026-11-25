@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
-  import { OperationError } from '../lib/ops'
+  import { Attempt } from '../lib/attempt.svelte'
   import Logo from './Logo.svelte'
 
   const {
@@ -8,6 +8,8 @@
     intro,
     submitLabel,
     onsubmit,
+    quietSubmit = false,
+    lead,
     children,
   }: {
     heading: string
@@ -15,23 +17,18 @@
     submitLabel: string
     /** Runs the operation. A thrown OperationError is shown to the person. */
     onsubmit: () => Promise<void>
+    /** Gives the submit button the quiet look, when something above the form is the main way in. */
+    quietSubmit?: boolean
+    /** Shown between the heading and the form. */
+    lead?: Snippet
     children: Snippet
   } = $props()
 
-  let busy = $state(false)
-  let error = $state<string | null>(null)
+  const attempt = new Attempt()
 
-  async function submit(event: SubmitEvent) {
+  function submit(event: SubmitEvent) {
     event.preventDefault()
-    busy = true
-    error = null
-    try {
-      await onsubmit()
-    } catch (caught) {
-      error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'
-    } finally {
-      busy = false
-    }
+    attempt.run(onsubmit)
   }
 </script>
 
@@ -42,12 +39,13 @@
       <h1>{heading}</h1>
       <p class="muted">{intro}</p>
     </div>
+    {@render lead?.()}
     <form class="stack" onsubmit={submit}>
       {@render children()}
-      {#if error}
-        <p class="error" role="alert">{error}</p>
+      {#if attempt.error}
+        <p class="error" role="alert">{attempt.error}</p>
       {/if}
-      <button type="submit" class="btn primary" disabled={busy}>{submitLabel}</button>
+      <button type="submit" class="btn" class:primary={!quietSubmit} disabled={attempt.busy}>{submitLabel}</button>
     </form>
   </div>
 </main>

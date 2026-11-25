@@ -1,5 +1,6 @@
 //! Turtle server: one binary with the web app inside and one data directory.
 
+mod demo;
 mod diff;
 mod directive;
 mod http_api;
@@ -104,12 +105,20 @@ async fn main() -> anyhow::Result<()> {
     let mail_from = std::env::var("TURTLE_MAIL_FROM").ok();
     let mailer = mail::from_settings(smtp_url.as_deref(), mail_from.as_deref(), public_url.as_ref())?;
 
+    // A Demo says so on every screen and shows its demo Member on the sign-in
+    // screen; the hosting resets it.
+    let demo_email = std::env::var("TURTLE_DEMO_EMAIL").ok();
+    let demo_password = std::env::var("TURTLE_DEMO_PASSWORD").ok();
+    let demo_reset_hours = std::env::var("TURTLE_DEMO_RESET_HOURS").ok();
+    let demo = demo::from_settings(demo_email.as_deref(), demo_password.as_deref(), demo_reset_hours.as_deref())?;
+
     // Opening the core brings the schema up to date.
     let db_path = store::database_in(&data_dir)?;
     let mut core = ops::Core::open(&db_path)?;
     core.set_attachment_limit(attachment_limit);
     core.set_public_url(public_url);
     core.set_mailer(mailer.map(|smtp| Arc::new(smtp) as Arc<dyn mail::Mailer>));
+    core.set_demo(demo);
     let core = Arc::new(core);
     // Whether Turtle looks reachable only from its intranet may take a name
     // lookup; it is found out now, off the async workers, so the Connect AI

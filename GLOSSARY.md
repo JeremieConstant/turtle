@@ -10,6 +10,10 @@ Turtle is an open-source, self-hosted knowledge base where humans and agents wri
 The single organisation an installation serves; everything else lives inside it.
 _Avoid_: Tenant, Mandant, organisation, instance
 
+**Demo**:
+A Turtle its settings declare a demo: every screen says so and how often the hosting resets it. Its demo Member is a Member without Workspace Admin whose email address and password the settings name and Turtle shows to everyone, so anyone can sign in as them.
+_Avoid_: Sandbox, trial, playground
+
 **Area**:
 A top-level container in the Workspace that holds one tree of Pages and Folders and is the unit permissions are granted on.
 _Avoid_: Space, Bereich, project, wiki

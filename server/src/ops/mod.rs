@@ -78,6 +78,11 @@ pub struct Core {
     /// Sends invitations and password reset links, when SMTP is set up.
     /// Mailed links point at the public URL, so it is set too.
     mailer: Option<Arc<dyn crate::mail::Mailer>>,
+    /// Set when this Turtle is a Demo.
+    demo: Option<crate::demo::DemoSettings>,
+    /// Whether the operator has been told, this start, that the demo
+    /// Member is a Workspace Admin and so is not shown.
+    demo_warning: std::sync::Once,
 }
 
 impl Core {
@@ -109,6 +114,8 @@ impl Core {
             resolve: intranet::system_resolver(),
             intranet_only: OnceLock::new(),
             mailer: None,
+            demo: None,
+            demo_warning: std::sync::Once::new(),
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -142,6 +149,22 @@ impl Core {
     /// What sends mail, if Turtle sends any.
     pub fn mailer(&self) -> Option<&Arc<dyn crate::mail::Mailer>> {
         self.mailer.as_ref()
+    }
+
+    /// Makes this Turtle a Demo, or not.
+    pub fn set_demo(&mut self, demo: Option<crate::demo::DemoSettings>) {
+        self.demo = demo;
+    }
+
+    /// The demo settings, when this Turtle is a Demo.
+    pub fn demo(&self) -> Option<&crate::demo::DemoSettings> {
+        self.demo.as_ref()
+    }
+
+    /// Tells the operator, once per start, that the demo Member is a
+    /// Workspace Admin and so is not shown.
+    pub fn warn_demo_member_is_workspace_admin(&self) {
+        self.demo_warning.call_once(crate::demo::warn_about_workspace_admin);
     }
 
     /// Sets how host names are looked up, so tests need no network.
