@@ -150,6 +150,7 @@ fn table() -> Vec<Row> {
         ("attach_file", |f| json!({"page_id": f.page_id, "name": "a.txt", "content": "aGVsbG8="}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("list_attachments", |f| json!({"id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("read_attachment", |f| json!({"id": f.attachment_id}), [OK, OK, OK, HIDDEN, OK]),
+        ("remove_attachment", |f| json!({"id": f.attachment_id}), [OK, OK, REFUSED, HIDDEN, OK]),
         // It leaves out the Pages the caller cannot read instead of failing; ops::links tests which.
         ("get_page_titles", |_| json!({"page_ids": ["made-up"]}), [OK; 5]),
         ("get_page_markdown", |f| json!({"page_id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),

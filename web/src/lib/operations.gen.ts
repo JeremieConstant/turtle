@@ -737,6 +737,13 @@ export type Operations = {
     }
     output: Attachment
   }
+  /** Removes an Attachment from its Page. The Page's content is left as it is, so an image of the Attachment shown there shows as missing; take it out of the content too. Needs the Write Role. */
+  remove_attachment: {
+    input: {
+      id: string
+    }
+    output: null
+  }
   /** Lists the Attachments of a Page, the oldest first, with their names and sizes. */
   list_attachments: {
     input: {
