@@ -28,7 +28,7 @@ Turtle then listens on <http://localhost:4100>. On the first visit it asks you t
 docker compose pull && docker compose up -d
 ```
 
-The image is `ghcr.io/jeremieconstant/turtle`: `latest` is the newest release, `X.Y` and `X.Y.Z` a release line or one release, and `edge` whatever is on `main`. Settings from [Start](#start) go under `environment:` in `compose.yml`; set `TURTLE_PUBLIC_URL` there once Turtle has an address of its own. [Connect AI](#connect-ai) says how to let Claude or another MCP client in.
+The image is `ghcr.io/turtle-wiki/turtle`: `latest` is the newest release, `X.Y` and `X.Y.Z` a release line or one release, and `edge` whatever is on `main`. Settings from [Start](#start) go under `environment:` in `compose.yml`; set `TURTLE_PUBLIC_URL` there once Turtle has an address of its own. [Connect AI](#connect-ai) says how to let Claude or another MCP client in.
 
 Without Docker, Turtle is one file built from source, as [Build](#build) describes:
 
