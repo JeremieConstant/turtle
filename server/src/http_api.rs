@@ -3,12 +3,13 @@
 //! turning cookies and Tokens into principals and errors into status codes.
 
 use crate::ops::{self, Catalogue, Core, OpError, Principal, SessionChange};
-use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use serde_json::{json, Value};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 const SESSION_COOKIE: &str = "turtle_session";
@@ -16,6 +17,9 @@ const SESSION_COOKIE: &str = "turtle_session";
 struct Api {
     core: Arc<Core>,
     catalogue: Catalogue,
+    /// The header a reverse proxy passes the client's address on in, when
+    /// the operator says Turtle is behind one.
+    client_address_header: Option<HeaderName>,
 }
 
 /// The largest request an operation is called with. An attached file
@@ -25,11 +29,12 @@ pub fn input_limit(core: &Core) -> DefaultBodyLimit {
     DefaultBodyLimit::max((core.attachment_limit().div_ceil(3) * 4 + 64 * 1024) as usize)
 }
 
-pub fn router(core: Arc<Core>) -> Router {
+pub fn router(core: Arc<Core>, client_address_header: Option<HeaderName>) -> Router {
     let limit = input_limit(&core);
     let api = Arc::new(Api {
         core,
         catalogue: ops::catalogue(),
+        client_address_header,
     });
     Router::new()
         .route("/api/{operation}", post(call))
@@ -40,9 +45,12 @@ pub fn router(core: Arc<Core>) -> Router {
 async fn call(
     State(api): State<Arc<Api>>,
     Path(operation): Path<String>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     body: String,
 ) -> Response {
+    let connected = connection.map(|Extension(ConnectInfo(address))| address.ip());
+    let client = client_address(api.client_address_header.as_ref(), &headers).or(connected);
     // Only JSON is accepted. A plain HTML form cannot send it, which keeps
     // other sites from posting operations with someone's cookie.
     let is_json = headers
@@ -67,7 +75,7 @@ async fn call(
     let outcome = tokio::task::spawn_blocking(move || {
         let principal = principal(&api.core, &headers)?;
         api.catalogue
-            .call(&api.core, &principal, &operation, input)
+            .call_from(&api.core, &principal, client, &operation, input)
             .map_err(Refusal::Op)
     })
     .await;
@@ -88,6 +96,18 @@ async fn call(
         Ok(Err(refused)) => refused.into_response(),
         Err(error) => error_response(OpError::Internal(error.into())),
     }
+}
+
+/// The client's address as the reverse proxy passed it on in `header`: the
+/// last address in it, the one the proxy added, since a client can put
+/// anything before it. Some proxies add the client's port. None without a
+/// proxy, or if the header holds no address.
+fn client_address(header: Option<&HeaderName>, headers: &HeaderMap) -> Option<IpAddr> {
+    let value = headers.get_all(header?).iter().next_back()?.to_str().ok()?;
+    let last = value.rsplit(',').next()?.trim();
+    last.parse()
+        .or_else(|_| last.parse::<SocketAddr>().map(|with_port| with_port.ip()))
+        .ok()
 }
 
 /// Why a request is refused.

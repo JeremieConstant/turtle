@@ -1,6 +1,6 @@
 //! Accounts and sessions: the first account, signing in and signing out.
 
-use super::{Catalogue, Core, OpError, OpResult, Principal, Reply, SessionChange, SessionId};
+use super::{attempts, Catalogue, Client, Core, OpError, OpResult, Principal, Reply, SessionChange, SessionId};
 use anyhow::anyhow;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
@@ -27,7 +27,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         )
         .browser_only = true;
     catalogue
-        .add(
+        .add_from_client(
             "sign_in",
             "Signs a Member in with email and password.",
             sign_in,
@@ -197,10 +197,11 @@ pub fn create_first_account(
     })
 }
 
-pub fn sign_in(core: &Core, _: &Principal, input: Credentials) -> OpResult<Member> {
+pub fn sign_in(core: &Core, _: &Principal, client: Client, input: Credentials) -> OpResult<Member> {
     let refused = || {
         OpError::NotPermitted("That email address and password do not match an account.".into())
     };
+    let attempt = attempts::begin(core, client, Some(&input.email))?;
     // No account has a longer password, so it is refused without hashing it.
     if input.password.chars().count() > MAX_PASSWORD_LENGTH {
         return Err(refused());
@@ -221,6 +222,7 @@ pub fn sign_in(core: &Core, _: &Principal, input: Credentials) -> OpResult<Membe
     // Hashing is slow on purpose; it runs without holding the database.
     let matches = verify_password(&input.password, &stored_hash)?;
     let member = member.filter(|_| matches).ok_or_else(refused)?;
+    attempt.succeeded();
     let secret = start_session(core, &core.db(), &member.id)?;
     Ok(Reply {
         output: member,
@@ -453,7 +455,7 @@ mod tests {
             email: "ada@example.org".into(),
             password: "correct horse battery".into(),
         };
-        let signed = sign_in(&core, &Principal::Anonymous, credentials).unwrap();
+        let signed = sign_in(&core, &Principal::Anonymous, None, credentials).unwrap();
         assert_eq!(signed.output, created.output);
         let SessionChange::Start(secret) = &signed.session else {
             panic!("signing in started no session");
@@ -478,7 +480,7 @@ mod tests {
             email: "ada@example.org".into(),
             password: "correct horse battery".into(),
         };
-        let second = sign_in(&core, &Principal::Anonymous, credentials).unwrap();
+        let second = sign_in(&core, &Principal::Anonymous, None, credentials).unwrap();
 
         sign_out(&core, &signed_in(&core, &second), Nothing {}).unwrap();
         assert_ne!(signed_in(&core, &first), Principal::Anonymous);
@@ -497,12 +499,143 @@ mod tests {
             email: "nobody@example.org".into(),
             password: "correct horse battery".into(),
         };
-        let first = sign_in(&core, &Principal::Anonymous, wrong_password).unwrap_err();
-        let second = sign_in(&core, &Principal::Anonymous, unknown_email).unwrap_err();
+        let first = sign_in(&core, &Principal::Anonymous, None, wrong_password).unwrap_err();
+        let second = sign_in(&core, &Principal::Anonymous, None, unknown_email).unwrap_err();
         assert_eq!(first.kind(), "not_permitted");
         // Nothing tells a caller which email addresses have an account.
         assert_eq!(first.kind(), second.kind());
         assert_eq!(first.message(), second.message());
+    }
+
+    fn from(address: &str) -> Option<std::net::IpAddr> {
+        Some(address.parse().unwrap())
+    }
+
+    fn ada_with(password: &str) -> Credentials {
+        Credentials {
+            email: "ada@example.org".into(),
+            password: password.into(),
+        }
+    }
+
+    #[test]
+    fn after_five_failed_sign_ins_with_an_email_address_it_is_refused_for_fifteen_minutes() {
+        let core = fresh();
+        create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        // From five different clients, so only the email address adds up.
+        for client in ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4", "198.51.100.5"] {
+            let failed = sign_in(&core, &Principal::Anonymous, from(client), ada_with("incorrect horse")).unwrap_err();
+            assert_eq!(failed.message(), "That email address and password do not match an account.");
+        }
+
+        let refused =
+            sign_in(&core, &Principal::Anonymous, from("198.51.100.6"), ada_with("correct horse battery")).unwrap_err();
+        assert_eq!(refused.kind(), "not_permitted");
+        assert_eq!(refused.message(), "Too many attempts failed. Try again in 15 minutes.");
+
+        core.advance(14 * 60);
+        let refused =
+            sign_in(&core, &Principal::Anonymous, from("198.51.100.6"), ada_with("correct horse battery")).unwrap_err();
+        assert_eq!(refused.message(), "Too many attempts failed. Try again in 1 minute.");
+
+        core.advance(60);
+        assert!(sign_in(&core, &Principal::Anonymous, from("198.51.100.6"), ada_with("correct horse battery")).is_ok());
+    }
+
+    #[test]
+    fn after_twenty_failed_sign_ins_from_a_client_it_is_refused_whatever_the_email_address() {
+        let core = fresh();
+        create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        // Four tries each at five addresses, staying under the limit per address.
+        for number in 0..20 {
+            let guess = Credentials {
+                email: format!("person{}@example.org", number % 5),
+                password: "a guessed password".into(),
+            };
+            sign_in(&core, &Principal::Anonymous, from("203.0.113.7"), guess).unwrap_err();
+        }
+
+        let refused =
+            sign_in(&core, &Principal::Anonymous, from("203.0.113.7"), ada_with("correct horse battery")).unwrap_err();
+        assert_eq!(refused.message(), "Too many attempts failed. Try again in 15 minutes.");
+        // Another client is not held up.
+        assert!(sign_in(&core, &Principal::Anonymous, from("203.0.113.8"), ada_with("correct horse battery")).is_ok());
+    }
+
+    #[test]
+    fn an_ipv6_client_is_counted_by_its_network() {
+        let core = fresh();
+        create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        for number in 0..20 {
+            let guess = Credentials {
+                email: format!("person{}@example.org", number % 5),
+                password: "a guessed password".into(),
+            };
+            let client = from(&format!("2001:db8:1:2::{number:x}"));
+            sign_in(&core, &Principal::Anonymous, client, guess).unwrap_err();
+        }
+
+        let same_network = from("2001:db8:1:2:ffff::1");
+        let refused = sign_in(&core, &Principal::Anonymous, same_network, ada_with("correct horse battery")).unwrap_err();
+        assert_eq!(refused.message(), "Too many attempts failed. Try again in 15 minutes.");
+        let other_network = from("2001:db8:1:3::1");
+        assert!(sign_in(&core, &Principal::Anonymous, other_network, ada_with("correct horse battery")).is_ok());
+    }
+
+    #[test]
+    fn signing_in_too_often_with_an_unknown_email_address_is_refused_alike() {
+        let core = fresh();
+        create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        let nobody = || Credentials {
+            email: "nobody@example.org".into(),
+            password: "a guessed password".into(),
+        };
+        for _ in 0..5 {
+            sign_in(&core, &Principal::Anonymous, None, ada_with("incorrect horse")).unwrap_err();
+            sign_in(&core, &Principal::Anonymous, None, nobody()).unwrap_err();
+        }
+
+        let member = sign_in(&core, &Principal::Anonymous, None, ada_with("incorrect horse")).unwrap_err();
+        let no_member = sign_in(&core, &Principal::Anonymous, None, nobody()).unwrap_err();
+        assert_eq!(member.message(), "Too many attempts failed. Try again in 15 minutes.");
+        assert_eq!((member.kind(), member.message()), (no_member.kind(), no_member.message()));
+    }
+
+    #[test]
+    fn signing_in_successfully_does_not_count_as_a_failure() {
+        let core = fresh();
+        create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        for _ in 0..4 {
+            sign_in(&core, &Principal::Anonymous, from("198.51.100.1"), ada_with("incorrect horse")).unwrap_err();
+        }
+        for _ in 0..20 {
+            sign_in(&core, &Principal::Anonymous, from("198.51.100.1"), ada_with("correct horse battery")).unwrap();
+        }
+
+        // The fifth failure is still let through; only after it is Ada refused.
+        let fifth = sign_in(&core, &Principal::Anonymous, from("198.51.100.1"), ada_with("incorrect horse")).unwrap_err();
+        assert_eq!(fifth.message(), "That email address and password do not match an account.");
+        let refused =
+            sign_in(&core, &Principal::Anonymous, from("198.51.100.1"), ada_with("correct horse battery")).unwrap_err();
+        assert_eq!(refused.message(), "Too many attempts failed. Try again in 15 minutes.");
+    }
+
+    #[test]
+    fn a_refused_sign_in_does_not_hash_the_password() {
+        let core = fresh();
+        create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        let started = std::time::Instant::now();
+        for _ in 0..5 {
+            sign_in(&core, &Principal::Anonymous, None, ada_with("incorrect horse")).unwrap_err();
+        }
+        let one_hash = started.elapsed() / 5;
+
+        let started = std::time::Instant::now();
+        for _ in 0..5 {
+            sign_in(&core, &Principal::Anonymous, None, ada_with("incorrect horse")).unwrap_err();
+        }
+        // Hashing takes long on purpose, far longer than turning someone away.
+        assert!(started.elapsed() < one_hash, "five refusals took {:?}, one hash {one_hash:?}", started.elapsed());
     }
 
     #[test]
@@ -549,7 +682,7 @@ mod tests {
             email: "ADA@example.org".into(),
             password: "correct horse battery".into(),
         };
-        assert!(sign_in(&core, &Principal::Anonymous, credentials).is_ok());
+        assert!(sign_in(&core, &Principal::Anonymous, None, credentials).is_ok());
     }
 
     #[test]

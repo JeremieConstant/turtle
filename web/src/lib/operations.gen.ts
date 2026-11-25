@@ -761,7 +761,7 @@ export type Operations = {
     }
     output: AttachmentContent
   }
-  /** Invites a person by email address with a single-use link that expires: Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin. */
+  /** Invites a person by email address with a single-use link that expires: Turtle mails it to them when it sends mail, and otherwise, or when that mail cannot be sent, returns it to pass on. Only for a Workspace Admin. */
   invite_member: {
     input: {
       email: string
@@ -800,7 +800,7 @@ export type Operations = {
     }
     output: MemberEntry
   }
-  /** Creates a single-use link that lets a Member set a new password; it expires. Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin. */
+  /** Creates a single-use link that lets a Member set a new password; it expires. Turtle mails it to them when it sends mail, and otherwise, or when that mail cannot be sent, returns it to pass on. Only for a Workspace Admin. */
   create_password_reset: {
     input: {
       id: string

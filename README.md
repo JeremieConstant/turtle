@@ -71,6 +71,7 @@ Turtle is configured with environment variables:
 | `TURTLE_PORT` | `4100` | The port Turtle listens on. |
 | `TURTLE_MAX_ATTACHMENT_MB` | `25` | The largest file, in MB, that can be attached to a Page. |
 | `TURTLE_PUBLIC_URL` | unset | The address people and AI clients reach Turtle at, such as `https://turtle.example.org`, at the root of its host. When set, Claude and other MCP clients can connect with OAuth: a Member pastes `<address>/mcp` into the client and clicks **Allow**. Without it, only Tokens created by hand work at the MCP endpoint. |
+| `TURTLE_CLIENT_ADDRESS_HEADER` | unset | Behind a reverse proxy, the header it passes on the client's address in, such as `X-Forwarded-For`. Turtle takes the last address in it, the one the proxy added; behind more than one proxy, name the header the outermost one sets, such as `CF-Connecting-IP` behind Cloudflare. Someone who fails to sign in or to use a single-use link too often in a short time is turned away for 15 minutes, and so is everyone trying an email address after five failed attempts with it; without this setting, everyone behind the proxy counts as one. Leave it unset without a proxy, since anyone can send the header. |
 | `TURTLE_SMTP_URL` | unset | The SMTP server Turtle sends mail through, such as `smtps://user:password@smtp.example.org` or `smtp://user:password@smtp.example.org:587?tls=required`. When set, invitations and password reset links are mailed, and a Member who forgot their password can ask for a link on the sign-in screen. Needs `TURTLE_MAIL_FROM` and `TURTLE_PUBLIC_URL`. Without it, a Workspace Admin gets each link to pass on by hand. |
 | `TURTLE_MAIL_FROM` | unset | The address Turtle's mail comes from, such as `Turtle <turtle@example.org>`. |
 | `TURTLE_DEMO_EMAIL` | unset | Makes Turtle a public demo, together with `TURTLE_DEMO_PASSWORD`: the email address of the demo Member, a Member without Workspace Admin whom anyone may sign in as. Every screen then says that this is a demo. |
@@ -86,7 +87,7 @@ TURTLE_DATA=/var/lib/turtle TURTLE_PORT=8080 TURTLE_PUBLIC_URL=https://turtle.ex
 
 The demo account must be a Member without Workspace Admin; Turtle never shows a Workspace Admin's password, and shows no account until a Member with that email address exists. Turtle does not reset the demo itself: the hosting stops it, empties the data directory, starts it and fills it again.
 
-Behind a reverse proxy, set `TURTLE_PUBLIC_URL` to the address people open in the browser. Turtle cannot work it out by itself, and without it AI clients cannot sign in; the **Connect AI** page then tells the Workspace Admin what is missing.
+Behind a reverse proxy, set `TURTLE_PUBLIC_URL` to the address people open in the browser. Turtle cannot work it out by itself, and without it AI clients cannot sign in; the **Connect AI** page then tells the Workspace Admin what is missing. Set `TURTLE_CLIENT_ADDRESS_HEADER` too, so Turtle tells the people behind the proxy apart when it counts failed attempts to sign in.
 
 When a newer Turtle starts on an existing data directory, it brings the database up to date by itself. To back up Turtle, stop it and copy the data directory. With Docker, the data directory is the `turtle-data` volume.
 

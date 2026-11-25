@@ -124,6 +124,16 @@ async fn main() -> anyhow::Result<()> {
     let demo_reset_hours = std::env::var("TURTLE_DEMO_RESET_HOURS").ok();
     let demo = demo::from_settings(demo_email.as_deref(), demo_password.as_deref(), demo_reset_hours.as_deref())?;
 
+    // Behind a reverse proxy every request comes from the proxy, so failed
+    // attempts are counted by the client address the proxy passes on in
+    // this header. Without it the header is not trusted, as anyone can send it.
+    let client_address_header = match std::env::var("TURTLE_CLIENT_ADDRESS_HEADER") {
+        Ok(name) if !name.trim().is_empty() => Some(name.trim().parse::<header::HeaderName>().map_err(|_| {
+            anyhow::anyhow!("TURTLE_CLIENT_ADDRESS_HEADER must be the name of an HTTP header, such as X-Forwarded-For, not {name:?}")
+        })?),
+        _ => None,
+    };
+
     // Opening the core brings the schema up to date.
     let db_path = store::database_in(&data_dir)?;
     let mut core = ops::Core::open(&db_path)?;
@@ -210,7 +220,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/pdf_style_logos/{id}", get(show_pdf_style_logo))
         .route("/api/profile_pictures/{id}", get(show_profile_picture))
         .with_state(app.clone())
-        .merge(http_api::router(core.clone()))
+        .merge(http_api::router(core.clone(), client_address_header))
         .merge(oauth::router(core.clone()))
         .merge(mcp::router(core))
         .merge(web_app::router(web_app::EMBEDDED));
@@ -222,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
         "Turtle is listening on http://{address} (data directory: {})",
         data_dir.display()
     );
-    axum::serve(listener, router)
+    axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(shutdown_requested())
         .await?;
 
