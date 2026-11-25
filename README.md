@@ -101,6 +101,8 @@ For scripts and clients without OAuth, a Token is created by hand under **For de
 
 ## Develop
 
+To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md) first: what is welcome, signing off your commits, and when a change is done.
+
 Run the server and its tests from the repository root:
 
 ```bash

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Every check CI runs, in one command: lints, the types generated from the
-# operation catalogue, the web app's type check and tests, and the server's
-# tests. Run it from anywhere in the repository before committing.
+# operation catalogue, the web app's type check and tests, the sign-off
+# check's tests, and the server's tests. Run it from anywhere in the
+# repository before committing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -28,6 +29,9 @@ npm --prefix web run --silent check
 
 step "Web app tests"
 npm --prefix web test --silent
+
+step "Sign-off check tests"
+scripts/check-sign-off.test.sh
 
 step "Server tests"
 cargo test --quiet --manifest-path server/Cargo.toml

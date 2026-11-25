@@ -23,3 +23,15 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm --prefix web ci
       - run: scripts/check.sh
+
+  # Every commit a pull request adds is signed off by its author; see
+  # CONTRIBUTING.md. Commits already on the base branch are not checked.
+  sign-off:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - run: scripts/check-sign-off.sh "origin/$GITHUB_BASE_REF" HEAD

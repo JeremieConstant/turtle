@@ -10,7 +10,7 @@ Run cargo as `scripts/cargo`, which finds it off PATH. The server is a binary cr
 
 ## Commits
 
-The commit that finishes an issue ends its message with `Closes #N`. A bare `(#N)` in the title does not close the issue on push. Commits for an unfinished issue use `Refs #N`.
+The commit that finishes an issue ends its message with `Closes #N`. A bare `(#N)` in the title does not close the issue on push. Commits for an unfinished issue use `Refs #N`. Every commit is signed off (`git commit -s`), or CI fails the pull request; see `CONTRIBUTING.md`.
 
 ## Agent skills
 
