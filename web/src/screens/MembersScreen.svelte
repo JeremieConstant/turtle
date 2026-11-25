@@ -126,6 +126,9 @@
         {#if shown.link.mailed_to}
           <p>Turtle has mailed the link to {shown.link.mailed_to}.</p>
         {:else}
+          {#if shown.link.mail_failed_to}
+            <p>Turtle could not mail the link to {shown.link.mail_failed_to}. Pass it on yourself.</p>
+          {/if}
           <div class="controls">
             <input class="input grow" readonly aria-label="Link to pass on" value={address} onfocus={event => event.currentTarget.select()} />
             <button type="button" class="btn" onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>

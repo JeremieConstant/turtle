@@ -1,0 +1,53 @@
+name: Bug report
+description: Turtle did something it should not, or failed to do something it should.
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting this. A security problem goes through the [security policy](https://github.com/turtle-wiki/turtle/security/policy) instead, not here in public.
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: What you saw, including any error message as it was shown.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What should have happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: From a running Turtle, what to do so that it happens again.
+      placeholder: |
+        1. Open a Page in an Area where you have Write
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Turtle version
+      description: The release you run (such as `0.1.0`), the image tag (such as `edge`), or the commit if you built it yourself.
+    validations:
+      required: true
+  - type: dropdown
+    id: runs
+    attributes:
+      label: How Turtle runs
+      options:
+        - Docker
+        - Binary built from source
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: The browser, the MCP client, the server log around the time it happened, screenshots.

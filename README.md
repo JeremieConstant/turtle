@@ -12,7 +12,7 @@ A self-hosted wiki where people and AI agents write documentation together.
 - **An Agent never has more access than its person.** Agents work through MCP with almost every operation people have. An Agent a Member connects is limited to what that Member may do, and what it changes shows under their name, as "Ada Example via Claude" in the screenshot above.
 - **Your writing stays Markdown.** Every Page can be read and written as Markdown, and an Area or Subtree exports as a ZIP of Markdown files with its Attachments, or as a PDF.
 
-Turtle is at an early stage. [docs/mvp.md](docs/mvp.md) describes where it is heading, [GLOSSARY.md](GLOSSARY.md) defines its terms, and [docs/adr/](docs/adr/) records the decisions behind it.
+Turtle is at an early stage. [ROADMAP.md](ROADMAP.md) says what is being built now and what comes next, [GLOSSARY.md](GLOSSARY.md) defines its terms, and [docs/adr/](docs/adr/) records the decisions behind it.
 
 ## Run it
 

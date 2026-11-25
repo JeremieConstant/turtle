@@ -1,0 +1,25 @@
+name: Feature request
+description: Something Turtle should do that it does not do yet.
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you write, the [roadmap](https://github.com/turtle-wiki/turtle/blob/main/ROADMAP.md) says what is planned and what Turtle will not become.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way today. Describe the problem before any solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: How Turtle could solve it, if you have one in mind.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How you manage now
+      description: Workarounds or other tools you use for it today.

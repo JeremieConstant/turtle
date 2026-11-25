@@ -120,6 +120,7 @@ mod tests {
 #[cfg(test)]
 pub mod fake {
     use super::{Mail, Mailer};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Condvar, Mutex};
     use std::time::Duration;
 
@@ -129,13 +130,18 @@ pub mod fake {
     pub struct FakeMailer {
         sent: Mutex<Vec<Mail>>,
         arrived: Condvar,
-        broken: bool,
+        broken: AtomicBool,
     }
 
     impl FakeMailer {
         /// A mailer whose server takes no mail.
         pub fn broken() -> FakeMailer {
-            FakeMailer { broken: true, ..FakeMailer::default() }
+            FakeMailer { broken: AtomicBool::new(true), ..FakeMailer::default() }
+        }
+
+        /// The server takes mail again.
+        pub fn repair(&self) {
+            self.broken.store(false, Ordering::SeqCst);
         }
 
         /// Every mail sent so far, or given to a broken mailer.
@@ -160,7 +166,7 @@ pub mod fake {
         fn send(&self, mail: &Mail) -> anyhow::Result<()> {
             self.sent.lock().unwrap().push(mail.clone());
             self.arrived.notify_all();
-            if self.broken {
+            if self.broken.load(Ordering::SeqCst) {
                 anyhow::bail!("the fake SMTP server is broken");
             }
             Ok(())
