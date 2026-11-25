@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Source Confluence Alternative | Turtle Wiki</title>
+  <meta name="description" content="Open source Confluence alternative: Turtle is a self-hosted wiki where your team and AI agents write docs together. One binary, Markdown, AGPL.">
+  <link rel="canonical" href="https://turtle-wiki.app/">
+  <meta name="theme-color" content="#fafaf8">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://turtle-wiki.app/">
+  <meta property="og:title" content="Open Source Confluence Alternative | Turtle Wiki">
+  <meta property="og:description" content="A self-hosted wiki where your team and AI agents write docs together. One binary, Markdown, AGPL.">
+  <meta property="og:image" content="https://turtle-wiki.app/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Turtle Wiki",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Linux, macOS",
+    "description": "Open source Confluence alternative: a self-hosted wiki where people and AI agents write documentation together.",
+    "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+    "url": "https://turtle-wiki.app/",
+    "codeRepository": "https://github.com/JeremieConstant/turtle",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="preload" as="image" href="hero.webp" imagesrcset="hero-1440.webp 1440w, hero.webp 2880w" imagesizes="(min-width: 1320px) 1320px, 100vw">
+
+  <style>
+    :root {
+      --bg: #fafaf8;
+      --ink: #191918;
+      --muted: #62625e;
+      --line: #e6e6e2;
+      --accent: #0f7b6c;
+      --accent-ink: #ffffff;
+      --radius: 10px;
+      --wrap: 1120px;
+      --gutter: 24px;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 400 1.0625rem/1.55 Geist, -apple-system, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+      overflow-x: hidden;
+    }
+    a { color: inherit; }
+    .wrap { width: min(var(--wrap), 100% - 2 * var(--gutter)); margin-inline: auto; }
+    .skip { position: absolute; left: 12px; top: -48px; padding: 10px 14px; background: var(--ink); color: #fff; border-radius: 8px; z-index: 10; }
+    .skip:focus { top: 12px; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+    /* Header */
+    header { padding-block: 22px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600; letter-spacing: -0.01em; min-height: 44px; }
+    .brand img { width: 26px; height: 26px; }
+
+    /* Hero copy */
+    .hero { position: relative; text-align: center; padding-top: clamp(40px, 9vh, 96px); }
+    .copy { position: relative; z-index: 2; }
+    h1 {
+      margin: 0 auto; max-width: 11.5em;
+      font-weight: 600; font-size: clamp(2.6rem, 6.4vw, 5.25rem);
+      line-height: 1.02; letter-spacing: -0.035em;
+      text-wrap: balance;
+    }
+    .lines { margin: 28px auto 0; padding: 0; list-style: none; color: var(--muted); font-size: clamp(1.0625rem, 1.6vw, 1.25rem); line-height: 1.5; }
+    .lines li + li { margin-top: 2px; }
+    .actions { display: flex; justify-content: center; gap: 12px; margin-top: 36px; flex-wrap: wrap; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-height: 48px; padding: 0 22px; border-radius: 999px;
+      font-family: inherit; font-weight: 500; font-size: 1rem; line-height: 1; text-decoration: none; cursor: pointer;
+      border: 1px solid transparent;
+      transition: transform 160ms var(--ease), background-color 160ms var(--ease), box-shadow 160ms var(--ease);
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0) scale(0.97); transition-duration: 80ms; }
+    .btn-primary { background: var(--ink); color: #fff; box-shadow: 0 1px 2px rgba(25,25,24,.2); }
+    .btn-primary:hover { background: #2c2c2a; box-shadow: 0 6px 16px -6px rgba(25,25,24,.35); }
+    .btn-ghost { background: #fff; color: var(--ink); border-color: var(--line); }
+    .btn-ghost:hover { border-color: #cfcfca; box-shadow: 0 6px 16px -8px rgba(25,25,24,.18); }
+    .btn svg { width: 18px; height: 18px; flex: none; }
+    .btn .arrow { transition: transform 160ms var(--ease); }
+    .btn:hover .arrow { transform: translateX(2px); }
+
+    /* Product stage: tilted back, flattens as you scroll */
+    .stage {
+      --p: 0;
+      position: relative; z-index: 1;
+      margin-top: clamp(-96px, -6vw, -24px);
+      perspective: 1800px; perspective-origin: 50% 0%;
+    }
+    .stage .tilt {
+      width: min(1320px, 100%); margin-inline: auto;
+      transform-origin: 50% 100%;
+      transform:
+        translateY(calc(40px - var(--p) * 12px))
+        rotateX(calc((1 - var(--p)) * 16deg))
+        scale(calc(0.94 + var(--p) * 0.06));
+      will-change: transform;
+    }
+    .stage img { display: block; width: 100%; height: auto; }
+    /* The copy sits a touch over the image: the image's top edge fades into the page while it leans back */
+    .stage img {
+      -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(0.15 + var(--p) * 0.85)) 0%, #000 22%);
+              mask-image: linear-gradient(to bottom, rgb(0 0 0 / calc(0.15 + var(--p) * 0.85)) 0%, #000 22%);
+    }
+
+    /* Waitlist */
+    .waitlist { padding-block: clamp(72px, 12vh, 140px) clamp(64px, 10vh, 120px); text-align: center; }
+    h2 { margin: 0; font-weight: 600; font-size: clamp(1.75rem, 3.4vw, 2.5rem); line-height: 1.1; letter-spacing: -0.025em; }
+    .waitlist p { margin: 14px auto 0; color: var(--muted); max-width: 40ch; }
+    form { display: flex; gap: 10px; max-width: 480px; margin: 32px auto 0; }
+    .field { flex: 1; text-align: left; }
+    .field label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    input[type="email"] {
+      width: 100%; min-height: 48px; padding: 0 18px; border-radius: 999px;
+      border: 1px solid var(--line); background: #fff; color: var(--ink);
+      font: inherit; font-size: 1rem;
+      transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease);
+    }
+    input[type="email"]::placeholder { color: #9a9a96; }
+    input[type="email"]:hover { border-color: #cfcfca; }
+    input[type="email"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+    .hp { position: absolute; left: -9999px; }
+    .status { min-height: 1.5em; margin: 12px auto 0; font-size: .9375rem; color: var(--muted); }
+    .status[data-state="error"] { color: #b42318; }
+    .status[data-state="ok"] { color: var(--accent); }
+    form[aria-busy="true"] .btn { opacity: .7; pointer-events: none; }
+
+    footer { border-top: 1px solid var(--line); padding-block: 28px; color: var(--muted); font-size: .875rem; }
+    footer .wrap { display: flex; justify-content: space-between; align-items: center; gap: 0 16px; flex-wrap: wrap; }
+    footer a { text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
+    footer a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+    footer nav { display: flex; gap: 20px; }
+
+    /* Entrance, once on load */
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    @keyframes rise-stage { from { opacity: 0; translate: 0 48px; } to { opacity: 1; translate: 0 0; } }
+    .enter { animation: rise 800ms var(--ease) both; }
+    .enter:nth-child(2) { animation-delay: 80ms; }
+    .enter:nth-child(3) { animation-delay: 160ms; }
+    .stage { animation: rise-stage 1100ms var(--ease) 220ms both; }
+
+    @media (max-width: 640px) {
+      :root { --gutter: 16px; }
+      .lines li { text-wrap: balance; }
+      .lines li + li { margin-top: 10px; }
+      /* On a phone the whole window is too small to read: show it larger and let it run off the right edge */
+      .stage { overflow: clip; padding-bottom: 24px; }
+      .stage .tilt { width: 175%; margin-left: 0; }
+      .actions .btn, form .btn { width: 100%; }
+      form { flex-direction: column; }
+      .stage .tilt { transform: translateY(calc(20px - var(--p) * 6px)) rotateX(calc((1 - var(--p)) * 10deg)) scale(calc(0.96 + var(--p) * 0.04)); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .enter, .stage { animation: none; }
+      .stage .tilt { transform: none; }
+      .btn, .btn .arrow { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#waitlist">Skip to the waitlist</a>
+
+  <header>
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Turtle Wiki home">
+        <img src="favicon.svg" alt="" width="26" height="26">
+        Turtle Wiki
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap copy">
+        <h1 class="enter">Open Source Confluence Alternative</h1>
+        <ul class="lines enter">
+          <li>Turtle is a wiki your team and its AI agents write together.</li>
+          <li>With Co-Authoring, Pages stay in Markdown.</li>
+          <li>AGPL-licensed, with no feature behind a paywall.</li>
+        </ul>
+        <div class="actions enter">
+          <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+            Try the demo
+            <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/JeremieConstant/turtle">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+            View on GitHub
+          </a>
+        </div>
+      </div>
+
+      <div class="stage" id="stage">
+        <div class="tilt">
+          <img
+            src="hero.webp"
+            srcset="hero-1440.webp 1440w, hero.webp 2880w"
+            sizes="(min-width: 1320px) 1320px, 100vw"
+            width="2880" height="2128"
+            alt="A runbook open in Turtle Wiki, last edited by Ada Example via Claude"
+            fetchpriority="high">
+        </div>
+      </div>
+    </section>
+
+    <section class="waitlist" id="waitlist" aria-labelledby="waitlist-title">
+      <div class="wrap">
+        <h2 id="waitlist-title">Join the waitlist</h2>
+        <p>Hosted Turtle is on its way. Leave your email and we'll write once, when it opens.</p>
+        <form id="waitlist-form" action="https://n8n.novalutions.de/webhook/WP-Formular-To-CRM" method="post" novalidate>
+          <div class="field">
+            <label for="email">Work email</label>
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@company.com" required aria-describedby="form-status">
+          </div>
+          <input class="hp" type="text" name="company" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <button class="btn btn-primary" type="submit">Join the waitlist</button>
+        </form>
+        <p class="status" id="form-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>Turtle Wiki · AGPL-3.0</span>
+      <nav aria-label="Footer">
+        <a href="https://github.com/JeremieConstant/turtle">GitHub</a>
+        <a href="https://demo.turtle-wiki.app">Demo</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll-linked tilt: the product window starts leaning back under the copy
+    // and stands up flat as it comes into view.
+    (() => {
+      const stage = document.getElementById('stage');
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) { stage.style.setProperty('--p', 1); return; }
+      let ticking = false;
+      const update = () => {
+        ticking = false;
+        // 0 at the top of the page, 1 once the image's top has risen to ~12% of the viewport
+        const top = stage.getBoundingClientRect().top + scrollY;
+        const span = Math.max(1, top - innerHeight * 0.12);
+        const p = Math.min(1, Math.max(0, scrollY / span));
+        // ease-out so the last degrees settle softly
+        stage.style.setProperty('--p', (1 - Math.pow(1 - p, 2.2)).toFixed(4));
+      };
+      addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } }, { passive: true });
+      addEventListener('resize', update);
+      update();
+    })();
+
+    // Waitlist form
+    (() => {
+      const form = document.getElementById('waitlist-form');
+      const input = document.getElementById('email');
+      const status = document.getElementById('form-status');
+      const say = (text, state) => { status.textContent = text; status.dataset.state = state || ''; };
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (form.company.value) return; // bot
+        if (!input.checkValidity()) {
+          input.setAttribute('aria-invalid', 'true');
+          say('Please enter a valid email address.', 'error');
+          input.focus();
+          return;
+        }
+        input.removeAttribute('aria-invalid');
+        form.setAttribute('aria-busy', 'true');
+        say('Sending…');
+        try {
+          const res = await fetch(form.action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // n8n workflow "WP Formular an Twenty CRM": finds or creates the contact in Twenty,
+            // adds a task and mails the team. It splits `name`, so it must be a string.
+            body: JSON.stringify({
+              name: '',
+              email: input.value.trim(),
+              nachricht: 'Turtle Wiki: wants to join the waitlist for hosted Turtle.',
+              seiten_titel: 'Turtle Wiki Waitlist',
+              seiten_url: location.href,
+              source: 'turtle-wiki.app waitlist',
+              submitted_at: new Date().toISOString(),
+            }),
+          });
+          if (!res.ok) throw new Error(res.status);
+          form.reset();
+          say("Thanks. You're on the list.", 'ok');
+        } catch {
+          say('That did not go through. Please try again in a moment.', 'error');
+        } finally {
+          form.removeAttribute('aria-busy');
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
