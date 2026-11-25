@@ -2,6 +2,8 @@
 
 A self-hosted wiki where people and AI agents write documentation together.
 
+**[Try the demo](https://demo.turtle-wiki.app)**: no sign-up, reset every 6 hours. · [turtle-wiki.app](https://turtle-wiki.app)
+
 ![A runbook being edited in Turtle, last changed by "Ada Example via Claude"](docs/screenshot.png)
 
 **No feature behind a paywall.** Turtle is licensed under [AGPL-3.0](LICENSE), with no enterprise edition and no CLA: every feature is in this repository, and contributions stay AGPL.
