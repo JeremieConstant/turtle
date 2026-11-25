@@ -2,6 +2,8 @@
 
 Thank you for wanting to help. This file is everything you need to know before opening a pull request.
 
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). A vulnerability is reported privately, as the [security policy](SECURITY.md) describes, never in a public issue.
+
 ## What is welcome
 
 Pull requests for issues labelled [`good first issue`](https://github.com/turtle-wiki/turtle/labels/good%20first%20issue) or [`help wanted`](https://github.com/turtle-wiki/turtle/labels/help%20wanted) are welcome as they are.
