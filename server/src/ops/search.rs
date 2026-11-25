@@ -2,6 +2,7 @@
 //! fed with what it needs to know about each Page.
 
 use super::areas;
+use super::attachments;
 use super::permissions;
 use super::tags;
 use super::{Catalogue, Core, OpResult, Principal};
@@ -13,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "search",
-        "Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear.",
+        "Searches the titles, the content and the Attachment file names of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear.",
         search,
     );
 }
@@ -59,9 +60,10 @@ pub struct SearchResult {
     /// its Area down.
     pub path: Vec<String>,
     /// A passage of the content around the first match, in pieces; the
-    /// highlighted pieces are the words that matched. The beginning of the
-    /// content when only the title matched, and empty for a Page without
-    /// content. A passage cut from a longer text begins or ends with "…".
+    /// highlighted pieces are the words that matched. The file name of an
+    /// Attachment when only that matched, the beginning of the content when
+    /// only the title matched, and empty for a Page without content. A
+    /// passage cut from a longer text begins or ends with "…".
     pub snippet: Vec<Fragment>,
 }
 
@@ -104,6 +106,10 @@ pub fn search(core: &Core, principal: &Principal, input: SearchQuery) -> OpResul
         else {
             continue;
         };
+        // Nor is one put in the Trash since.
+        if permissions::in_trash(&db, &hit.page_id)? {
+            continue;
+        }
         let path = path_to(&db, &hit.page_id)?;
         results.push(SearchResult { page_id: hit.page_id, title, area_id, area_name, path, snippet: hit.snippet });
     }
@@ -190,7 +196,8 @@ fn document(db: &Connection, page_id: &str) -> anyhow::Result<Option<PageDocumen
         None => String::new(),
     };
     let tags = tags::tags_of(db, page_id)?;
-    Ok(Some(PageDocument { page_id: page_id.to_string(), area_id, access, title, text, tags }))
+    let attachment_names = attachments::names_of(db, page_id)?;
+    Ok(Some(PageDocument { page_id: page_id.to_string(), area_id, access, title, text, tags, attachment_names }))
 }
 
 #[cfg(test)]
@@ -713,6 +720,68 @@ mod tests {
 
         assert_eq!(found(&core, &acting_for_grace, "#runbook"), ["Deploy"]);
         assert_eq!(found(&core, &reviewer, "#runbook"), ["Deploy"]);
+    }
+
+    fn attach(core: &Core, writer: &Principal, page_id: &str, name: &str) {
+        use crate::ops::attachments::{attach_file, NewAttachment};
+        // "hello" in base64.
+        let input = NewAttachment { page_id: page_id.into(), name: name.into(), content: "aGVsbG8=".into() };
+        attach_file(core, writer, input).unwrap();
+    }
+
+    #[test]
+    fn a_page_is_found_by_the_file_name_of_its_attachment() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let finance = area(&core, &grace, "Finance");
+        let planning = page(&core, &grace, &finance, "Planning");
+        page(&core, &grace, &finance, "Holidays");
+        core.catch_up_search().unwrap();
+
+        attach(&core, &grace, &planning, "Q3-budget_final.xlsx");
+
+        assert_eq!(found(&core, &grace, "budget"), ["Planning"]);
+        assert_eq!(found(&core, &grace, "bugdet final"), ["Planning"]);
+        assert_eq!(found(&core, &grace, "xlsx"), ["Planning"]);
+    }
+
+    #[test]
+    fn a_match_only_in_a_file_name_shows_that_file_name_as_the_snippet() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let finance = area(&core, &grace, "Finance");
+        let planning = page(&core, &grace, &finance, "Planning");
+        write(&core, &planning, "Numbers for the quarter.\n");
+        attach(&core, &grace, &planning, "notes.txt");
+        attach(&core, &grace, &planning, "Q3-budget.xlsx");
+        let review = page(&core, &grace, &finance, "Review");
+        write(&core, &review, "The budget was met.\n");
+        attach(&core, &grace, &review, "budget.pdf");
+
+        let hits = results(&core, &grace, "budget");
+
+        let snippet = |title: &str| &hits.iter().find(|result| result.title == title).unwrap().snippet;
+        assert_eq!(snippet("Planning"), &[piece("Q3-", false), piece("budget", true), piece(".xlsx", false)]);
+        // A match in the text is shown before one in a file name.
+        assert_eq!(
+            snippet("Review"),
+            &[piece("The ", false), piece("budget", true), piece(" was met.", false)]
+        );
+    }
+
+    #[test]
+    fn a_page_just_put_in_the_trash_is_not_found_before_the_index_catches_up() {
+        use crate::ops::trash::{move_to_trash, EntryId};
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let finance = area(&core, &grace, "Finance");
+        let budget = page(&core, &grace, &finance, "Budget");
+        assert_eq!(found(&core, &grace, "budget"), ["Budget"]);
+
+        move_to_trash(&core, &grace, EntryId { id: budget }).unwrap();
+
+        let input = SearchQuery { query: "budget".into(), area_id: None, limit: None };
+        assert!(search(&core, &grace, input).unwrap().output.results.is_empty());
     }
 
     #[test]

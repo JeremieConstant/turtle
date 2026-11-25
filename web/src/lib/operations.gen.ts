@@ -497,9 +497,10 @@ export type SearchResult = {
 its Area down. */
   path: string[]
   /** A passage of the content around the first match, in pieces; the
-highlighted pieces are the words that matched. The beginning of the
-content when only the title matched, and empty for a Page without
-content. A passage cut from a longer text begins or ends with "…". */
+highlighted pieces are the words that matched. The file name of an
+Attachment when only that matched, the beginning of the content when
+only the title matched, and empty for a Page without content. A
+passage cut from a longer text begins or ends with "…". */
   snippet: Fragment[]
   title: string
 }
@@ -1039,7 +1040,7 @@ document update, in base64. The web app sends it in place of
     }
     output: QuickNoteList
   }
-  /** Searches the titles and content of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear. */
+  /** Searches the titles, the content and the Attachment file names of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear. */
   search: {
     input: {
       /** The Area to search in; everything the caller can read if absent. */

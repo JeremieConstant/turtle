@@ -161,5 +161,5 @@ _Avoid_: Permission level, access level, Berechtigung
 ### Search
 
 **Snippet**:
-The passage of a Page's content shown with a search result, with the words that matched highlighted.
+The passage of a Page's content shown with a search result, with the words that matched highlighted. When only the file name of one of the Page's Attachments matched, that file name.
 _Avoid_: Excerpt, preview, summary

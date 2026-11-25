@@ -24,7 +24,7 @@ use tantivy::{IndexReader, IndexWriter, TantivyDocument, Term};
 
 /// Changes whenever the schema or the analysis changes, so an index written
 /// by an older Turtle is rebuilt instead of read wrongly.
-const SCHEMA_VERSION: &str = "2";
+const SCHEMA_VERSION: &str = "3";
 const VERSION_FILE: &str = "turtle-search-version";
 /// Present only while no Turtle has the index open and everything was
 /// written before it closed. Without it, changes may have been lost in a
@@ -46,6 +46,8 @@ pub struct PageDocument {
     pub text: String,
     /// The Tags the Page carries, as they are stored.
     pub tags: Vec<String>,
+    /// The file names of the Page's Attachments.
+    pub attachment_names: Vec<String>,
 }
 
 /// What a query asks.
@@ -111,6 +113,8 @@ struct Fields {
     title_order: Field,
     title: Words,
     text: Words,
+    /// The file names of the Attachments, one value each.
+    attachment_names: Words,
 }
 
 /// One piece of text, indexed three ways: as written (for typos and words
@@ -249,14 +253,18 @@ impl Index {
             }
             Box::new(BooleanQuery::union(alternatives))
         };
-        let (title, text) = (self.fields.title, self.fields.text);
+        let (title, text, names) = (self.fields.title, self.fields.text, self.fields.attachment_names);
         Box::new(BooleanQuery::union(vec![
             Box::new(ConstScoreQuery::new(exact(title), 1000.0)),
             // Breaks ties between title matches: the shorter title is closer.
             exact(title),
             Box::new(ConstScoreQuery::new(loose(title), 500.0)),
+            // A file name says as little about a Page as a word of its
+            // text does, so it never outranks a title.
             exact(text),
             Box::new(ConstScoreQuery::new(loose(text), 0.5)),
+            exact(names),
+            Box::new(ConstScoreQuery::new(loose(names), 0.5)),
         ]))
     }
 
@@ -270,10 +278,10 @@ impl Index {
             document.add_text(fields.tags, tag);
         }
         document.add_text(fields.title_order, page.title.to_lowercase());
-        for (words, text) in [(fields.title, &page.title), (fields.text, &page.text)] {
-            document.add_text(words.raw, text);
-            document.add_text(words.english, text);
-            document.add_text(words.german, text);
+        fields.title.add(&mut document, &page.title);
+        fields.text.add(&mut document, &page.text);
+        for name in &page.attachment_names {
+            fields.attachment_names.add(&mut document, name);
         }
         document
     }
@@ -325,9 +333,29 @@ impl Index {
                 .and_then(|value| value.as_str())
                 .context("a search document without a Page")?;
             let text = document.get_first(self.fields.text.raw).and_then(|value| value.as_str()).unwrap_or("");
-            hits.push(Hit { page_id: page_id.to_string(), snippet: snippet(text, &words) });
+            // The text shows a match in its context, so it comes first; a
+            // file name alone at least shows why the Page was found.
+            let shown = if matches_any(text, &words) {
+                text
+            } else {
+                document
+                    .get_all(self.fields.attachment_names.raw)
+                    .filter_map(|value| value.as_str())
+                    .find(|name| matches_any(name, &words))
+                    .unwrap_or(text)
+            };
+            hits.push(Hit { page_id: page_id.to_string(), snippet: snippet(shown, &words) });
         }
         Ok(hits)
+    }
+}
+
+impl Words {
+    /// Adds a value to the document in all three analyses.
+    fn add(&self, document: &mut TantivyDocument, value: &str) {
+        document.add_text(self.raw, value);
+        document.add_text(self.english, value);
+        document.add_text(self.german, value);
     }
 }
 
@@ -363,17 +391,23 @@ fn typos_allowed(word: &str) -> u8 {
     }
 }
 
-/// The part of the text around the first word that matches the query, with
-/// every matching word in it highlighted. A word matches in the snippet as it
-/// does in the query: as written, as a word form, with typos, or as the
-/// beginning of a longer word when it is the last one.
-fn snippet(text: &str, query: &[Word]) -> Vec<Fragment> {
+/// Whether any word of the text matches the query.
+fn matches_any(text: &str, query: &[Word]) -> bool {
+    !matched(text, query).1.is_empty()
+}
+
+/// Each word of a text with where it is.
+type Spans = Vec<(String, Range<usize>)>;
+
+/// The words of the text, and where among them are the ones that match the
+/// query.
+fn matched(text: &str, query: &[Word]) -> (Spans, Vec<Range<usize>>) {
     // The three analyses split alike and drop the same over-long words, so
     // their tokens line up.
     let spans = token_spans(&mut analyzer(None), text);
     let english = tokens(&mut analyzer(Some(Language::English)), text);
     let german = tokens(&mut analyzer(Some(Language::German)), text);
-    let matched: Vec<Range<usize>> = spans
+    let matched = spans
         .iter()
         .zip(english.iter().zip(&german))
         .filter(|((raw, _), (english, german))| {
@@ -384,7 +418,15 @@ fn snippet(text: &str, query: &[Word]) -> Vec<Fragment> {
         })
         .map(|((_, span), _)| span.clone())
         .collect();
+    (spans, matched)
+}
 
+/// The part of the text around the first word that matches the query, with
+/// every matching word in it highlighted. A word matches in the snippet as it
+/// does in the query: as written, as a word form, with typos, or as the
+/// beginning of a longer word when it is the last one.
+fn snippet(text: &str, query: &[Word]) -> Vec<Fragment> {
+    let (spans, matched) = matched(text, query);
     let first = matched.first().map_or(0, |span| span.start);
     let lead = chars_back(text, first, SNIPPET_LEAD);
     // Begin and end on whole words.
@@ -486,7 +528,7 @@ fn distance(a: &str, b: &str) -> usize {
 }
 
 /// Each token with where it is in the text.
-fn token_spans(analyzer: &mut TextAnalyzer, text: &str) -> Vec<(String, Range<usize>)> {
+fn token_spans(analyzer: &mut TextAnalyzer, text: &str) -> Spans {
     let mut stream = analyzer.token_stream(text);
     let mut out = Vec::new();
     while let Some(token) = stream.next() {
@@ -540,6 +582,7 @@ fn schema() -> (Schema, Fields) {
     };
     let title = text(&mut builder, "title");
     let body = text(&mut builder, "text");
+    let attachment_names = text(&mut builder, "attachment_names");
     let fields = Fields {
         page_id: builder.add_text_field("page_id", STRING | STORED),
         area_id: builder.add_text_field("area_id", STRING),
@@ -548,6 +591,7 @@ fn schema() -> (Schema, Fields) {
         title_order: builder.add_text_field(TITLE_ORDER, STRING | FAST),
         title,
         text: body,
+        attachment_names,
     };
     (builder.build(), fields)
 }
