@@ -240,6 +240,14 @@ export type GrantList = {
   members: GrantableMember[]
 }
 
+export type Imported = {
+  /** The Pages and Folders created at the top of the import, with what is
+beneath them. */
+  entries: Entry[]
+  /** Each file that did not come across, with the reason. Empty when all did. */
+  problems: Problem[]
+}
+
 export type Kind = "page" | "folder"
 
 export type Language = "en" | "de"
@@ -425,6 +433,13 @@ export type Place = {
   before_id?: string | null
   /** The Page or Folder it is beneath; the top of the Area if absent. */
   parent_id?: string | null
+}
+
+export type Problem = {
+  /** Where it is in what was imported, such as its path in the ZIP. */
+  file: string
+  /** Why it did not come across, as a sentence. */
+  message: string
 }
 
 export type Profile = {
@@ -1189,6 +1204,17 @@ of the Page. Needed only when several Sections have this heading. */
       entry_id?: string | null
     }
     output: Export
+  }
+  /** Imports a ZIP of Markdown files, sent in base64, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role. */
+  import: {
+    input: {
+      area_id: string
+      /** The ZIP, in base64. */
+      content: string
+      /** The Page or Folder to import beneath; the top of the Area if absent. */
+      parent_id?: string | null
+    }
+    output: Imported
   }
   /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role. */
   export_pdf: {

@@ -306,7 +306,7 @@ fn point_into_export(blocks: &mut [Block], from: &[String], addresses: &Addresse
     });
 }
 
-fn for_each_inline(blocks: &mut [Block], change: &mut impl FnMut(&mut Inline)) {
+pub(super) fn for_each_inline(blocks: &mut [Block], change: &mut impl FnMut(&mut Inline)) {
     for block in blocks {
         match block {
             Block::Paragraph(content) | Block::Heading { content, .. } => content.iter_mut().for_each(&mut *change),

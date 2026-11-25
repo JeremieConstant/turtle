@@ -95,14 +95,9 @@ async fn main() -> anyhow::Result<()> {
         _ => Ipv4Addr::LOCALHOST.into(),
     };
 
-    // The largest file that can be attached, in MB.
-    let attachment_limit = match std::env::var("TURTLE_MAX_ATTACHMENT_MB") {
-        Ok(mb) => match mb.trim().parse::<u64>() {
-            Ok(mb) if mb > 0 => mb * 1024 * 1024,
-            _ => anyhow::bail!("TURTLE_MAX_ATTACHMENT_MB must be a whole number of MB above 0, not {mb:?}"),
-        },
-        Err(_) => ops::attachments::DEFAULT_ATTACHMENT_LIMIT,
-    };
+    // The largest file that can be attached, and the largest ZIP that can be imported.
+    let attachment_limit = megabytes("TURTLE_MAX_ATTACHMENT_MB", ops::attachments::DEFAULT_ATTACHMENT_LIMIT)?;
+    let import_limit = megabytes("TURTLE_MAX_IMPORT_MB", ops::import::DEFAULT_IMPORT_LIMIT)?;
 
     // Where people and AI clients reach this Turtle from outside, if it is
     // known; only then is OAuth offered (ADR-0010).
@@ -138,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
     let db_path = store::database_in(&data_dir)?;
     let mut core = ops::Core::open(&db_path)?;
     core.set_attachment_limit(attachment_limit);
+    core.set_import_limit(import_limit);
     core.set_public_url(public_url);
     core.set_mailer(mailer.map(|smtp| Arc::new(smtp) as Arc<dyn mail::Mailer>));
     core.set_demo(demo);
@@ -705,6 +701,17 @@ fn went_away(error: &anyhow::Error) -> bool {
 }
 
 
+
+/// A size in bytes from the setting `name`, given in MB, or `default` when it is unset.
+fn megabytes(name: &str, default: u64) -> anyhow::Result<u64> {
+    match std::env::var(name) {
+        Ok(mb) => match mb.trim().parse::<u64>() {
+            Ok(mb) if mb > 0 => Ok(mb * 1024 * 1024),
+            _ => anyhow::bail!("{name} must be a whole number of MB above 0, not {mb:?}"),
+        },
+        Err(_) => Ok(default),
+    }
+}
 
 #[cfg(test)]
 mod tests {

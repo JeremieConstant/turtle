@@ -21,6 +21,7 @@
   import { areaAddress, pageAddress } from '../lib/routes'
   import { ask } from '../lib/confirm.svelte'
   import { exportToFile } from '../lib/exporting'
+  import { chooseZip, importFromFile } from '../lib/importing'
   import { reportFailure } from '../lib/toasts'
   import { UNDO_DURATION } from '../lib/trash'
   import { createEntry } from '../lib/tree'
@@ -144,6 +145,13 @@
     router.navigate(pageAddress(page.id, page.title))
   }
 
+  /** Imports a ZIP the person chooses at the top of the Area. */
+  async function importIntoArea() {
+    if (!area) return
+    const file = await chooseZip()
+    if (file && (await importFromFile({ area_id: id }, file, area.name))) await reload()
+  }
+
   /** A Folder has no screen of its own: it opens in the sidebar's tree. */
   function openFolder(entry: Entry) {
     ui.openArea = id
@@ -191,6 +199,9 @@
               }}>Export as Markdown</button
             >
           </div>
+          {#if writable}
+            <button type="button" class="btn" onclick={importIntoArea}>Import Markdown</button>
+          {/if}
           {#if area.role === 'admin' && !area.personal}
             <button type="button" class="btn" onclick={() => renameDialog?.open(area?.name)}>Rename</button>
             <button type="button" class="btn" onclick={deleteArea}>Delete</button>

@@ -154,7 +154,7 @@ pub struct TreeOfArea {
 }
 
 pub fn create_page(core: &Core, principal: &Principal, input: NewPage) -> OpResult<Entry> {
-    let created = create(core, principal, input.entry, Kind::Page, Placement::Last)?;
+    let created = create(core, principal, input.entry, Kind::Page, Placement::Last, None)?;
     write_first_content(core, principal, created, input.markdown)
 }
 
@@ -167,7 +167,7 @@ pub(super) fn create_quick_note_page(
     content: Vec<crate::model::Block>,
     member_id: &str,
 ) -> OpResult<Entry> {
-    let created = create(core, principal, entry, Kind::Page, Placement::FirstAsQuickNoteOf(member_id))?;
+    let created = create(core, principal, entry, Kind::Page, Placement::FirstAsQuickNoteOf(member_id), None)?;
     if !content.is_empty() {
         super::content::write_content(core, principal, &created.output.id, content)?;
     }
@@ -191,43 +191,43 @@ enum Placement<'a> {
 }
 
 pub fn create_folder(core: &Core, principal: &Principal, input: NewEntry) -> OpResult<Entry> {
-    create(core, principal, input, Kind::Folder, Placement::Last)
+    create(core, principal, input, Kind::Folder, Placement::Last, None)
 }
 
-fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind, placement: Placement<'_>) -> OpResult<Entry> {
+/// Creates an empty Page or Folder at the end of its parent, under the ID
+/// `wanted_id` if it is one Turtle could have made and nothing has it yet,
+/// as an import keeps the IDs it finds.
+pub(super) fn create_with_id(
+    core: &Core,
+    principal: &Principal,
+    input: NewEntry,
+    kind: Kind,
+    wanted_id: Option<&str>,
+) -> OpResult<Entry> {
+    create(core, principal, input, kind, Placement::Last, wanted_id)
+}
+
+fn create(
+    core: &Core,
+    principal: &Principal,
+    input: NewEntry,
+    kind: Kind,
+    placement: Placement<'_>,
+    wanted_id: Option<&str>,
+) -> OpResult<Entry> {
     areas::signed_in(principal)?;
-    let id = random_hex(16)?;
+    let mut id = random_hex(16)?;
     let now = core.now();
     let db = core.db();
-    let area = areas::readable_area(&db, principal, &input.area_id)?;
-    let parent_id = match &input.parent_id {
-        None => root_of(&db, &area.id)?,
-        Some(parent_id) => {
-            let in_area: bool = db.query_row(
-                "SELECT EXISTS (SELECT 1 FROM nodes
-                                WHERE id = ?1 AND area_id = ?2 AND parent_id IS NOT NULL)",
-                rusqlite::params![parent_id, area.id],
-                |row| row.get(0),
-            )?;
-            if !in_area {
-                return Err(OpError::NotFound(
-                    "There is no such Page or Folder in this Area.".into(),
-                ));
-            }
-            parent_id.clone()
-        }
-    };
-    let role = permissions::role_on(&db, principal, &parent_id)?;
-    // A parent in the Trash is out of reach like one that does not exist.
-    if role.is_none() {
-        return Err(OpError::NotFound("There is no such Page or Folder in this Area.".into()));
-    }
-    if role < Some(Role::Write) {
-        return Err(OpError::NotPermitted(
-            "Only someone with the Write Role can add Pages and Folders here.".into(),
-        ));
-    }
+    let (area, parent_id) = writable_parent(&db, principal, &input.area_id, input.parent_id.as_deref())?;
     let title = valid_title(&input.title)?;
+    // Looked for under the same lock as the insert, so nothing takes the ID in between.
+    if let Some(wanted) = wanted_id.filter(|wanted| wanted.len() == id.len() && wanted.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
+        let taken: bool = db.query_row("SELECT EXISTS (SELECT 1 FROM nodes WHERE id = ?1)", [wanted], |row| row.get(0))?;
+        if !taken {
+            id = wanted.to_string();
+        }
+    }
     // Positions may go below zero, so putting an Entry first moves no sibling.
     let (position, quick_note_of) = match placement {
         Placement::Last => ("(SELECT COALESCE(MAX(position), 0) + 1 FROM nodes WHERE parent_id = ?3)", None),
@@ -246,6 +246,45 @@ fn create(core: &Core, principal: &Principal, input: NewEntry, kind: Kind, place
         core.page_changed(&id);
     }
     Ok(Entry { id, kind, title, children: Vec::new() }.into())
+}
+
+/// The Area and the node to add Pages and Folders beneath: `parent_id`, or
+/// the top of the Area if absent, where the principal must hold Write.
+pub(super) fn writable_parent(
+    db: &Connection,
+    principal: &Principal,
+    area_id: &str,
+    parent_id: Option<&str>,
+) -> Result<(Area, String), OpError> {
+    let area = areas::readable_area(db, principal, area_id)?;
+    let parent_id = match parent_id {
+        None => root_of(db, &area.id)?,
+        Some(parent_id) => {
+            let in_area: bool = db.query_row(
+                "SELECT EXISTS (SELECT 1 FROM nodes
+                                WHERE id = ?1 AND area_id = ?2 AND parent_id IS NOT NULL)",
+                rusqlite::params![parent_id, area.id],
+                |row| row.get(0),
+            )?;
+            if !in_area {
+                return Err(OpError::NotFound(
+                    "There is no such Page or Folder in this Area.".into(),
+                ));
+            }
+            parent_id.to_string()
+        }
+    };
+    let role = permissions::role_on(db, principal, &parent_id)?;
+    // A parent in the Trash is out of reach like one that does not exist.
+    if role.is_none() {
+        return Err(OpError::NotFound("There is no such Page or Folder in this Area.".into()));
+    }
+    if role < Some(Role::Write) {
+        return Err(OpError::NotPermitted(
+            "Only someone with the Write Role can add Pages and Folders here.".into(),
+        ));
+    }
+    Ok((area, parent_id))
 }
 
 pub fn rename_page(core: &Core, principal: &Principal, input: RenameEntry) -> OpResult<Entry> {

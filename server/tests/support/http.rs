@@ -43,14 +43,33 @@ pub async fn request(
         }
         head.push_str("\r\n");
         stream.write_all(head.as_bytes()).await.unwrap();
-        stream.write_all(body.as_bytes()).await.unwrap();
+        // A server refusing a body that is too large answers before it has
+        // all of it and closes, so writing the rest may fail; its answer is
+        // read all the same.
+        if let Err(error) = stream.write_all(body.as_bytes()).await {
+            assert!(cut_short(&error), "sending the request: {error}");
+        }
         let mut raw = Vec::new();
-        stream.read_to_end(&mut raw).await.expect("reading the response");
+        // On the heap: a buffer on the stack would make every request's future that large.
+        let mut chunk = vec![0; 64 * 1024];
+        loop {
+            match stream.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(read) => raw.extend_from_slice(&chunk[..read]),
+                Err(error) if cut_short(&error) && !raw.is_empty() => break,
+                Err(error) => panic!("reading the response: {error}"),
+            }
+        }
         // An image's bytes that are not UTF-8 become U+FFFD; text is read as sent.
         parse(&String::from_utf8_lossy(&raw))
     })
     .await
     .unwrap_or_else(|_| panic!("{method} {path} timed out"))
+}
+
+/// Whether the server closed the connection while it was still in use.
+fn cut_short(error: &std::io::Error) -> bool {
+    matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset)
 }
 
 fn parse(raw: &str) -> Response {

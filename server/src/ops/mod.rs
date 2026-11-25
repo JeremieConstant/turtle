@@ -17,6 +17,7 @@ pub mod fonts;
 #[cfg(test)]
 mod every_operation;
 pub mod grants;
+pub mod import;
 pub mod intranet;
 pub mod links;
 pub mod members;
@@ -66,6 +67,7 @@ pub struct Core {
     profile_pictures: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
+    import_limit: u64,
     /// The address Turtle is reached at from outside. OAuth is offered only
     /// when it is known (ADR-0010).
     public_url: Option<PublicUrl>,
@@ -113,6 +115,7 @@ impl Core {
             fonts: db_path.with_file_name("fonts"),
             profile_pictures: db_path.with_file_name("profile-pictures"),
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
+            import_limit: import::DEFAULT_IMPORT_LIMIT,
             public_url: None,
             resolve: intranet::system_resolver(),
             intranet_only: OnceLock::new(),
@@ -132,6 +135,15 @@ impl Core {
 
     pub fn attachment_limit(&self) -> u64 {
         self.attachment_limit
+    }
+
+    /// Sets the largest ZIP, in bytes, that can be imported at once.
+    pub fn set_import_limit(&mut self, bytes: u64) {
+        self.import_limit = bytes;
+    }
+
+    pub fn import_limit(&self) -> u64 {
+        self.import_limit
     }
 
     /// Sets the address Turtle is reached at from outside, which offers OAuth.
@@ -579,6 +591,7 @@ pub fn catalogue() -> Catalogue {
     moves::register(&mut catalogue);
     content::register(&mut catalogue);
     export::register(&mut catalogue);
+    import::register(&mut catalogue);
     pdf_export::register(&mut catalogue);
     pdf_styles::register(&mut catalogue);
     fonts::register(&mut catalogue);
