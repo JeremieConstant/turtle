@@ -3,7 +3,7 @@
 use super::http;
 use super::TestClient;
 use serde_json::Value;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -36,6 +36,8 @@ struct Settings {
     attachment_limit_mb: Option<u32>,
     /// `TURTLE_PUBLIC_URL`.
     public_url: Option<String>,
+    /// `TURTLE_HOST`.
+    host: Option<String>,
     demo: DemoEnv,
 }
 
@@ -79,6 +81,17 @@ impl TestServer {
         TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new()))), Settings::default()).await
     }
 
+    /// Starts a server that listens on `host` (`TURTLE_HOST`).
+    pub async fn start_listening_on(host: &str) -> TestServer {
+        TestServer::start_with(None, Settings { host: Some(host.to_string()), ..Settings::default() }).await
+    }
+
+    /// Starts a server with `TURTLE_HOST` set to `host`, expecting it to
+    /// refuse to start, and returns what it wrote to its standard error.
+    pub async fn refuses_to_start_listening_on(host: &str) -> String {
+        TestServer::refuses_to_start(Settings { host: Some(host.to_string()), ..Settings::default() }).await
+    }
+
     /// Starts a server with these demo settings.
     pub async fn start_as_demo(demo: DemoEnv) -> TestServer {
         TestServer::start_with(None, Settings { demo, ..Settings::default() }).await
@@ -87,8 +100,11 @@ impl TestServer {
     /// Starts a server with these demo settings, expecting it to refuse to
     /// start, and returns what it wrote to its standard error.
     pub async fn refuses_to_start_as_demo(demo: DemoEnv) -> String {
+        TestServer::refuses_to_start(Settings { demo, ..Settings::default() }).await
+    }
+
+    async fn refuses_to_start(settings: Settings) -> String {
         let data_dir = tempfile::tempdir().expect("creating a temporary data directory");
-        let settings = Settings { demo, ..Settings::default() };
         let output = tokio::time::timeout(START_TIMEOUT, command(data_dir.path(), None, &settings).output())
             .await
             .expect("the server neither started nor stopped within the timeout")
@@ -271,6 +287,7 @@ fn command(data_dir: &Path, saves: Option<&Arc<Mutex<Vec<Save>>>>, settings: &Se
     let mut command = Command::new(env!("CARGO_BIN_EXE_turtle"));
     let given = [
         ("TURTLE_PUBLIC_URL", settings.public_url.clone()),
+        ("TURTLE_HOST", settings.host.clone()),
         ("TURTLE_MAX_ATTACHMENT_MB", settings.attachment_limit_mb.map(|mb| mb.to_string())),
         ("TURTLE_DEMO_EMAIL", settings.demo.email.clone()),
         ("TURTLE_DEMO_PASSWORD", settings.demo.password.clone()),
@@ -316,10 +333,10 @@ async fn launch(
 
     let stdout = process.stdout.take().unwrap();
     let mut lines = BufReader::new(stdout).lines();
-    let port = tokio::time::timeout(START_TIMEOUT, async {
+    let addr = tokio::time::timeout(START_TIMEOUT, async {
         while let Some(line) = lines.next_line().await.expect("reading the server's output") {
-            if let Some(port) = announced_port(&line) {
-                return port;
+            if let Some(addr) = announced_addr(&line) {
+                return addr;
             }
         }
         panic!("the server exited before it was listening");
@@ -336,14 +353,25 @@ async fn launch(
         }
     });
 
-    (process, SocketAddr::from(([127, 0, 0, 1], port)))
+    (process, addr)
 }
 
-/// The port from "Turtle is listening on http://127.0.0.1:<port> ...".
-fn announced_port(line: &str) -> Option<u16> {
-    let rest = line.split_once("listening on http://127.0.0.1:")?.1;
-    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    digits.parse().ok().filter(|&port| port != 0)
+/// Where to reach the server that said "Turtle is listening on
+/// http://<address>:<port> ...": that address, or loopback when it listens
+/// on every address.
+fn announced_addr(line: &str) -> Option<SocketAddr> {
+    let rest = line.split_once("listening on http://")?.1;
+    let mut addr: SocketAddr = rest.split_whitespace().next()?.parse().ok()?;
+    if addr.port() == 0 {
+        return None;
+    }
+    if addr.ip().is_unspecified() {
+        addr.set_ip(match addr {
+            SocketAddr::V4(_) => Ipv4Addr::LOCALHOST.into(),
+            SocketAddr::V6(_) => Ipv6Addr::LOCALHOST.into(),
+        });
+    }
+    Some(addr)
 }
 
 /// A save from "Saved 3 Pages in 1.234 ms." (or "1 Page"), the line

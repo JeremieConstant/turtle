@@ -1,0 +1,19 @@
+# Runs Turtle with `docker compose up` at http://localhost:4100. Everything it
+# keeps is in the turtle-data volume; to update, `docker compose pull` and
+# `docker compose up -d`.
+services:
+  turtle:
+    image: ghcr.io/jeremieconstant/turtle:latest
+    restart: unless-stopped
+    ports:
+      - "4100:4100"
+    volumes:
+      - turtle-data:/data
+    # environment:
+    #   Set this once Turtle is reached at an address of its own, such as
+    #   behind a reverse proxy, so Claude and other AI clients can sign in
+    #   with OAuth. The other settings are listed in the README.
+    #   TURTLE_PUBLIC_URL: https://turtle.example.org
+
+volumes:
+  turtle-data:

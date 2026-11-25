@@ -28,6 +28,7 @@ use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use live::{frame, read_varuint, write_varuint, OpenPage, FRAME_PRESENCE, FRAME_PRESENCE_REQUEST, FRAME_TAGS, FRAME_UPDATE};
 use ops::permissions::Role;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -82,6 +83,17 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(4100);
+    // Loopback unless the operator says otherwise: a container has to listen
+    // on every address to be reached from outside it.
+    let host: IpAddr = match std::env::var("TURTLE_HOST") {
+        Ok(host) if !host.trim().is_empty() => match host.trim().parse() {
+            Ok(address) => address,
+            Err(_) => anyhow::bail!(
+                "TURTLE_HOST must be an IP address to listen on, such as 127.0.0.1 or 0.0.0.0, not {host:?}"
+            ),
+        },
+        _ => Ipv4Addr::LOCALHOST.into(),
+    };
 
     // The largest file that can be attached, in MB.
     let attachment_limit = match std::env::var("TURTLE_MAX_ATTACHMENT_MB") {
@@ -203,11 +215,11 @@ async fn main() -> anyhow::Result<()> {
         .merge(mcp::router(core))
         .merge(web_app::router(web_app::EMBEDDED));
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    let listener = tokio::net::TcpListener::bind((host, port)).await?;
     // With port 0 the system picks one; the line says which (the tests read it).
-    let port = listener.local_addr()?.port();
+    let address = listener.local_addr()?;
     println!(
-        "Turtle is listening on http://127.0.0.1:{port} (data directory: {})",
+        "Turtle is listening on http://{address} (data directory: {})",
         data_dir.display()
     );
     axum::serve(listener, router)

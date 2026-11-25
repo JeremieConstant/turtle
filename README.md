@@ -14,13 +14,27 @@ Turtle is at an early stage. [docs/mvp.md](docs/mvp.md) describes where it is he
 
 ## Run it
 
-Turtle is not yet released as a download or an image, so for now it is built from source. Once built, it is one file:
+With [Docker](https://docs.docker.com/get-started/get-docker/), save [compose.yml](compose.yml) in a directory of its own and run there:
+
+```bash
+docker compose up -d
+```
+
+Turtle then listens on <http://localhost:4100>. On the first visit it asks you to create the first account, which becomes the Workspace Admin. Everything Turtle keeps is in the `turtle-data` volume, so it survives stopping, removing and updating the container. To update, pull the newer image and start it:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+The image is `ghcr.io/jeremieconstant/turtle`: `latest` is the newest release, `X.Y` and `X.Y.Z` a release line or one release, and `edge` whatever is on `main`. Settings from [Start](#start) go under `environment:` in `compose.yml`; set `TURTLE_PUBLIC_URL` there once Turtle has an address of its own. [Connect AI](#connect-ai) says how to let Claude or another MCP client in.
+
+Without Docker, Turtle is one file built from source, as [Build](#build) describes:
 
 ```bash
 ./server/target/release/turtle
 ```
 
-Turtle then listens on <http://127.0.0.1:4100>. On the first visit it asks you to create the first account, which becomes the Workspace Admin. [Build](#build) says how to get the binary, [Start](#start) how to configure it, and [Connect AI](#connect-ai) how to let Claude or another MCP client in.
+It then listens on <http://127.0.0.1:4100>.
 
 ## Build
 
@@ -51,6 +65,7 @@ Turtle is configured with environment variables:
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `TURTLE_DATA` | `turtle-data` in the directory Turtle is started from | The data directory. It is created on the first start and holds the database, `turtle.db`, and the Attachments, each under the hash of its content in `attachments/`. |
+| `TURTLE_HOST` | `127.0.0.1` | The IP address Turtle listens on. The default lets in only connections from the same machine; `0.0.0.0` lets in every IPv4 address, `::` every address. The container image sets `0.0.0.0`. |
 | `TURTLE_PORT` | `4100` | The port Turtle listens on. |
 | `TURTLE_MAX_ATTACHMENT_MB` | `25` | The largest file, in MB, that can be attached to a Page. |
 | `TURTLE_PUBLIC_URL` | unset | The address people and AI clients reach Turtle at, such as `https://turtle.example.org`, at the root of its host. When set, Claude and other MCP clients can connect with OAuth: a Member pastes `<address>/mcp` into the client and clicks **Allow**. Without it, only Tokens created by hand work at the MCP endpoint. |
@@ -71,7 +86,7 @@ The demo account must be a Member without Workspace Admin; Turtle never shows a 
 
 Behind a reverse proxy, set `TURTLE_PUBLIC_URL` to the address people open in the browser. Turtle cannot work it out by itself, and without it AI clients cannot sign in; the **Connect AI** page then tells the Workspace Admin what is missing.
 
-When a newer Turtle starts on an existing data directory, it brings the database up to date by itself. To back up Turtle, stop it and copy the data directory.
+When a newer Turtle starts on an existing data directory, it brings the database up to date by itself. To back up Turtle, stop it and copy the data directory. With Docker, the data directory is the `turtle-data` volume.
 
 ## Connect AI
 
