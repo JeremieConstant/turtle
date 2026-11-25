@@ -3,7 +3,7 @@
 # `docker compose up -d`.
 services:
   turtle:
-    image: ghcr.io/jeremieconstant/turtle:latest
+    image: ghcr.io/turtle-wiki/turtle:latest
     restart: unless-stopped
     ports:
       - "4100:4100"
