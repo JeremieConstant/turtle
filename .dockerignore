@@ -1,0 +1,8 @@
+# Only server/ and web/ go into the image; leave out what is built, installed
+# or kept locally.
+*
+!server/
+!web/
+server/target/
+web/node_modules/
+web/dist/
