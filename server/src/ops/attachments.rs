@@ -136,6 +136,7 @@ pub fn attach_file(core: &Core, principal: &Principal, input: NewAttachment) -> 
             attachment.attached_at
         ],
     )?;
+    core.page_changed(&attachment.page_id);
     Ok(with_url(attachment).into())
 }
 
@@ -143,6 +144,14 @@ pub fn list_attachments(core: &Core, principal: &Principal, input: PageId) -> Op
     tree::get_page(core, principal, PageId { id: input.id.clone() })?;
     let attachments = stored_of(&core.db(), &input.id)?.into_iter().map(|(attachment, _)| attachment).collect();
     Ok(Attachments { attachments }.into())
+}
+
+/// The file names of a Page's Attachments, the oldest first. It does not ask
+/// who may read them.
+pub(super) fn names_of(db: &Connection, page_id: &str) -> rusqlite::Result<Vec<String>> {
+    let mut statement = db.prepare("SELECT name FROM attachments WHERE page_id = ?1 ORDER BY attached_at, rowid")?;
+    let names = statement.query_map([page_id], |row| row.get(0))?;
+    names.collect()
 }
 
 /// The Attachments of a Page, the oldest first, each with the hash its file
