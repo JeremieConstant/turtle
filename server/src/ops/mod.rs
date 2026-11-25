@@ -78,6 +78,8 @@ pub struct Core {
     /// Sends invitations and password reset links, when SMTP is set up.
     /// Mailed links point at the public URL, so it is set too.
     mailer: Option<Arc<dyn crate::mail::Mailer>>,
+    /// Set when this Turtle is a demo.
+    demo: Option<crate::demo::DemoSettings>,
 }
 
 impl Core {
@@ -109,6 +111,7 @@ impl Core {
             resolve: intranet::system_resolver(),
             intranet_only: OnceLock::new(),
             mailer: None,
+            demo: None,
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -142,6 +145,16 @@ impl Core {
     /// What sends mail, if Turtle sends any.
     pub fn mailer(&self) -> Option<&Arc<dyn crate::mail::Mailer>> {
         self.mailer.as_ref()
+    }
+
+    /// Makes this Turtle a demo, or not.
+    pub fn set_demo(&mut self, demo: Option<crate::demo::DemoSettings>) {
+        self.demo = demo;
+    }
+
+    /// The demo settings, when this Turtle is a demo.
+    pub fn demo(&self) -> Option<&crate::demo::DemoSettings> {
+        self.demo.as_ref()
     }
 
     /// Sets how host names are looked up, so tests need no network.

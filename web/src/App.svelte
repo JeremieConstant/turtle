@@ -2,6 +2,7 @@
   import { tick } from 'svelte'
   import { Toaster } from 'svelte-sonner'
   import ConfirmDialog from './components/ConfirmDialog.svelte'
+  import DemoNotice from './components/DemoNotice.svelte'
   import Icon from './components/Icon.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import { appearance } from './lib/appearance.svelte'
@@ -121,6 +122,10 @@
 
 <svelte:window {onkeydown} />
 
+<div class="frame">
+{#if session.demo}
+  <DemoNotice resetsEveryHours={session.demo.resets_every_hours ?? null} />
+{/if}
 {#if failed}
   <main class="message">Turtle cannot be reached. Reload the page to try again.</main>
 {:else if !session.loaded || target !== null}
@@ -203,6 +208,7 @@
     </div>
   </div>
 {/if}
+</div>
 
 <ConfirmDialog />
 
@@ -210,10 +216,27 @@
 <Toaster theme={appearance.choice} position="bottom-right" visibleToasts={4} gap={8} offset={20} duration={4000} />
 
 <style>
+  /* A demo's notice sits above everything, and the screen below it takes the rest of the window. */
+  .frame {
+    display: flex;
+    flex-direction: column;
+    min-height: var(--height-screen);
+  }
+
+  .frame:has(> .app) {
+    height: var(--height-screen);
+  }
+
+  .frame > :global(.standalone) {
+    flex: 1;
+    min-height: 0;
+  }
+
   .app {
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: var(--width-side) 1fr;
-    height: var(--height-screen);
   }
 
   .side {

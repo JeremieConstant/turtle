@@ -24,10 +24,29 @@ pub struct TestServer {
     /// When the server reports each save (`TURTLE_LOG_SAVES`): the saves
     /// it reported that nobody has taken yet.
     saves: Option<Arc<Mutex<Vec<Save>>>>,
-    /// `TURTLE_MAX_ATTACHMENT_MB`, when the test sets it.
+    settings: Settings,
+    /// Every line the server has written to its standard error.
+    logged: Arc<Mutex<Vec<String>>>,
+}
+
+/// The settings a test may give the server; the rest are left unset.
+#[derive(Debug, Clone, Default)]
+struct Settings {
+    /// `TURTLE_MAX_ATTACHMENT_MB`.
     attachment_limit_mb: Option<u32>,
-    /// `TURTLE_PUBLIC_URL`, when the test sets it.
+    /// `TURTLE_PUBLIC_URL`.
     public_url: Option<String>,
+    demo: DemoSettings,
+}
+
+/// `TURTLE_DEMO_EMAIL`, `TURTLE_DEMO_PASSWORD` and `TURTLE_DEMO_RESET_HOURS`,
+/// each when the test sets it. Values are passed as written, so a test can
+/// give an invalid one.
+#[derive(Debug, Clone, Default)]
+pub struct DemoSettings {
+    pub email: Option<String>,
+    pub password: Option<String>,
+    pub reset_hours: Option<String>,
 }
 
 /// One round of saving changed Pages, as the server reports it.
@@ -41,40 +60,60 @@ pub struct Save {
 impl TestServer {
     /// Starts a server with an empty data directory of its own.
     pub async fn start() -> TestServer {
-        TestServer::start_with(None, None, None).await
+        TestServer::start_with(None, Settings::default()).await
     }
 
     /// Starts a server that says it is reachable at `url`, so it offers OAuth.
     pub async fn start_with_public_url(url: &str) -> TestServer {
-        TestServer::start_with(None, None, Some(url.to_string())).await
+        TestServer::start_with(None, Settings { public_url: Some(url.to_string()), ..Settings::default() }).await
     }
 
     /// Starts a server that takes files of at most this many MB.
     pub async fn start_with_attachment_limit(mb: u32) -> TestServer {
-        TestServer::start_with(None, Some(mb), None).await
+        TestServer::start_with(None, Settings { attachment_limit_mb: Some(mb), ..Settings::default() }).await
     }
 
     /// Starts a server that reports each save it makes; `next_save` and
     /// `take_saves` return them.
     pub async fn start_reporting_saves() -> TestServer {
-        TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new()))), None, None).await
+        TestServer::start_with(Some(Arc::new(Mutex::new(Vec::new()))), Settings::default()).await
     }
 
-    async fn start_with(
-        saves: Option<Arc<Mutex<Vec<Save>>>>,
-        attachment_limit_mb: Option<u32>,
-        public_url: Option<String>,
-    ) -> TestServer {
+    /// Starts a server with these demo settings.
+    pub async fn start_as_demo(demo: DemoSettings) -> TestServer {
+        TestServer::start_with(None, Settings { demo, ..Settings::default() }).await
+    }
+
+    /// Starts a server with these demo settings, expecting it to refuse to
+    /// start, and returns what it wrote to its standard error.
+    pub async fn refuses_to_start_as_demo(demo: DemoSettings) -> String {
         let data_dir = tempfile::tempdir().expect("creating a temporary data directory");
-        let (process, addr) = launch(data_dir.path(), saves.clone(), attachment_limit_mb, public_url.as_deref()).await;
+        let settings = Settings { demo, ..Settings::default() };
+        let output = tokio::time::timeout(START_TIMEOUT, command(data_dir.path(), None, &settings).output())
+            .await
+            .expect("the server neither started nor stopped within the timeout")
+            .expect("running the turtle binary");
+        assert!(!output.status.success(), "the server started: {}", String::from_utf8_lossy(&output.stdout));
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    }
+
+    async fn start_with(saves: Option<Arc<Mutex<Vec<Save>>>>, settings: Settings) -> TestServer {
+        let data_dir = tempfile::tempdir().expect("creating a temporary data directory");
+        let logged = Arc::new(Mutex::new(Vec::new()));
+        let (process, addr) = launch(data_dir.path(), saves.clone(), &settings, logged.clone()).await;
         TestServer {
             process: Some(process),
             addr,
             data_dir,
             saves,
-            attachment_limit_mb,
-            public_url,
+            settings,
+            logged,
         }
+    }
+
+    /// Every line the server has written to its standard error so far.
+    pub async fn logged(&self) -> Vec<String> {
+        self.logged.lock().await.clone()
     }
 
     fn reported_saves(&self) -> &Mutex<Vec<Save>> {
@@ -221,49 +260,59 @@ impl TestServer {
         if self.process.is_some() {
             self.stop().await;
         }
-        let (process, addr) = launch(
-            self.data_dir.path(),
-            self.saves.clone(),
-            self.attachment_limit_mb,
-            self.public_url.as_deref(),
-        )
-        .await;
+        let (process, addr) = launch(self.data_dir.path(), self.saves.clone(), &self.settings, self.logged.clone()).await;
         self.process = Some(process);
         self.addr = addr;
     }
 }
 
-async fn launch(
-    data_dir: &Path,
-    saves: Option<Arc<Mutex<Vec<Save>>>>,
-    attachment_limit_mb: Option<u32>,
-    public_url: Option<&str>,
-) -> (Child, SocketAddr) {
+/// The command that runs the server on `data_dir` with exactly these settings.
+fn command(data_dir: &Path, saves: Option<&Arc<Mutex<Vec<Save>>>>, settings: &Settings) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_turtle"));
-    match public_url {
-        Some(url) => command.env("TURTLE_PUBLIC_URL", url),
-        None => command.env_remove("TURTLE_PUBLIC_URL"),
-    };
-    match attachment_limit_mb {
-        Some(mb) => command.env("TURTLE_MAX_ATTACHMENT_MB", mb.to_string()),
-        None => command.env_remove("TURTLE_MAX_ATTACHMENT_MB"),
-    };
-    if saves.is_some() {
-        command.env("TURTLE_LOG_SAVES", "1");
-    } else {
-        command.env_remove("TURTLE_LOG_SAVES");
+    let given = [
+        ("TURTLE_PUBLIC_URL", settings.public_url.clone()),
+        ("TURTLE_MAX_ATTACHMENT_MB", settings.attachment_limit_mb.map(|mb| mb.to_string())),
+        ("TURTLE_DEMO_EMAIL", settings.demo.email.clone()),
+        ("TURTLE_DEMO_PASSWORD", settings.demo.password.clone()),
+        ("TURTLE_DEMO_RESET_HOURS", settings.demo.reset_hours.clone()),
+        ("TURTLE_LOG_SAVES", saves.map(|_| "1".to_string())),
+    ];
+    for (name, value) in given {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
     }
-    let mut process = command
+    command
         .env("TURTLE_DATA", data_dir)
         // Port 0: the system picks a free one, and the server says which.
         .env("TURTLE_PORT", "0")
         .env_remove("PORT")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true)
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command
+}
+
+async fn launch(
+    data_dir: &Path,
+    saves: Option<Arc<Mutex<Vec<Save>>>>,
+    settings: &Settings,
+    logged: Arc<Mutex<Vec<String>>>,
+) -> (Child, SocketAddr) {
+    let mut process = command(data_dir, saves.as_ref(), settings)
         .spawn()
         .expect("starting the turtle binary");
+
+    // Passed on, so a failing test still shows what the server said, and kept.
+    let mut errors = BufReader::new(process.stderr.take().unwrap()).lines();
+    tokio::spawn(async move {
+        while let Ok(Some(line)) = errors.next_line().await {
+            eprintln!("{line}");
+            logged.lock().await.push(line);
+        }
+    });
 
     let stdout = process.stdout.take().unwrap();
     let mut lines = BufReader::new(stdout).lines();

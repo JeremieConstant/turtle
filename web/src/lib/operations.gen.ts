@@ -142,6 +142,20 @@ export type DeletedAreaList = {
   areas: DeletedArea[]
 }
 
+export type Demo = {
+  /** The account visitors may sign in with. Null while no active Member
+has the demo's email address, and when that Member is a Workspace
+Admin. */
+  account?: DemoAccount | null
+  /** How many hours pass between resets, if the operator said. */
+  resets_every_hours?: number | null
+}
+
+export type DemoAccount = {
+  email: string
+  password: string
+}
+
 export type Entry = {
   children: Entry[]
   id: string
@@ -501,6 +515,8 @@ specific query then finds what is missing. */
 export type Session = {
   /** The standalone Agent calling through one of its Tokens, if it is one. */
   agent?: CallingAgent | null
+  /** Present when this Turtle is a demo, which is reset from time to time. */
+  demo?: Demo | null
   /** The signed-in Member, if anyone is signed in. */
   member?: Member | null
   /** Whether Turtle sends mail: invitations and password reset links are

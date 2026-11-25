@@ -56,6 +56,9 @@ Turtle is configured with environment variables:
 | `TURTLE_PUBLIC_URL` | unset | The address people and AI clients reach Turtle at, such as `https://turtle.example.org`, at the root of its host. When set, Claude and other MCP clients can connect with OAuth: a Member pastes `<address>/mcp` into the client and clicks **Allow**. Without it, only Tokens created by hand work at the MCP endpoint. |
 | `TURTLE_SMTP_URL` | unset | The SMTP server Turtle sends mail through, such as `smtps://user:password@smtp.example.org` or `smtp://user:password@smtp.example.org:587?tls=required`. When set, invitations and password reset links are mailed, and a Member who forgot their password can ask for a link on the sign-in screen. Needs `TURTLE_MAIL_FROM` and `TURTLE_PUBLIC_URL`. Without it, a Workspace Admin gets each link to pass on by hand. |
 | `TURTLE_MAIL_FROM` | unset | The address Turtle's mail comes from, such as `Turtle <turtle@example.org>`. |
+| `TURTLE_DEMO_EMAIL` | unset | Makes Turtle a public demo, together with `TURTLE_DEMO_PASSWORD`: the email address of the account visitors sign in with. Every screen then says that this is a demo. |
+| `TURTLE_DEMO_PASSWORD` | unset | The demo account's password. It is shown to everyone. |
+| `TURTLE_DEMO_RESET_HOURS` | unset | How many hours pass between resets of the demo, a whole number, for the notice on every screen. Only in demo mode. |
 | `TURTLE_LOG_SAVES` | unset | When set, Turtle prints a line for each save of changed Pages and how long it took, to see whether saving keeps up. |
 
 For example:
@@ -63,6 +66,8 @@ For example:
 ```bash
 TURTLE_DATA=/var/lib/turtle TURTLE_PORT=8080 TURTLE_PUBLIC_URL=https://turtle.example.org ./server/target/release/turtle
 ```
+
+The demo account must be a Member without Workspace Admin; Turtle never shows a Workspace Admin's password, and shows no account until a Member with that email address exists. Turtle does not reset the demo itself: the hosting stops it, empties the data directory, starts it and fills it again.
 
 Behind a reverse proxy, set `TURTLE_PUBLIC_URL` to the address people open in the browser. Turtle cannot work it out by itself, and without it AI clients cannot sign in; the **Connect AI** page then tells the Workspace Admin what is missing.
 
