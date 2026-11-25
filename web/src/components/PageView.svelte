@@ -298,11 +298,16 @@
   }
 
   .side {
-    flex: none;
+    /* Never wider than the bar: on a narrow window the people, the connection
+       note and the buttons wrap onto more rows rather than run off the screen. */
+    flex: 0 1 auto;
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
     margin-left: auto;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2) var(--space-3);
   }
 
   .columns {
