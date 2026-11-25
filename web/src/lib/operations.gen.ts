@@ -535,6 +535,9 @@ only the person it is for holds it. */
   address?: string | null
   /** When the link stops working, in seconds since the Unix epoch. */
   expires_at: number
+  /** The email address Turtle tried to mail the link to but could not;
+the link is then to be passed on. */
+  mail_failed_to?: string | null
   /** The email address the link was mailed to; absent when it is to be
 passed on. */
   mailed_to?: string | null

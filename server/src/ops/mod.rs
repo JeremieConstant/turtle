@@ -47,7 +47,7 @@ pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 /// What operations work on: the database and the time.
 pub struct Core {
-    db: Mutex<Connection>,
+    db: Arc<Mutex<Connection>>,
     clock: Clock,
     /// Counts the changes that may have taken access away or changed a Role,
     /// so open editors check theirs again at once.
@@ -102,7 +102,7 @@ impl Core {
         // The open Pages get a connection of their own, so live editing does
         // not wait behind operations.
         Ok(Core {
-            db: Mutex::new(crate::store::open(db_path)?),
+            db: Arc::new(Mutex::new(crate::store::open(db_path)?)),
             search: crate::search::Index::open(&db_path.with_file_name("search"))?,
             live: crate::live::Pages::new(crate::store::open(db_path)?, clock.clone()),
             attachments: db_path.with_file_name("attachments"),
@@ -204,6 +204,11 @@ impl Core {
 
     pub fn db(&self) -> MutexGuard<'_, Connection> {
         self.db.lock().unwrap()
+    }
+
+    /// The database, for work that goes on after an operation has answered.
+    pub fn shared_db(&self) -> Arc<Mutex<Connection>> {
+        self.db.clone()
     }
 
     /// Says that someone's access may have changed: a Grant, a session, or
