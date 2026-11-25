@@ -63,27 +63,20 @@ pub struct Session {
     /// The standalone Agent calling through one of its Tokens, if it is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<CallingAgent>,
-    /// Present when this Turtle is a demo, which is reset from time to time.
+    /// Present when this Turtle is a Demo, which is reset from time to time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub demo: Option<Demo>,
 }
 
-/// What a demo tells everyone, signed in or not.
+/// What a Demo tells everyone, signed in or not.
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Demo {
     /// How many hours pass between resets, if the operator said.
     pub resets_every_hours: Option<u32>,
-    /// The account visitors may sign in with. Null while no active Member
-    /// has the demo's email address, and when that Member is a Workspace
-    /// Admin.
-    pub account: Option<DemoAccount>,
-}
-
-/// The email address and password of a demo's account.
-#[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct DemoAccount {
-    pub email: String,
-    pub password: String,
+    /// The email address and password of the demo Member, which anyone may
+    /// sign in with. Null while no active Member has the Demo's email
+    /// address, and when that Member is a Workspace Admin.
+    pub account: Option<Credentials>,
 }
 
 /// A standalone Agent as it learns who it is.
@@ -100,7 +93,7 @@ pub struct NewAccount {
     pub password: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Credentials {
     pub email: String,
     pub password: String,
@@ -136,28 +129,29 @@ pub fn get_session(core: &Core, principal: &Principal, _: Nothing) -> OpResult<S
         sends_mail: core.mailer().is_some(),
         member,
         agent,
-        demo: core.demo().map(|settings| demo(&db, settings)).transpose()?,
+        demo: core.demo().map(|settings| demo_for_everyone(core, &db, settings)).transpose()?,
     }
     .into())
 }
 
-/// What a demo says. Its account is shown only when an active Member who is
-/// not a Workspace Admin has that email address, so visitors never get
-/// credentials that fail or that hand them the Workspace.
-fn demo(db: &Connection, settings: &crate::demo::DemoSettings) -> rusqlite::Result<Demo> {
+/// What a Demo says. The demo Member's email and password are shown only
+/// when an active Member who is not a Workspace Admin has that email
+/// address, found as `sign_in` finds it, so nobody gets credentials that
+/// fail or that hand them the Workspace.
+fn demo_for_everyone(core: &Core, db: &Connection, settings: &crate::demo::DemoSettings) -> rusqlite::Result<Demo> {
     let workspace_admin: Option<bool> = db
         .query_row(
             "SELECT workspace_admin FROM members WHERE email = ?1 AND deactivated_at IS NULL",
-            [settings.email.to_lowercase()],
+            [normalize_email(&settings.email)],
             |row| row.get(0),
         )
         .optional()?;
     if workspace_admin == Some(true) {
-        settings.warn_about_workspace_admin();
+        core.warn_demo_member_is_workspace_admin();
     }
     Ok(Demo {
         resets_every_hours: settings.resets_every_hours,
-        account: (workspace_admin == Some(false)).then(|| DemoAccount {
+        account: (workspace_admin == Some(false)).then(|| Credentials {
             email: settings.email.clone(),
             password: settings.password.clone(),
         }),
@@ -567,10 +561,10 @@ mod tests {
         assert!(get_session(&with, &Principal::Anonymous, Nothing {}).unwrap().output.sends_mail);
     }
 
-    /// A fresh core told it is a demo of `email` with the demo password.
-    fn demo_of(email: &str, resets_every_hours: Option<u32>) -> TestCore {
+    /// A fresh core told it is a Demo of `email` with the demo password.
+    fn demo_of(email: &str, reset_hours: Option<&str>) -> TestCore {
         let mut core = fresh();
-        let settings = crate::demo::from_settings(Some(email), Some("try turtle now"), resets_every_hours.map(|h| h.to_string()).as_deref())
+        let settings = crate::demo::from_settings(Some(email), Some("try turtle now"), reset_hours)
             .unwrap()
             .expect("demo mode is on");
         core.core.set_demo(Some(settings));
@@ -585,7 +579,7 @@ mod tests {
 
     #[test]
     fn a_demo_shows_the_account_of_a_member_who_is_not_workspace_admin() {
-        let core = demo_of("member-grace@example.org", Some(6));
+        let core = demo_of("member-grace@example.org", Some("6"));
         crate::ops::testing::member(&core, "Grace", false);
 
         let session = get_session(&core, &Principal::Anonymous, Nothing {}).unwrap().output;
@@ -593,7 +587,7 @@ mod tests {
             session.demo,
             Some(Demo {
                 resets_every_hours: Some(6),
-                account: Some(DemoAccount {
+                account: Some(Credentials {
                     email: "member-grace@example.org".into(),
                     password: "try turtle now".into(),
                 }),
@@ -612,8 +606,17 @@ mod tests {
     }
 
     #[test]
+    fn a_demo_finds_its_member_however_the_email_address_is_written() {
+        let core = demo_of("  Member-Grace@Example.ORG ", Some("6"));
+        crate::ops::testing::member(&core, "Grace", false);
+
+        let demo = get_session(&core, &Principal::Anonymous, Nothing {}).unwrap().output.demo.unwrap();
+        assert!(demo.account.is_some(), "{demo:?}");
+    }
+
+    #[test]
     fn a_demo_never_shows_the_account_of_a_workspace_admin() {
-        let core = demo_of("member-ada@example.org", Some(6));
+        let core = demo_of("member-ada@example.org", Some("6"));
         crate::ops::testing::member(&core, "Ada", true);
 
         let demo = get_session(&core, &Principal::Anonymous, Nothing {}).unwrap().output.demo.unwrap();
@@ -622,7 +625,7 @@ mod tests {
 
     #[test]
     fn a_demo_shows_no_account_until_a_member_has_its_email_address() {
-        let core = demo_of("grace@example.org", Some(6));
+        let core = demo_of("grace@example.org", Some("6"));
 
         let demo = get_session(&core, &Principal::Anonymous, Nothing {}).unwrap().output.demo.unwrap();
         assert_eq!(demo, Demo { resets_every_hours: Some(6), account: None });
@@ -630,9 +633,11 @@ mod tests {
 
     #[test]
     fn a_demo_shows_no_account_of_a_deactivated_member() {
-        let core = demo_of("member-grace@example.org", Some(6));
+        let core = demo_of("member-grace@example.org", Some("6"));
         crate::ops::testing::member(&core, "Grace", false);
-        core.db().execute("UPDATE members SET deactivated_at = 1 WHERE id = 'member-grace'", []).unwrap();
+        let ada = crate::ops::testing::member(&core, "Ada", true);
+        let grace = crate::ops::members::MemberId { id: "member-grace".into() };
+        crate::ops::members::deactivate_member(&core, &ada, grace).unwrap();
 
         let demo = get_session(&core, &Principal::Anonymous, Nothing {}).unwrap().output.demo.unwrap();
         assert_eq!(demo.account, None);
@@ -640,7 +645,7 @@ mod tests {
 
     #[test]
     fn a_demo_tells_the_same_to_everyone_signed_in_or_not() {
-        let core = demo_of("member-grace@example.org", Some(6));
+        let core = demo_of("member-grace@example.org", Some("6"));
         let grace = crate::ops::testing::member(&core, "Grace", false);
         let ada = crate::ops::testing::member(&core, "Ada", true);
 

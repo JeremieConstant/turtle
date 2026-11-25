@@ -2,6 +2,7 @@
   import AccountForm from '../components/AccountForm.svelte'
   import DemoSignIn from '../components/DemoSignIn.svelte'
   import Field from '../components/Field.svelte'
+  import type { Credentials } from '../lib/operations.gen'
   import { call } from '../lib/ops'
   import { router } from '../lib/router.svelte'
   import { session } from '../lib/session.svelte'
@@ -17,7 +18,7 @@
 
   const demoAccount = $derived(session.demo?.account ?? null)
 
-  async function signIn(credentials: { email: string; password: string }) {
+  async function signIn(credentials: Credentials) {
     session.signedIn(await call('sign_in', credentials))
     router.navigate(returnTo)
   }

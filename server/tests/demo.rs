@@ -1,13 +1,13 @@
-//! Demo mode as a visitor and the operator see it: what `get_session` tells
+//! A Demo as everyone and the operator see it: what `get_session` tells
 //! everyone, and the settings Turtle refuses to start with.
 
 mod support;
 
 use serde_json::{json, Value};
-use support::{http, DemoSettings, TestServer};
+use support::{http, DemoEnv, TestServer};
 
-fn demo(email: &str, reset_hours: Option<&str>) -> DemoSettings {
-    DemoSettings {
+fn demo(email: &str, reset_hours: Option<&str>) -> DemoEnv {
+    DemoEnv {
         email: Some(email.into()),
         password: Some("try turtle now".into()),
         reset_hours: reset_hours.map(Into::into),
@@ -89,12 +89,16 @@ async fn a_demo_never_publishes_a_workspace_admins_password_and_says_why_once() 
 
 #[tokio::test]
 async fn turtle_refuses_to_start_with_demo_settings_that_do_not_fit() {
-    let password_alone = DemoSettings { email: None, ..demo("grace@example.org", None) };
-    let email_alone = DemoSettings { password: None, ..demo("grace@example.org", None) };
-    let interval_alone = DemoSettings { reset_hours: Some("6".into()), ..DemoSettings::default() };
+    let password_alone = DemoEnv { email: None, ..demo("grace@example.org", None) };
+    let email_alone = DemoEnv { password: None, ..demo("grace@example.org", None) };
+    let spaces_for_email = DemoEnv { email: Some("  ".into()), ..demo("grace@example.org", None) };
+    let spaces_for_password = DemoEnv { password: Some("  ".into()), ..demo("grace@example.org", None) };
+    let interval_alone = DemoEnv { reset_hours: Some("6".into()), ..DemoEnv::default() };
     let cases = [
         (password_alone, "TURTLE_DEMO_EMAIL"),
         (email_alone, "TURTLE_DEMO_PASSWORD"),
+        (spaces_for_email, "TURTLE_DEMO_EMAIL"),
+        (spaces_for_password, "TURTLE_DEMO_PASSWORD"),
         (interval_alone, "TURTLE_DEMO_RESET_HOURS"),
         (demo("grace@example.org", Some("0")), "TURTLE_DEMO_RESET_HOURS"),
         (demo("grace@example.org", Some("1.5")), "TURTLE_DEMO_RESET_HOURS"),

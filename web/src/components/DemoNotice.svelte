@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** Tells a visitor of a demo that what they change does not last. It cannot be dismissed. */
+  /** Tells everyone in a Demo that what they change does not last. It cannot be dismissed. */
   let { resetsEveryHours }: { resetsEveryHours: number | null } = $props()
 
   const text = $derived(

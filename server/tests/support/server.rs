@@ -36,14 +36,14 @@ struct Settings {
     attachment_limit_mb: Option<u32>,
     /// `TURTLE_PUBLIC_URL`.
     public_url: Option<String>,
-    demo: DemoSettings,
+    demo: DemoEnv,
 }
 
 /// `TURTLE_DEMO_EMAIL`, `TURTLE_DEMO_PASSWORD` and `TURTLE_DEMO_RESET_HOURS`,
 /// each when the test sets it. Values are passed as written, so a test can
 /// give an invalid one.
 #[derive(Debug, Clone, Default)]
-pub struct DemoSettings {
+pub struct DemoEnv {
     pub email: Option<String>,
     pub password: Option<String>,
     pub reset_hours: Option<String>,
@@ -80,13 +80,13 @@ impl TestServer {
     }
 
     /// Starts a server with these demo settings.
-    pub async fn start_as_demo(demo: DemoSettings) -> TestServer {
+    pub async fn start_as_demo(demo: DemoEnv) -> TestServer {
         TestServer::start_with(None, Settings { demo, ..Settings::default() }).await
     }
 
     /// Starts a server with these demo settings, expecting it to refuse to
     /// start, and returns what it wrote to its standard error.
-    pub async fn refuses_to_start_as_demo(demo: DemoSettings) -> String {
+    pub async fn refuses_to_start_as_demo(demo: DemoEnv) -> String {
         let data_dir = tempfile::tempdir().expect("creating a temporary data directory");
         let settings = Settings { demo, ..Settings::default() };
         let output = tokio::time::timeout(START_TIMEOUT, command(data_dir.path(), None, &settings).output())

@@ -10,4 +10,4 @@ mod server;
 #[allow(unused_imports)]
 pub use client::{Content, TestClient};
 #[allow(unused_imports)]
-pub use server::{DemoSettings, Member, Save, TestServer};
+pub use server::{DemoEnv, Member, Save, TestServer};

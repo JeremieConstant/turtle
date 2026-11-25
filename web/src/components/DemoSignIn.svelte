@@ -1,31 +1,18 @@
 <script lang="ts">
-  import type { DemoAccount } from '../lib/operations.gen'
-  import { OperationError } from '../lib/ops'
+  import { Attempt } from '../lib/attempt.svelte'
+  import type { Credentials } from '../lib/operations.gen'
 
-  /** Shows a demo's account and opens the demo with it in one click. */
+  /** Shows the email address and password of a Demo's demo Member and opens the Demo with them in one click. */
   const {
     account,
     onopen,
   }: {
-    account: DemoAccount
-    /** Signs in with the account. A thrown OperationError is shown to the visitor. */
+    account: Credentials
+    /** Signs in as the demo Member. A thrown OperationError is shown to the person. */
     onopen: () => Promise<void>
   } = $props()
 
-  let busy = $state(false)
-  let error = $state<string | null>(null)
-
-  async function open() {
-    busy = true
-    error = null
-    try {
-      await onopen()
-    } catch (caught) {
-      error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'
-    } finally {
-      busy = false
-    }
-  }
+  const attempt = new Attempt()
 </script>
 
 <section class="stack demo-sign-in" aria-label="Demo account">
@@ -35,10 +22,10 @@
     <dt>Password</dt>
     <dd>{account.password}</dd>
   </dl>
-  {#if error}
-    <p class="error" role="alert">{error}</p>
+  {#if attempt.error}
+    <p class="error" role="alert">{attempt.error}</p>
   {/if}
-  <button type="button" class="btn primary" disabled={busy} onclick={open}>Open the demo</button>
+  <button type="button" class="btn primary" disabled={attempt.busy} onclick={() => attempt.run(onopen)}>Open the demo</button>
 </section>
 
 <style>

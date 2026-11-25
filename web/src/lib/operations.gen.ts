@@ -125,6 +125,11 @@ only here; Turtle keeps only a hash of it. */
   value: string
 }
 
+export type Credentials = {
+  email: string
+  password: string
+}
+
 export type DeletedArea = {
   /** Days before it is removed for good, a day begun counting: 30 just
 after deleting, 1 on its last day. */
@@ -143,17 +148,12 @@ export type DeletedAreaList = {
 }
 
 export type Demo = {
-  /** The account visitors may sign in with. Null while no active Member
-has the demo's email address, and when that Member is a Workspace
-Admin. */
-  account?: DemoAccount | null
+  /** The email address and password of the demo Member, which anyone may
+sign in with. Null while no active Member has the Demo's email
+address, and when that Member is a Workspace Admin. */
+  account?: Credentials | null
   /** How many hours pass between resets, if the operator said. */
   resets_every_hours?: number | null
-}
-
-export type DemoAccount = {
-  email: string
-  password: string
 }
 
 export type Entry = {
@@ -515,7 +515,7 @@ specific query then finds what is missing. */
 export type Session = {
   /** The standalone Agent calling through one of its Tokens, if it is one. */
   agent?: CallingAgent | null
-  /** Present when this Turtle is a demo, which is reset from time to time. */
+  /** Present when this Turtle is a Demo, which is reset from time to time. */
   demo?: Demo | null
   /** The signed-in Member, if anyone is signed in. */
   member?: Member | null

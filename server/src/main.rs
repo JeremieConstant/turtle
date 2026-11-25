@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let mail_from = std::env::var("TURTLE_MAIL_FROM").ok();
     let mailer = mail::from_settings(smtp_url.as_deref(), mail_from.as_deref(), public_url.as_ref())?;
 
-    // A demo says so on every screen and shows its account on the sign-in
+    // A Demo says so on every screen and shows its demo Member on the sign-in
     // screen; the hosting resets it.
     let demo_email = std::env::var("TURTLE_DEMO_EMAIL").ok();
     let demo_password = std::env::var("TURTLE_DEMO_PASSWORD").ok();

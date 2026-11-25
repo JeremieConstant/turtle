@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
-  import { OperationError } from '../lib/ops'
+  import { Attempt } from '../lib/attempt.svelte'
   import Logo from './Logo.svelte'
 
   const {
@@ -24,20 +24,11 @@
     children: Snippet
   } = $props()
 
-  let busy = $state(false)
-  let error = $state<string | null>(null)
+  const attempt = new Attempt()
 
-  async function submit(event: SubmitEvent) {
+  function submit(event: SubmitEvent) {
     event.preventDefault()
-    busy = true
-    error = null
-    try {
-      await onsubmit()
-    } catch (caught) {
-      error = caught instanceof OperationError ? caught.message : 'Something went wrong. Try again.'
-    } finally {
-      busy = false
-    }
+    attempt.run(onsubmit)
   }
 </script>
 
@@ -51,10 +42,10 @@
     {@render lead?.()}
     <form class="stack" onsubmit={submit}>
       {@render children()}
-      {#if error}
-        <p class="error" role="alert">{error}</p>
+      {#if attempt.error}
+        <p class="error" role="alert">{attempt.error}</p>
       {/if}
-      <button type="submit" class="btn" class:primary={!quietSubmit} disabled={busy}>{submitLabel}</button>
+      <button type="submit" class="btn" class:primary={!quietSubmit} disabled={attempt.busy}>{submitLabel}</button>
     </form>
   </div>
 </main>
