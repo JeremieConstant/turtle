@@ -722,11 +722,28 @@ mod tests {
         assert_eq!(found(&core, &reviewer, "#runbook"), ["Deploy"]);
     }
 
-    fn attach(core: &Core, writer: &Principal, page_id: &str, name: &str) {
+    fn attach(core: &Core, writer: &Principal, page_id: &str, name: &str) -> String {
         use crate::ops::attachments::{attach_file, NewAttachment};
         // "hello" in base64.
         let input = NewAttachment { page_id: page_id.into(), name: name.into(), content: "aGVsbG8=".into() };
-        attach_file(core, writer, input).unwrap();
+        attach_file(core, writer, input).unwrap().output.id
+    }
+
+    #[test]
+    fn a_page_is_no_longer_found_by_the_file_name_of_an_attachment_removed_from_it() {
+        use crate::ops::attachments::{remove_attachment, AttachmentId};
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let finance = area(&core, &grace, "Finance");
+        let planning = page(&core, &grace, &finance, "Planning");
+        let budget = attach(&core, &grace, &planning, "Q3-budget.xlsx");
+        attach(&core, &grace, &planning, "forecast.xlsx");
+        assert_eq!(found(&core, &grace, "budget"), ["Planning"]);
+
+        remove_attachment(&core, &grace, AttachmentId { id: budget }).unwrap();
+
+        assert!(found(&core, &grace, "budget").is_empty());
+        assert_eq!(found(&core, &grace, "forecast"), ["Planning"]);
     }
 
     #[test]

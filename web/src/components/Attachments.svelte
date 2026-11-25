@@ -2,8 +2,8 @@
   /*
    * The Attachments of a Page, under its content: each file with its name
    * and size, downloaded from its link. With the Write Role, files can be
-   * attached from here; images pasted or dropped into the content show up
-   * here too.
+   * attached from here and removed again; images pasted or dropped into
+   * the content show up here too.
    */
   import { fileSize } from '../lib/attachments'
   import type { Attachment } from '../lib/operations.gen'
@@ -12,11 +12,14 @@
     attachments,
     writable,
     onattach,
+    onremove,
   }: {
     attachments: Attachment[]
     writable: boolean
     /** Attaches the chosen files to the Page. */
     onattach: (files: File[]) => void
+    /** Removes the Attachment, once the person has confirmed it. */
+    onremove: (attachment: Attachment) => void
   } = $props()
 
   let picker = $state<HTMLInputElement>()
@@ -43,7 +46,14 @@
         {#each attachments as attachment (attachment.id)}
           <li>
             <a class="item-name" href={attachment.url} download={attachment.name}>{attachment.name}</a>
-            <span class="hint">{fileSize(attachment.size)}</span>
+            <span class="controls">
+              <span class="hint">{fileSize(attachment.size)}</span>
+              {#if writable}
+                <button type="button" class="btn" aria-label="Remove {attachment.name}" onclick={() => onremove(attachment)}>
+                  Remove
+                </button>
+              {/if}
+            </span>
           </li>
         {/each}
       </ul>

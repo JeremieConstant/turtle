@@ -1,5 +1,10 @@
 //! Attachments: images and files that belong to a Page. Whoever may read the
-//! Page may read its Attachments; adding one needs the Write Role.
+//! Page may read its Attachments; adding or removing one needs the Write Role.
+//!
+//! Removing an Attachment does not change the Page's content: an image of it
+//! there, or in an earlier Version, stays where it was and shows as missing.
+//! Refusing the removal instead would leave the file in place for as long as
+//! any Version shows it, which is what removing is meant to end.
 //!
 //! The files themselves live in the data directory, each under the SHA-256
 //! of its content, so the same file attached twice is stored once.
@@ -25,6 +30,11 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         "attach_file",
         "Attaches an image or file to a Page and returns the Attachment. The content is sent in base64. An image is shown in the Page by putting its `url` in the content, in Markdown as ![description](url). Files larger than the limit Turtle was started with (25 MB unless set otherwise) are refused. Needs the Write Role.",
         attach_file,
+    );
+    catalogue.add(
+        "remove_attachment",
+        "Removes an Attachment from its Page. The Page's content is left as it is, so an image of the Attachment shown there shows as missing; take it out of the content too. Needs the Write Role.",
+        remove_attachment,
     );
     catalogue
         .add(
@@ -144,6 +154,29 @@ pub fn list_attachments(core: &Core, principal: &Principal, input: PageId) -> Op
     tree::get_page(core, principal, PageId { id: input.id.clone() })?;
     let attachments = stored_of(&core.db(), &input.id)?.into_iter().map(|(attachment, _)| attachment).collect();
     Ok(Attachments { attachments }.into())
+}
+
+pub fn remove_attachment(core: &Core, principal: &Principal, input: AttachmentId) -> OpResult<()> {
+    super::areas::signed_in(principal)?;
+    let Some((attachment, _)) = find(&core.db(), &input.id)? else {
+        return Err(OpError::NotFound(NO_SUCH_ATTACHMENT.into()));
+    };
+    // Hidden is not found, as for reading it.
+    match tree::page_to_change(core, principal, &attachment.page_id) {
+        Ok(_) => {}
+        Err(OpError::NotFound(_)) => return Err(OpError::NotFound(NO_SUCH_ATTACHMENT.into())),
+        Err(other) => return Err(other),
+    }
+    let db = core.db();
+    // Looked up again under the lock that removes it: someone else may have
+    // removed it meanwhile.
+    let Some((_, content_hash)) = find(&db, &input.id)? else {
+        return Err(OpError::NotFound(NO_SUCH_ATTACHMENT.into()));
+    };
+    db.execute("DELETE FROM attachments WHERE id = ?1", [&input.id])?;
+    remove_unattached_files(core, &db, &[content_hash])?;
+    core.page_changed(&attachment.page_id);
+    Ok(().into())
 }
 
 /// The file names of a Page's Attachments, the oldest first. It does not ask
@@ -591,6 +624,69 @@ mod tests {
         assert_eq!(stored_files(&setup), [HELLO_FILE]);
         let read = read_attachment(&setup.core, &setup.grace, AttachmentId { id: again.id }).unwrap().output;
         assert_eq!(read.content, HELLO);
+    }
+
+    fn remove(setup: &Setup, by: &Principal, id: &str) -> Result<(), OpError> {
+        remove_attachment(&setup.core, by, AttachmentId { id: id.into() }).map(|reply| reply.output)
+    }
+
+    #[test]
+    fn a_writer_removes_an_attachment_and_it_is_no_longer_listed_or_read() {
+        let setup = setup();
+        let removed = attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        let kept = attach(&setup, &setup.grace, "farewell.txt", BYE).unwrap();
+
+        remove(&setup, &setup.grace, &removed.id).unwrap();
+
+        let listed = list_attachments(&setup.core, &setup.grace, PageId { id: setup.page_id.clone() }).unwrap().output;
+        assert_eq!(listed.attachments, vec![kept]);
+        let gone = read_attachment(&setup.core, &setup.grace, AttachmentId { id: removed.id.clone() }).unwrap_err();
+        assert_eq!(gone.message(), NO_SUCH_ATTACHMENT);
+        let again = remove(&setup, &setup.grace, &removed.id).unwrap_err();
+        assert_eq!(again.message(), NO_SUCH_ATTACHMENT);
+    }
+
+    #[test]
+    fn removing_needs_the_write_role() {
+        let setup = setup();
+        let attached = attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        let ken = member(&setup.core, "Ken", false);
+        give_role(&setup.core, &setup.area_id, &ken, Role::Read);
+
+        let refused = remove(&setup, &ken, &attached.id).unwrap_err();
+
+        assert_eq!(refused.kind(), "not_permitted");
+        read_attachment(&setup.core, &ken, AttachmentId { id: attached.id }).unwrap();
+    }
+
+    #[test]
+    fn without_read_on_the_page_removing_answers_like_for_an_attachment_that_does_not_exist() {
+        let setup = setup();
+        let attached = attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        let linus = member(&setup.core, "Linus", false);
+
+        let hidden = remove(&setup, &linus, &attached.id).unwrap_err();
+        let missing = remove(&setup, &linus, "made-up").unwrap_err();
+
+        assert_eq!((hidden.kind(), hidden.message()), (missing.kind(), missing.message()));
+        assert_eq!(hidden.kind(), "not_found");
+        read_attachment(&setup.core, &setup.grace, AttachmentId { id: attached.id }).unwrap();
+    }
+
+    #[test]
+    fn removing_the_last_attachment_that_holds_a_file_removes_the_file() {
+        let setup = setup();
+        let first = attach(&setup, &setup.grace, "deploy.txt", HELLO).unwrap();
+        let second = attach(&setup, &setup.grace, "copy.txt", HELLO).unwrap();
+        attach(&setup, &setup.grace, "farewell.txt", BYE).unwrap();
+
+        remove(&setup, &setup.grace, &first.id).unwrap();
+        assert_eq!(stored_files(&setup), [HELLO_FILE, BYE_FILE], "the copy still holds the file");
+        let read = read_attachment(&setup.core, &setup.grace, AttachmentId { id: second.id.clone() }).unwrap().output;
+        assert_eq!(read.content, HELLO);
+
+        remove(&setup, &setup.grace, &second.id).unwrap();
+        assert_eq!(stored_files(&setup), [BYE_FILE]);
     }
 
     #[test]

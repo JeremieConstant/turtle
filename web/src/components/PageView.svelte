@@ -11,6 +11,7 @@
   import * as Y from 'yjs'
   import { attach } from '../lib/attachments'
   import { beginAgentChange, endAgentChange, unmarkAgentChange } from '../lib/agent-changes'
+  import { ask } from '../lib/confirm.svelte'
   import { Connection, type ChangingAgent, type Status } from '../lib/connection'
   import { call } from '../lib/ops'
   import type { Attachment, Page } from '../lib/operations.gen'
@@ -77,6 +78,25 @@
     } catch (caught) {
       reportFailure(caught, `${file.name || 'The file'} could not be attached. Try again.`)
       return null
+    }
+  }
+
+  /** Removes an Attachment once the person confirms it, and takes it off the list. */
+  async function removeAttachment(attachment: Attachment) {
+    const sure = await ask({
+      title: `Remove ${attachment.name}?`,
+      message: attachment.shown_as_image
+        ? 'Where the Page shows this image, it will show as missing. The file cannot be brought back.'
+        : 'Links to this file will no longer download it. The file cannot be brought back.',
+      action: 'Remove',
+      destructive: true,
+    })
+    if (!sure) return
+    try {
+      await call('remove_attachment', { id: attachment.id })
+      attachments = attachments.filter(other => other.id !== attachment.id)
+    } catch (caught) {
+      reportFailure(caught, `${attachment.name} could not be removed. Try again.`)
     }
   }
 
@@ -233,7 +253,9 @@
         <Editor {doc} {connection} {person} {editable} pageId={id} attach={attachFile} onready={started => (editor = started)} />
       {/if}
 
-      <Attachments {attachments} writable={editable} onattach={files => files.forEach(file => void attachFile(file))} />
+      <Attachments {attachments} writable={editable} onattach={files => files.forEach(file => void attachFile(file))}
+        onremove={attachment => void removeAttachment(attachment)}
+      />
     </div>
 
     {#if markdownShown}
