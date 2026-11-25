@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question
+    url: https://github.com/turtle-wiki/turtle/discussions
+    about: Ask how to run or use Turtle in GitHub Discussions.
+  - name: Security problem
+    url: https://github.com/turtle-wiki/turtle/security/policy
+    about: Report a vulnerability privately, as the security policy describes.
