@@ -34,6 +34,8 @@ pub struct TestServer {
 struct Settings {
     /// `TURTLE_MAX_ATTACHMENT_MB`.
     attachment_limit_mb: Option<u32>,
+    /// `TURTLE_MAX_IMPORT_MB`.
+    import_limit_mb: Option<u32>,
     /// `TURTLE_PUBLIC_URL`.
     public_url: Option<String>,
     /// `TURTLE_HOST`.
@@ -75,6 +77,13 @@ impl TestServer {
     /// Starts a server that takes files of at most this many MB.
     pub async fn start_with_attachment_limit(mb: u32) -> TestServer {
         TestServer::start_with(None, Settings { attachment_limit_mb: Some(mb), ..Settings::default() }).await
+    }
+
+    /// Starts a server that takes files of at most `attachment_mb` MB and
+    /// ZIPs to import of at most `import_mb` MB.
+    pub async fn start_with_limits(attachment_mb: u32, import_mb: u32) -> TestServer {
+        let settings = Settings { attachment_limit_mb: Some(attachment_mb), import_limit_mb: Some(import_mb), ..Settings::default() };
+        TestServer::start_with(None, settings).await
     }
 
     /// Starts a server that reports each save it makes; `next_save` and
@@ -299,6 +308,7 @@ fn command(data_dir: &Path, saves: Option<&Arc<Mutex<Vec<Save>>>>, settings: &Se
         ("TURTLE_HOST", settings.host.clone()),
         ("TURTLE_CLIENT_ADDRESS_HEADER", settings.client_address_header.clone()),
         ("TURTLE_MAX_ATTACHMENT_MB", settings.attachment_limit_mb.map(|mb| mb.to_string())),
+        ("TURTLE_MAX_IMPORT_MB", settings.import_limit_mb.map(|mb| mb.to_string())),
         ("TURTLE_DEMO_EMAIL", settings.demo.email.clone()),
         ("TURTLE_DEMO_PASSWORD", settings.demo.password.clone()),
         ("TURTLE_DEMO_RESET_HOURS", settings.demo.reset_hours.clone()),

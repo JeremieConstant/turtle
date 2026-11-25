@@ -3,6 +3,7 @@
 //! turning cookies and Tokens into principals and errors into status codes.
 
 use crate::ops::{self, Catalogue, Core, OpError, Principal, SessionChange};
+use axum::extract::rejection::StringRejection;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -26,17 +27,32 @@ struct Api {
 /// arrives in base64, a third larger than the file, with room for the rest
 /// of the input.
 pub fn input_limit(core: &Core) -> DefaultBodyLimit {
-    DefaultBodyLimit::max((core.attachment_limit().div_ceil(3) * 4 + 64 * 1024) as usize)
+    DefaultBodyLimit::max(base64_input_of(core.attachment_limit()))
+}
+
+/// The largest request `import` is called with: a ZIP, in base64. It has a
+/// limit of its own, far above the rest, which is checked before anyone is
+/// known; only someone signed in gets as far as the import.
+fn import_input_limit(core: &Core) -> DefaultBodyLimit {
+    DefaultBodyLimit::max(base64_input_of(core.import_limit()))
+}
+
+/// The size of an input carrying a file of `bytes` bytes in base64.
+fn base64_input_of(bytes: u64) -> usize {
+    (bytes.div_ceil(3) * 4 + 64 * 1024) as usize
 }
 
 pub fn router(core: Arc<Core>, client_address_header: Option<HeaderName>) -> Router {
     let limit = input_limit(&core);
+    let import_limit = import_input_limit(&core);
     let api = Arc::new(Api {
         core,
         catalogue: ops::catalogue(),
         client_address_header,
     });
+    // The limit given with a route takes the place of the one around them all.
     Router::new()
+        .route("/api/import", post(call_import).layer(import_limit))
         .route("/api/{operation}", post(call))
         .layer(limit)
         .with_state(api)
@@ -47,8 +63,41 @@ async fn call(
     Path(operation): Path<String>,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
-    body: String,
+    body: Result<String, StringRejection>,
 ) -> Response {
+    call_operation(api, operation, connection, headers, body).await
+}
+
+async fn call_import(
+    State(api): State<Arc<Api>>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    body: Result<String, StringRejection>,
+) -> Response {
+    call_operation(api, "import".into(), connection, headers, body).await
+}
+
+async fn call_operation(
+    api: Arc<Api>,
+    operation: String,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    body: Result<String, StringRejection>,
+) -> Response {
+    let body = match body {
+        Ok(body) => body,
+        Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+            let message = if operation == "import" {
+                ops::import::too_large(&api.core)
+            } else {
+                OpError::InvalidInput("This request is larger than Turtle accepts. Send less at once.".into())
+            };
+            let mut response = error_response(message);
+            *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
+            return response;
+        }
+        Err(rejection) => return rejection.into_response(),
+    };
     let connected = connection.map(|Extension(ConnectInfo(address))| address.ip());
     let client = client_address(api.client_address_header.as_ref(), &headers).or(connected);
     // Only JSON is accepted. A plain HTML form cannot send it, which keeps
@@ -70,6 +119,8 @@ async fn call(
             Err(error) => return error_response(OpError::InvalidInput(error.to_string())),
         }
     };
+    // The input holds what the body did; an import's ZIP need not be kept twice.
+    drop(body);
     // Operations hash passwords and wait for the database, so they run off
     // the async workers.
     let outcome = tokio::task::spawn_blocking(move || {

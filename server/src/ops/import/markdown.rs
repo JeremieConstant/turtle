@@ -7,8 +7,12 @@ use crate::ops::OpError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Read;
 
-pub(super) fn read(content: &str) -> Result<Bundle, OpError> {
-    let bytes = crate::ops::attachments::decode_content(content)?;
+/// Reads a ZIP sent in base64. It is taken whole and let go of as soon as
+/// it is read, since an import holds it in memory, and each file's bytes are
+/// handed on rather than copied.
+pub(super) fn read(content: String) -> Result<Bundle, OpError> {
+    let bytes = crate::ops::attachments::decode_content(&content)?;
+    drop(content);
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|_| OpError::InvalidInput("Choose a ZIP file.".into()))?;
     let mut files = BTreeMap::new();
@@ -38,11 +42,23 @@ pub(super) fn read(content: &str) -> Result<Bundle, OpError> {
         }
         files.insert(path, content);
     }
+    drop(archive);
     let mut entries = entries_in("", &files);
     let mut attached = HashSet::new();
     collect_attached(&entries, &mut attached);
-    attach_linked(&mut entries, &files, &mut attached);
+    attach_linked(&mut entries, &mut attached);
+    hand_over_content(&mut entries, &mut files);
     Ok(Bundle { entries, problems })
+}
+
+/// Moves each Attachment's bytes out of the files, where each is found once.
+fn hand_over_content(entries: &mut [Incoming], files: &mut BTreeMap<String, Vec<u8>>) {
+    for entry in entries {
+        for attachment in &mut entry.attachments {
+            attachment.content = files.remove(&attachment.key).unwrap_or_default();
+        }
+        hand_over_content(&mut entry.children, files);
+    }
 }
 
 /// Whether a file is one the Finder adds when it makes a ZIP, which holds
@@ -60,7 +76,7 @@ fn collect_attached(entries: &[Incoming], attached: &mut HashSet<String>) {
 
 /// Makes each file a Page links to, which is not an Attachment already,
 /// an Attachment of the first Page in tree order that links to it.
-fn attach_linked(entries: &mut [Incoming], files: &BTreeMap<String, Vec<u8>>, attached: &mut HashSet<String>) {
+fn attach_linked(entries: &mut [Incoming], attached: &mut HashSet<String>) {
     for entry in entries {
         let mut linked: Vec<&String> = entry
             .links
@@ -77,11 +93,11 @@ fn attach_linked(entries: &mut [Incoming], files: &BTreeMap<String, Vec<u8>>, at
             .filter(|key| attached.insert((*key).clone()))
             .map(|key| {
                 let name = key.rsplit('/').next().unwrap_or(key).to_string();
-                IncomingAttachment { key: key.clone(), name, content: files[key].clone() }
+                IncomingAttachment { key: key.clone(), name, content: Vec::new() }
             })
             .collect();
         entry.attachments.extend(new);
-        attach_linked(&mut entry.children, files, attached);
+        attach_linked(&mut entry.children, attached);
     }
 }
 
@@ -250,13 +266,14 @@ fn holds_markdown(within: &str, files: &BTreeMap<String, Vec<u8>>) -> bool {
 /// The directory in a Page's directory that holds its Attachments.
 const ATTACHMENTS: &str = "_attachments";
 
-/// The files directly in the directory `within`, as Attachments.
+/// The files directly in the directory `within`, as Attachments whose
+/// content is handed over once all are known.
 fn attachments_in(within: &str, files: &BTreeMap<String, Vec<u8>>) -> Vec<IncomingAttachment> {
     files
-        .iter()
-        .filter_map(|(path, content)| {
+        .keys()
+        .filter_map(|path| {
             let name = path.strip_prefix(within).filter(|name| !name.contains('/'))?;
-            Some(IncomingAttachment { key: path.clone(), name: name.to_string(), content: content.clone() })
+            Some(IncomingAttachment { key: path.clone(), name: name.to_string(), content: Vec::new() })
         })
         .collect()
 }

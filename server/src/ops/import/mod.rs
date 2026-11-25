@@ -26,6 +26,19 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     );
 }
 
+/// The largest ZIP that can be imported at once, unless whoever runs Turtle
+/// sets another. An import is held in memory several times over while it is
+/// read, so this is far below what a whole Confluence space may need.
+pub const DEFAULT_IMPORT_LIMIT: u64 = 200 * 1024 * 1024;
+
+/// Why a ZIP larger than the import limit is refused.
+pub fn too_large(core: &Core) -> OpError {
+    OpError::InvalidInput(format!(
+        "This ZIP is larger than {}, the most this Turtle imports at once. Import it in parts, or ask whoever runs Turtle to raise the limit.",
+        super::attachments::size_in_words(core.import_limit())
+    ))
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ToImport {
     pub area_id: String,
@@ -64,7 +77,7 @@ impl Problem {
 pub fn import(core: &Core, principal: &Principal, input: ToImport) -> OpResult<Imported> {
     // Access is checked before the ZIP is read, so a refused import reads nothing.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
-    let bundle = markdown::read(&input.content)?;
+    let bundle = markdown::read(input.content)?;
     write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle)
 }
 
