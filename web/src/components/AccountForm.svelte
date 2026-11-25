@@ -8,6 +8,8 @@
     intro,
     submitLabel,
     onsubmit,
+    quietSubmit = false,
+    lead,
     children,
   }: {
     heading: string
@@ -15,6 +17,10 @@
     submitLabel: string
     /** Runs the operation. A thrown OperationError is shown to the person. */
     onsubmit: () => Promise<void>
+    /** Gives the submit button the quiet look, when something above the form is the main way in. */
+    quietSubmit?: boolean
+    /** Shown between the heading and the form. */
+    lead?: Snippet
     children: Snippet
   } = $props()
 
@@ -42,12 +48,13 @@
       <h1>{heading}</h1>
       <p class="muted">{intro}</p>
     </div>
+    {@render lead?.()}
     <form class="stack" onsubmit={submit}>
       {@render children()}
       {#if error}
         <p class="error" role="alert">{error}</p>
       {/if}
-      <button type="submit" class="btn primary" disabled={busy}>{submitLabel}</button>
+      <button type="submit" class="btn" class:primary={!quietSubmit} disabled={busy}>{submitLabel}</button>
     </form>
   </div>
 </main>
