@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "invite_member",
-        "Invites a person by email address with a single-use link that expires: Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin.",
+        "Invites a person by email address with a single-use link that expires: Turtle mails it to them when it sends mail, and otherwise, or when that mail cannot be sent, returns it to pass on. Only for a Workspace Admin.",
         invite_member,
     );
     catalogue
@@ -44,7 +44,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     );
     catalogue.add(
         "create_password_reset",
-        "Creates a single-use link that lets a Member set a new password; it expires. Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin.",
+        "Creates a single-use link that lets a Member set a new password; it expires. Turtle mails it to them when it sends mail, and otherwise, or when that mail cannot be sent, returns it to pass on. Only for a Workspace Admin.",
         create_password_reset,
     );
     catalogue
@@ -92,7 +92,8 @@ pub struct Invite {
 }
 
 /// A single-use link: mailed to the person it is for when Turtle sends mail,
-/// and otherwise returned for a Workspace Admin to pass on.
+/// and otherwise, or when that mail cannot be sent, returned for a Workspace
+/// Admin to pass on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SingleUseLink {
     /// The address of the link, starting with a slash; it goes after the
@@ -102,6 +103,9 @@ pub struct SingleUseLink {
     /// The email address the link was mailed to; absent when it is to be
     /// passed on.
     pub mailed_to: Option<String>,
+    /// The email address Turtle tried to mail the link to but could not;
+    /// the link is then to be passed on.
+    pub mail_failed_to: Option<String>,
     /// When the link stops working, in seconds since the Unix epoch.
     pub expires_at: i64,
 }
@@ -368,9 +372,16 @@ pub fn request_password_reset(core: &Core, _: &Principal, input: ResetRequest) -
     )?;
     let link = full_address(core, &format!("/{RESET_PATH}/{secret}"))?;
     let mail = (stored == 1).then(|| reset_mail(&email, &link));
+    let db = core.shared_db();
+    let id = digest(&secret);
     std::thread::spawn(move || {
         if let Err(error) = mail.map_or(Ok(()), |mail| mailer.send(&mail)) {
             eprintln!("mailing a password reset link failed: {error:#}");
+            // Nobody holds the link, and while it is stored it keeps the
+            // Member from asking for another.
+            if let Err(error) = db.lock().unwrap().execute("DELETE FROM single_use_links WHERE id = ?1", [&id]) {
+                eprintln!("removing a password reset link that could not be mailed failed: {error:#}");
+            }
         }
     });
     Ok(().into())
@@ -458,31 +469,36 @@ fn full_address(core: &Core, address: &str) -> Result<String, OpError> {
 }
 
 /// Mails a link to the person it is for when Turtle sends mail, or else
-/// returns it to pass on. A link whose mail could not be sent is removed, as
-/// nobody holds it.
+/// returns it to pass on. When its mail cannot be sent, the link is returned
+/// too, so the Workspace Admin can still get it to them.
 fn deliver(core: &Core, issued: IssuedLink, mail: impl FnOnce(&str) -> Mail) -> Result<SingleUseLink, OpError> {
-    let Some(mailer) = core.mailer() else {
-        return Ok(SingleUseLink {
-            address: Some(issued.address),
-            mailed_to: None,
-            expires_at: issued.expires_at,
-        });
+    let to_pass_on = |mail_failed_to| SingleUseLink {
+        address: Some(issued.address.clone()),
+        mailed_to: None,
+        mail_failed_to,
+        expires_at: issued.expires_at,
     };
-    let sent = full_address(core, &issued.address).and_then(|link| {
-        let mail = mail(&link);
-        mailer.send(&mail)?;
-        Ok(mail.to)
-    });
-    let to = match sent {
-        Ok(to) => to,
+    let Some(mailer) = core.mailer() else {
+        return Ok(to_pass_on(None));
+    };
+    let link = match full_address(core, &issued.address) {
+        Ok(link) => link,
         Err(error) => {
+            // Nobody will hold the link, and a stored reset link keeps the
+            // Member from asking for another.
             core.db().execute("DELETE FROM single_use_links WHERE id = ?1", [&issued.id])?;
             return Err(error);
         }
     };
+    let mail = mail(&link);
+    if let Err(error) = mailer.send(&mail) {
+        eprintln!("mailing a link failed: {error:#}");
+        return Ok(to_pass_on(Some(mail.to)));
+    }
     Ok(SingleUseLink {
         address: None,
-        mailed_to: Some(to),
+        mailed_to: Some(mail.to),
+        mail_failed_to: None,
         expires_at: issued.expires_at,
     })
 }
@@ -568,6 +584,7 @@ mod tests {
         SingleUseLink {
             address: Some(link.trim_start_matches("https://turtle.example.org").to_string()),
             mailed_to: None,
+            mail_failed_to: None,
             expires_at: 0,
         }
     }
@@ -626,7 +643,7 @@ mod tests {
         let expired = accept_invitation(&core, &Principal::Anonymous, None, joining(&late, "Linus")).unwrap_err();
         assert_eq!(expired.kind(), "not_permitted");
 
-        let made_up = SingleUseLink { address: Some("/join/0123".into()), mailed_to: None, expires_at: 0 };
+        let made_up = SingleUseLink { address: Some("/join/0123".into()), mailed_to: None, mail_failed_to: None, expires_at: 0 };
         let unknown = accept_invitation(&core, &Principal::Anonymous, None, joining(&made_up, "Eve")).unwrap_err();
         assert_eq!(unknown.kind(), "not_permitted");
     }
@@ -839,7 +856,7 @@ mod tests {
     }
 
     fn made_up(path: &str, number: usize) -> SingleUseLink {
-        SingleUseLink { address: Some(format!("/{path}/{number:064x}")), mailed_to: None, expires_at: 0 }
+        SingleUseLink { address: Some(format!("/{path}/{number:064x}")), mailed_to: None, mail_failed_to: None, expires_at: 0 }
     }
 
     #[test]
@@ -998,16 +1015,34 @@ mod tests {
     }
 
     #[test]
-    fn a_link_whose_mail_could_not_be_sent_does_not_work() {
+    fn when_an_invitation_cannot_be_mailed_the_workspace_admin_gets_the_link_to_pass_on() {
         let (core, mailer) = fresh_with_mail(FakeMailer::broken());
         let admin = member(&core, "Ada", true);
 
-        let failed = invite_member(&core, &admin, Invite { email: "grace@example.org".into() }).unwrap_err();
-        assert_eq!(failed.kind(), "internal");
-        // Were the mail delivered after all, its link would not work.
-        let attempted = mailer.sent();
-        let refused = accept_invitation(&core, &Principal::Anonymous, None, joining(&link_in(&attempted[0]), "Grace")).unwrap_err();
-        assert_eq!(refused.kind(), "not_permitted");
+        let invited = invite_member(&core, &admin, Invite { email: "grace@example.org".into() })
+            .unwrap()
+            .output;
+        assert_eq!(invited.mailed_to, None);
+        assert_eq!(invited.mail_failed_to.as_deref(), Some("grace@example.org"));
+        assert!(invited.address.as_deref().unwrap().starts_with("/join/"), "{invited:?}");
+        assert_eq!(mailer.sent().len(), 1, "the mail was attempted");
+
+        let joined = accept_invitation(&core, &Principal::Anonymous, None, joining(&invited, "Grace")).unwrap();
+        assert_eq!(joined.output.email, "grace@example.org");
+    }
+
+    #[test]
+    fn when_a_password_reset_cannot_be_mailed_the_workspace_admin_gets_the_link_to_pass_on() {
+        let (core, _) = fresh_with_mail(FakeMailer::broken());
+        let admin = member(&core, "Ada", true);
+        member(&core, "Ken", false);
+
+        let reset = create_password_reset(&core, &admin, MemberId { id: "member-ken".into() }).unwrap().output;
+        assert_eq!(reset.mailed_to, None);
+        assert_eq!(reset.mail_failed_to.as_deref(), Some("member-ken@example.org"));
+
+        let done = reset_password(&core, &Principal::Anonymous, None, new_password(&reset)).unwrap();
+        assert_eq!(done.output.id, "member-ken");
     }
 
     fn asks_for_reset(core: &Core, email: &str) -> Result<Reply<()>, OpError> {
@@ -1059,6 +1094,28 @@ mod tests {
         asks_for_reset(&core, "member-ken@example.org").unwrap();
 
         assert_eq!(mailer.wait_for(2).len(), 2);
+    }
+
+    #[test]
+    fn after_a_reset_mail_could_not_be_sent_asking_again_sends_one_at_once() {
+        let (core, mailer) = fresh_with_mail(FakeMailer::broken());
+        member(&core, "Ken", false);
+
+        asks_for_reset(&core, "member-ken@example.org").unwrap();
+        mailer.wait_for(1);
+        mailer.repair();
+        // The failed mail is noticed in the background, so the Member may
+        // ask a few times before it is; the clock does not move meanwhile.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while mailer.sent().len() < 2 && std::time::Instant::now() < deadline {
+            asks_for_reset(&core, "member-ken@example.org").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let sent = mailer.wait_for(2);
+        assert_eq!(sent.len(), 2, "exactly one mail after the failed one");
+        let done = reset_password(&core, &Principal::Anonymous, None, new_password(&link_in(&sent[1]))).unwrap();
+        assert_eq!(done.output.id, "member-ken");
     }
 
     #[test]
