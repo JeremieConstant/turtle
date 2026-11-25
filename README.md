@@ -54,6 +54,8 @@ Turtle is configured with environment variables:
 | `TURTLE_PORT` | `4100` | The port Turtle listens on. |
 | `TURTLE_MAX_ATTACHMENT_MB` | `25` | The largest file, in MB, that can be attached to a Page. |
 | `TURTLE_PUBLIC_URL` | unset | The address people and AI clients reach Turtle at, such as `https://turtle.example.org`, at the root of its host. When set, Claude and other MCP clients can connect with OAuth: a Member pastes `<address>/mcp` into the client and clicks **Allow**. Without it, only Tokens created by hand work at the MCP endpoint. |
+| `TURTLE_SMTP_URL` | unset | The SMTP server Turtle sends mail through, such as `smtps://user:password@smtp.example.org` or `smtp://user:password@smtp.example.org:587?tls=required`. When set, invitations and password reset links are mailed, and a Member who forgot their password can ask for a link on the sign-in screen. Needs `TURTLE_MAIL_FROM` and `TURTLE_PUBLIC_URL`. Without it, a Workspace Admin gets each link to pass on by hand. |
+| `TURTLE_MAIL_FROM` | unset | The address Turtle's mail comes from, such as `Turtle <turtle@example.org>`. |
 | `TURTLE_LOG_SAVES` | unset | When set, Turtle prints a line for each save of changed Pages and how long it took, to see whether saving keeps up. |
 
 For example:

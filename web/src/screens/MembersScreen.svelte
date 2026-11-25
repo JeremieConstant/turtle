@@ -93,7 +93,7 @@
     return attempt(async () => show(`Password reset for ${member.name}`, await call('create_password_reset', { id: member.id })))
   }
 
-  const address = $derived(shown ? location.origin + shown.link.address : '')
+  const address = $derived(shown?.link.address ? location.origin + shown.link.address : '')
   const expires = $derived(shown ? new Date(shown.link.expires_at * 1000).toLocaleString() : '')
 
   async function copy() {
@@ -109,7 +109,11 @@
   {:else if members !== null}
     <form class="section stack" onsubmit={invite}>
       <h2 class="section-title">Invite a person</h2>
-      <p class="muted">You get a link to pass on. It works once and expires after seven days.</p>
+      <p class="muted">
+        {session.sendsMail
+          ? 'Turtle mails them a link. It works once and expires after seven days.'
+          : 'You get a link to pass on. It works once and expires after seven days.'}
+      </p>
       <div class="controls">
         <input class="input grow" type="email" aria-label="Email address" placeholder="Email address" required autocomplete="off" bind:value={email} />
         <button type="submit" class="btn primary" disabled={busy}>Invite</button>
@@ -119,10 +123,14 @@
     {#if shown}
       <section class="section notice" aria-live="polite">
         <strong>{shown.purpose}</strong>
-        <div class="controls">
-          <input class="input grow" readonly aria-label="Link to pass on" value={address} onfocus={event => event.currentTarget.select()} />
-          <button type="button" class="btn" onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>
-        </div>
+        {#if shown.link.mailed_to}
+          <p>Turtle has mailed the link to {shown.link.mailed_to}.</p>
+        {:else}
+          <div class="controls">
+            <input class="input grow" readonly aria-label="Link to pass on" value={address} onfocus={event => event.currentTarget.select()} />
+            <button type="button" class="btn" onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+          </div>
+        {/if}
         <small class="hint">Works once, until {expires}.</small>
       </section>
     {/if}

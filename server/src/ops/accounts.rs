@@ -54,6 +54,10 @@ pub struct Member {
 pub struct Session {
     /// True until the first account has been created.
     pub setup_required: bool,
+    /// Whether Turtle sends mail: invitations and password reset links are
+    /// then mailed, and a Member who forgot their password can ask for a
+    /// reset link when signing in.
+    pub sends_mail: bool,
     /// The signed-in Member, if anyone is signed in.
     pub member: Option<Member>,
     /// The standalone Agent calling through one of its Tokens, if it is one.
@@ -108,6 +112,7 @@ pub fn get_session(core: &Core, principal: &Principal, _: Nothing) -> OpResult<S
     };
     Ok(Session {
         setup_required: !any_member_exists(&db)?,
+        sends_mail: core.mailer().is_some(),
         member,
         agent,
     }
@@ -357,6 +362,7 @@ mod tests {
             before.output,
             Session {
                 setup_required: true,
+                sends_mail: false,
                 member: None,
                 agent: None,
             }
@@ -373,6 +379,7 @@ mod tests {
             after.output,
             Session {
                 setup_required: false,
+                sends_mail: false,
                 member: Some(created.output),
                 agent: None,
             }
@@ -502,5 +509,14 @@ mod tests {
             password: "correct horse battery".into(),
         };
         assert!(sign_in(&core, &Principal::Anonymous, credentials).is_ok());
+    }
+
+    #[test]
+    fn the_session_says_whether_turtle_sends_mail() {
+        let without = fresh();
+        let (with, _) = crate::ops::testing::fresh_with_mail(crate::mail::fake::FakeMailer::default());
+
+        assert!(!get_session(&without, &Principal::Anonymous, Nothing {}).unwrap().output.sends_mail);
+        assert!(get_session(&with, &Principal::Anonymous, Nothing {}).unwrap().output.sends_mail);
     }
 }

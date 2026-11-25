@@ -75,6 +75,9 @@ pub struct Core {
     /// was found out. The public URL does not change while Turtle runs, so
     /// its host is looked up once.
     intranet_only: OnceLock<bool>,
+    /// Sends invitations and password reset links, when SMTP is set up.
+    /// Mailed links point at the public URL, so it is set too.
+    mailer: Option<Arc<dyn crate::mail::Mailer>>,
 }
 
 impl Core {
@@ -105,6 +108,7 @@ impl Core {
             public_url: None,
             resolve: intranet::system_resolver(),
             intranet_only: OnceLock::new(),
+            mailer: None,
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -128,6 +132,16 @@ impl Core {
     /// The address Turtle is reached at from outside, if it is known.
     pub fn public_url(&self) -> Option<&PublicUrl> {
         self.public_url.as_ref()
+    }
+
+    /// Sets what sends mail. Without one, links are passed on by hand.
+    pub fn set_mailer(&mut self, mailer: Option<Arc<dyn crate::mail::Mailer>>) {
+        self.mailer = mailer;
+    }
+
+    /// What sends mail, if Turtle sends any.
+    pub fn mailer(&self) -> Option<&Arc<dyn crate::mail::Mailer>> {
+        self.mailer.as_ref()
     }
 
     /// Sets how host names are looked up, so tests need no network.
@@ -706,6 +720,15 @@ pub(crate) mod testing {
         out
     }
 
+    /// A fresh core that mails through a fake mailer, at a public URL.
+    pub fn fresh_with_mail(mailer: crate::mail::fake::FakeMailer) -> (TestCore, Arc<crate::mail::fake::FakeMailer>) {
+        let mut core = fresh();
+        let mailer = Arc::new(mailer);
+        core.core.set_public_url(Some(crate::public_url::PublicUrl::parse("https://turtle.example.org").unwrap()));
+        core.core.set_mailer(Some(mailer.clone()));
+        (core, mailer)
+    }
+
     pub fn fresh() -> TestCore {
         let dir = tempfile::tempdir().unwrap();
         let time = Arc::new(AtomicI64::new(1_700_000_000));
@@ -746,7 +769,7 @@ mod tests {
         let reply = catalogue()
             .call(&core, &Principal::Anonymous, "get_session", json!({}))
             .unwrap();
-        assert_eq!(reply.output, json!({"setup_required": true, "member": null}));
+        assert_eq!(reply.output, json!({"setup_required": true, "sends_mail": false, "member": null}));
     }
 
     #[test]

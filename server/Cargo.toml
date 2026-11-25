@@ -11,6 +11,10 @@ base64 = "0.22.1"
 axum = { version = "0.8.9", features = ["ws"] }
 futures-util = "0.3.34"
 getrandom = "0.4.3"
+# Invitations and password reset links are mailed over SMTP when it is set
+# up. Blocking, since operations run off the async workers; rustls, so no
+# system TLS library is needed.
+lettre = { version = "0.11.24", default-features = false, features = ["smtp-transport", "builder", "hostname", "rustls-tls"] }
 # Profile pictures are decoded, cropped and scaled down. The formats a Page
 # shows as images, nothing more.
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }

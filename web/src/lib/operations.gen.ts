@@ -503,16 +503,24 @@ export type Session = {
   agent?: CallingAgent | null
   /** The signed-in Member, if anyone is signed in. */
   member?: Member | null
+  /** Whether Turtle sends mail: invitations and password reset links are
+then mailed, and a Member who forgot their password can ask for a
+reset link when signing in. */
+  sends_mail: boolean
   /** True until the first account has been created. */
   setup_required: boolean
 }
 
 export type SingleUseLink = {
   /** The address of the link, starting with a slash; it goes after the
-address Turtle is reached at. */
-  address: string
+address Turtle is reached at. Absent when the link was mailed, so
+only the person it is for holds it. */
+  address?: string | null
   /** When the link stops working, in seconds since the Unix epoch. */
   expires_at: number
+  /** The email address the link was mailed to; absent when it is to be
+passed on. */
+  mailed_to?: string | null
 }
 
 export type TagsInUse = {
@@ -726,7 +734,7 @@ export type Operations = {
     }
     output: AttachmentContent
   }
-  /** Invites a person by email address and returns a single-use link for them that expires. Only for a Workspace Admin. */
+  /** Invites a person by email address with a single-use link that expires: Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin. */
   invite_member: {
     input: {
       email: string
@@ -765,12 +773,20 @@ export type Operations = {
     }
     output: MemberEntry
   }
-  /** Creates a single-use link that lets a Member set a new password; it expires. Only for a Workspace Admin. */
+  /** Creates a single-use link that lets a Member set a new password; it expires. Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin. */
   create_password_reset: {
     input: {
       id: string
     }
     output: SingleUseLink
+  }
+  /** Mails a password reset link to the Member with this email address, if there is one. The answer is the same either way. Only when Turtle sends mail. */
+  request_password_reset: {
+    input: {
+      /** The email address of the account. */
+      email: string
+    }
+    output: null
   }
   /** Sets a new password through a reset link, ends the Member's other sessions and signs them in. */
   reset_password: {

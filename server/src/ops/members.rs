@@ -1,11 +1,13 @@
 //! Members of the Workspace: inviting them, managing them, and resetting
-//! their passwords through links a Workspace Admin passes on.
+//! their passwords through single-use links. Turtle mails the links when it
+//! sends mail; otherwise a Workspace Admin passes them on.
 
 use super::accounts::{
     check_password, digest, hash_password, random_hex, read_member, start_session, valid_email, valid_name,
     Member, Nothing,
 };
 use super::{profiles, Catalogue, Core, OpError, OpResult, Principal, Reply, SessionChange};
+use crate::mail::Mail;
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,7 +15,7 @@ use serde::{Deserialize, Serialize};
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "invite_member",
-        "Invites a person by email address and returns a single-use link for them that expires. Only for a Workspace Admin.",
+        "Invites a person by email address with a single-use link that expires: Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin.",
         invite_member,
     );
     catalogue
@@ -42,9 +44,16 @@ pub(super) fn register(catalogue: &mut Catalogue) {
     );
     catalogue.add(
         "create_password_reset",
-        "Creates a single-use link that lets a Member set a new password; it expires. Only for a Workspace Admin.",
+        "Creates a single-use link that lets a Member set a new password; it expires. Turtle mails it to them when it sends mail, and otherwise returns it to pass on. Only for a Workspace Admin.",
         create_password_reset,
     );
+    catalogue
+        .add(
+            "request_password_reset",
+            "Mails a password reset link to the Member with this email address, if there is one. The answer is the same either way. Only when Turtle sends mail.",
+            request_password_reset,
+        )
+        .browser_only = true;
     catalogue
         .add(
             "reset_password",
@@ -67,17 +76,32 @@ pub struct NewPassword {
     pub password: String,
 }
 
+/// How long after a reset link was mailed another is not, so asking again
+/// and again does not flood a Member's mailbox.
+pub const RESET_REQUEST_INTERVAL: i64 = 5 * 60;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ResetRequest {
+    /// The email address of the account.
+    pub email: String,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Invite {
     pub email: String,
 }
 
-/// A single-use link a Workspace Admin passes on.
+/// A single-use link: mailed to the person it is for when Turtle sends mail,
+/// and otherwise returned for a Workspace Admin to pass on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SingleUseLink {
     /// The address of the link, starting with a slash; it goes after the
-    /// address Turtle is reached at.
-    pub address: String,
+    /// address Turtle is reached at. Absent when the link was mailed, so
+    /// only the person it is for holds it.
+    pub address: Option<String>,
+    /// The email address the link was mailed to; absent when it is to be
+    /// passed on.
+    pub mailed_to: Option<String>,
     /// When the link stops working, in seconds since the Unix epoch.
     pub expires_at: i64,
 }
@@ -191,6 +215,9 @@ pub fn set_workspace_admin(
 pub fn invite_member(core: &Core, principal: &Principal, input: Invite) -> OpResult<SingleUseLink> {
     require_workspace_admin(principal)?;
     let email = valid_email(&input.email)?;
+    let Principal::Member { id: inviter, .. } = principal else {
+        unreachable!("only a Member is Workspace Admin")
+    };
     let db = core.db();
     let taken: bool = db.query_row(
         "SELECT EXISTS (SELECT 1 FROM members WHERE email = ?1)",
@@ -202,7 +229,19 @@ pub fn invite_member(core: &Core, principal: &Principal, input: Invite) -> OpRes
             "There already is a Member with this email address.".into(),
         ));
     }
-    Ok(issue_link(core, &db, LinkFor::Invitation(&email))?.into())
+    let issued = issue_link(core, &db, LinkFor::Invitation(&email))?;
+    let inviter: String = db.query_row("SELECT name FROM members WHERE id = ?1", [inviter], |row| row.get(0))?;
+    drop(db);
+    let mail = |link: &str| Mail {
+        to: email.clone(),
+        subject: format!("{inviter} invites you to Turtle"),
+        body: format!(
+            "{inviter} invites you to join their Workspace on Turtle.\n\n\
+             Choose your name and password here:\n{link}\n\n\
+             The link works once, within seven days.\n"
+        ),
+    };
+    Ok(deliver(core, issued, mail)?.into())
 }
 
 pub fn accept_invitation(core: &Core, _: &Principal, input: Joining) -> OpResult<Member> {
@@ -300,7 +339,54 @@ pub fn create_password_reset(core: &Core, principal: &Principal, input: MemberId
             "A deactivated Member cannot sign in, so their password cannot be reset.".into(),
         ));
     }
-    Ok(issue_link(core, &db, LinkFor::PasswordReset(&target.id))?.into())
+    let issued = issue_link(core, &db, LinkFor::PasswordReset(&target.id))?;
+    drop(db);
+    Ok(deliver(core, issued, |link| reset_mail(&target.email, link))?.into())
+}
+
+pub fn request_password_reset(core: &Core, _: &Principal, input: ResetRequest) -> OpResult<()> {
+    let Some(mailer) = core.mailer().cloned() else {
+        return Err(OpError::NotPermitted(
+            "Turtle does not send mail here. Ask a Workspace Admin for a password reset link.".into(),
+        ));
+    };
+    let email = valid_email(&input.email)?;
+    // Nothing in the answer, nor in how long it takes, tells the caller
+    // whether the address has an account: every address takes the same
+    // statement, which stores a link only for an active Member not mailed
+    // one lately, and the mail goes out in the background.
+    let secret = random_hex(32)?;
+    let now = core.now();
+    let stored = core.db().execute(
+        "INSERT INTO single_use_links (id, kind, email, member_id, created_at, expires_at)
+         SELECT ?1, 'password_reset', NULL, members.id, ?3, ?4 FROM members
+         WHERE members.email = ?2 AND members.deactivated_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM single_use_links
+                           WHERE kind = 'password_reset' AND member_id = members.id AND created_at > ?5)",
+        rusqlite::params![digest(&secret), email, now, now + PASSWORD_RESET_LIFETIME, now - RESET_REQUEST_INTERVAL],
+    )?;
+    let link = full_address(core, &format!("/{RESET_PATH}/{secret}"))?;
+    let mail = (stored == 1).then(|| reset_mail(&email, &link));
+    std::thread::spawn(move || {
+        if let Err(error) = mail.map_or(Ok(()), |mail| mailer.send(&mail)) {
+            eprintln!("mailing a password reset link failed: {error:#}");
+        }
+    });
+    Ok(().into())
+}
+
+/// The mail that brings a Member a password reset link.
+fn reset_mail(to: &str, link: &str) -> Mail {
+    Mail {
+        to: to.to_string(),
+        subject: "Set a new password for Turtle".into(),
+        body: format!(
+            "A new password was requested for your account on Turtle.\n\n\
+             Choose it here:\n{link}\n\n\
+             The link works once, within 24 hours. If you did not ask for it, \
+             ignore this mail: your password stays as it is.\n"
+        ),
+    }
 }
 
 pub fn reset_password(core: &Core, _: &Principal, input: NewPassword) -> OpResult<Member> {
@@ -349,23 +435,75 @@ enum LinkFor<'a> {
     PasswordReset(&'a str),
 }
 
-/// Stores a new single-use link and returns it. Only a digest of its secret
-/// is kept, so reading the database does not let anyone use it.
-fn issue_link(core: &Core, db: &Connection, about: LinkFor) -> Result<SingleUseLink, OpError> {
+/// A single-use link just stored, before it is mailed or returned.
+struct IssuedLink {
+    /// Its address after the public URL, starting with a slash.
+    address: String,
+    /// What the database keeps in place of its secret.
+    id: String,
+    expires_at: i64,
+}
+
+/// Where a password reset link leads, after the public URL.
+const RESET_PATH: &str = "reset-password";
+
+/// The whole address of a link, for a mail.
+fn full_address(core: &Core, address: &str) -> Result<String, OpError> {
+    let public_url = core
+        .public_url()
+        .ok_or_else(|| anyhow::anyhow!("Turtle sends mail but has no public URL to link to"))?;
+    Ok(format!("{public_url}{address}"))
+}
+
+/// Mails a link to the person it is for when Turtle sends mail, or else
+/// returns it to pass on. A link whose mail could not be sent is removed, as
+/// nobody holds it.
+fn deliver(core: &Core, issued: IssuedLink, mail: impl FnOnce(&str) -> Mail) -> Result<SingleUseLink, OpError> {
+    let Some(mailer) = core.mailer() else {
+        return Ok(SingleUseLink {
+            address: Some(issued.address),
+            mailed_to: None,
+            expires_at: issued.expires_at,
+        });
+    };
+    let sent = full_address(core, &issued.address).and_then(|link| {
+        let mail = mail(&link);
+        mailer.send(&mail)?;
+        Ok(mail.to)
+    });
+    let to = match sent {
+        Ok(to) => to,
+        Err(error) => {
+            core.db().execute("DELETE FROM single_use_links WHERE id = ?1", [&issued.id])?;
+            return Err(error);
+        }
+    };
+    Ok(SingleUseLink {
+        address: None,
+        mailed_to: Some(to),
+        expires_at: issued.expires_at,
+    })
+}
+
+/// Stores a new single-use link. Only a digest of its secret is kept, so
+/// reading the database does not let anyone use it.
+fn issue_link(core: &Core, db: &Connection, about: LinkFor) -> Result<IssuedLink, OpError> {
     let secret = random_hex(32)?;
     let now = core.now();
     let (kind, email, member_id, lifetime, path) = match about {
         LinkFor::Invitation(email) => ("invitation", Some(email), None, INVITATION_LIFETIME, "join"),
-        LinkFor::PasswordReset(id) => ("password_reset", None, Some(id), PASSWORD_RESET_LIFETIME, "reset-password"),
+        LinkFor::PasswordReset(id) => ("password_reset", None, Some(id), PASSWORD_RESET_LIFETIME, RESET_PATH),
     };
     let expires_at = now + lifetime;
+    let id = digest(&secret);
     db.execute(
         "INSERT INTO single_use_links (id, kind, email, member_id, created_at, expires_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![digest(&secret), kind, email, member_id, now, expires_at],
+        rusqlite::params![id, kind, email, member_id, now, expires_at],
     )?;
-    Ok(SingleUseLink {
+    Ok(IssuedLink {
         address: format!("/{path}/{secret}"),
+        id,
         expires_at,
     })
 }
@@ -386,12 +524,29 @@ mod tests {
     use super::*;
     use crate::ops::accounts::{get_session, principal_for_session, sign_in, Credentials};
     use crate::ops::profiles::{set_profile_picture, NewProfilePicture};
-    use crate::ops::testing::{fresh, member};
+    use crate::mail::fake::FakeMailer;
+    use crate::mail::Mail;
+    use crate::ops::testing::{fresh, fresh_with_mail, member};
     use crate::ops::{Reply, SessionChange};
 
     /// The secret at the end of a link's address.
     fn secret_of(link: &SingleUseLink) -> String {
-        link.address.rsplit('/').next().unwrap().to_string()
+        let address = link.address.as_deref().expect("the link was returned, not mailed");
+        address.rsplit('/').next().unwrap().to_string()
+    }
+
+    /// The link a mail holds, as a link a Workspace Admin would get.
+    fn link_in(mail: &Mail) -> SingleUseLink {
+        let link = mail
+            .body
+            .split_whitespace()
+            .find(|word| word.starts_with("https://turtle.example.org/"))
+            .expect("the mail holds a link to Turtle");
+        SingleUseLink {
+            address: Some(link.trim_start_matches("https://turtle.example.org").to_string()),
+            mailed_to: None,
+            expires_at: 0,
+        }
     }
 
     fn signed_in<T>(core: &Core, reply: &Reply<T>) -> Principal {
@@ -417,7 +572,9 @@ mod tests {
         let link = invite_member(&core, &admin, Invite { email: "Grace@Example.org".into() })
             .unwrap()
             .output;
-        assert!(link.address.starts_with("/join/"), "{}", link.address);
+        assert!(secret_of(&link).len() > 16);
+        assert!(link.address.as_deref().unwrap().starts_with("/join/"), "{link:?}");
+        assert_eq!(link.mailed_to, None);
 
         let joined = accept_invitation(&core, &Principal::Anonymous, joining(&link, "Grace Hopper")).unwrap();
         assert_eq!(joined.output.name, "Grace Hopper");
@@ -446,7 +603,7 @@ mod tests {
         let expired = accept_invitation(&core, &Principal::Anonymous, joining(&late, "Linus")).unwrap_err();
         assert_eq!(expired.kind(), "not_permitted");
 
-        let made_up = SingleUseLink { address: "/join/0123".into(), expires_at: 0 };
+        let made_up = SingleUseLink { address: Some("/join/0123".into()), mailed_to: None, expires_at: 0 };
         let unknown = accept_invitation(&core, &Principal::Anonymous, joining(&made_up, "Eve")).unwrap_err();
         assert_eq!(unknown.kind(), "not_permitted");
     }
@@ -617,7 +774,7 @@ mod tests {
         let link = create_password_reset(&core, &admin, MemberId { id: joined.output.id.clone() })
             .unwrap()
             .output;
-        assert!(link.address.starts_with("/reset-password/"), "{}", link.address);
+        assert!(link.address.as_deref().unwrap().starts_with("/reset-password/"), "{link:?}");
         let reset = reset_password(&core, &Principal::Anonymous, new_password(&link)).unwrap();
 
         assert_eq!(reset.output, joined.output);
@@ -710,6 +867,118 @@ mod tests {
 
         reset_password(&core, &Principal::Anonymous, new_password(&second)).unwrap();
         let refused = reset_password(&core, &Principal::Anonymous, new_password(&first)).unwrap_err();
+        assert_eq!(refused.kind(), "not_permitted");
+    }
+
+    #[test]
+    fn with_mail_an_invitation_is_mailed_to_the_invited_address_and_not_returned() {
+        let (core, mailer) = fresh_with_mail(FakeMailer::default());
+        let admin = member(&core, "Ada", true);
+
+        let invited = invite_member(&core, &admin, Invite { email: "Grace@Example.org".into() })
+            .unwrap()
+            .output;
+        assert_eq!(invited.address, None);
+        assert_eq!(invited.mailed_to.as_deref(), Some("grace@example.org"));
+
+        let sent = mailer.sent();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].to, "grace@example.org");
+        assert!(sent[0].body.contains("Ada"), "the mail says who invites: {}", sent[0].body);
+        let link = link_in(&sent[0]);
+        assert!(link.address.as_deref().unwrap().starts_with("/join/"), "{link:?}");
+        let joined = accept_invitation(&core, &Principal::Anonymous, joining(&link, "Grace")).unwrap();
+        assert_eq!(joined.output.email, "grace@example.org");
+    }
+
+    #[test]
+    fn with_mail_a_password_reset_a_workspace_admin_creates_is_mailed_to_the_member() {
+        let (core, mailer) = fresh_with_mail(FakeMailer::default());
+        let admin = member(&core, "Ada", true);
+        let ken = member(&core, "Ken", false);
+        let Principal::Member { id, .. } = &ken else { unreachable!() };
+
+        let reset = create_password_reset(&core, &admin, MemberId { id: id.clone() }).unwrap().output;
+        assert_eq!(reset.address, None);
+        assert_eq!(reset.mailed_to.as_deref(), Some("member-ken@example.org"));
+
+        let sent = mailer.sent();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].to, "member-ken@example.org");
+        let done = reset_password(&core, &Principal::Anonymous, new_password(&link_in(&sent[0]))).unwrap();
+        assert_eq!(done.output.id, *id);
+    }
+
+    #[test]
+    fn a_link_whose_mail_could_not_be_sent_does_not_work() {
+        let (core, mailer) = fresh_with_mail(FakeMailer::broken());
+        let admin = member(&core, "Ada", true);
+
+        let failed = invite_member(&core, &admin, Invite { email: "grace@example.org".into() }).unwrap_err();
+        assert_eq!(failed.kind(), "internal");
+        // Were the mail delivered after all, its link would not work.
+        let attempted = mailer.sent();
+        let refused = accept_invitation(&core, &Principal::Anonymous, joining(&link_in(&attempted[0]), "Grace")).unwrap_err();
+        assert_eq!(refused.kind(), "not_permitted");
+    }
+
+    fn asks_for_reset(core: &Core, email: &str) -> Result<Reply<()>, OpError> {
+        request_password_reset(core, &Principal::Anonymous, ResetRequest { email: email.into() })
+    }
+
+    #[test]
+    fn with_mail_a_member_asks_for_a_reset_link_and_receives_it_by_mail() {
+        let (core, mailer) = fresh_with_mail(FakeMailer::default());
+        member(&core, "Ken", false);
+
+        asks_for_reset(&core, " Member-Ken@Example.org ").unwrap();
+
+        let sent = mailer.wait_for(1);
+        assert_eq!(sent[0].to, "member-ken@example.org");
+        let done = reset_password(&core, &Principal::Anonymous, new_password(&link_in(&sent[0]))).unwrap();
+        assert_eq!(done.output.id, "member-ken");
+    }
+
+    #[test]
+    fn asking_for_a_reset_for_an_unknown_or_deactivated_address_answers_alike_and_mails_nobody() {
+        let (core, mailer) = fresh_with_mail(FakeMailer::default());
+        let admin = member(&core, "Ada", true);
+        member(&core, "Ken", false);
+        member(&core, "Barbara", false);
+        deactivate_member(&core, &admin, MemberId { id: "member-barbara".into() }).unwrap();
+
+        let unknown = asks_for_reset(&core, "nobody@example.org").unwrap();
+        let deactivated = asks_for_reset(&core, "member-barbara@example.org").unwrap();
+        let known = asks_for_reset(&core, "member-ken@example.org").unwrap();
+        assert_eq!((unknown.output, &unknown.session), (known.output, &known.session));
+        assert_eq!((deactivated.output, &deactivated.session), ((), &SessionChange::Keep));
+
+        // Mail goes out in the background; once Ken's has, no other is coming.
+        let sent = mailer.wait_for(1);
+        let recipients: Vec<_> = sent.iter().map(|mail| mail.to.as_str()).collect();
+        assert_eq!(recipients, ["member-ken@example.org"]);
+    }
+
+    #[test]
+    fn asking_again_soon_after_sends_no_second_mail() {
+        let (core, mailer) = fresh_with_mail(FakeMailer::default());
+        member(&core, "Ken", false);
+
+        asks_for_reset(&core, "member-ken@example.org").unwrap();
+        mailer.wait_for(1);
+        asks_for_reset(&core, "member-ken@example.org").unwrap();
+        core.advance(RESET_REQUEST_INTERVAL + 1);
+        asks_for_reset(&core, "member-ken@example.org").unwrap();
+
+        assert_eq!(mailer.wait_for(2).len(), 2);
+    }
+
+    #[test]
+    fn without_mail_a_reset_cannot_be_asked_for() {
+        let core = fresh();
+        member(&core, "Ken", false);
+
+        let refused = asks_for_reset(&core, "member-ken@example.org").unwrap_err();
         assert_eq!(refused.kind(), "not_permitted");
     }
 }

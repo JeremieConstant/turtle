@@ -23,4 +23,7 @@
 <AccountForm heading="Sign in" intro="Sign in to your Workspace." submitLabel="Sign in" onsubmit={signIn}>
   <Field label="Email address" type="email" autocomplete="username" bind:value={email} />
   <Field label="Password" type="password" autocomplete="current-password" bind:value={password} />
+  {#if session.sendsMail}
+    <a class="hint" href="/forgot-password" onclick={event => router.follow(event, '/forgot-password')}>Forgot your password?</a>
+  {/if}
 </AccountForm>
