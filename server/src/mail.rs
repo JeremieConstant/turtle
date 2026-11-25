@@ -164,9 +164,12 @@ pub mod fake {
 
     impl Mailer for FakeMailer {
         fn send(&self, mail: &Mail) -> anyhow::Result<()> {
+            // Decided before the mail is kept, so a test woken by its arrival
+            // cannot repair the mailer in time to change this mail's outcome.
+            let broken = self.broken.load(Ordering::SeqCst);
             self.sent.lock().unwrap().push(mail.clone());
             self.arrived.notify_all();
-            if self.broken.load(Ordering::SeqCst) {
+            if broken {
                 anyhow::bail!("the fake SMTP server is broken");
             }
             Ok(())
