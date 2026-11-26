@@ -2,7 +2,7 @@
 # the image that runs holds only the binary, which embeds the web app and the
 # PDF fonts. Build it from the repository root with `docker build .`.
 
-FROM docker.io/library/node:24-bookworm-slim AS web
+FROM docker.io/library/node:25-bookworm-slim AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
