@@ -397,6 +397,8 @@ impl Converter<'_> {
             out.line.push(Inline::Image { src, alt });
         } else {
             self.found.add("missing attachment");
+            let file = element.child("ri:attachment").and_then(|attachment| attachment.attribute("ri:filename")).unwrap_or_default();
+            out.text(&format!("Not imported: {file}"), &Marks { italic: true, ..marks.clone() });
         }
         if let Some(caption) = element.child("ac:caption") {
             self.found.add("image caption");
@@ -855,7 +857,7 @@ mod tests {
         let converted = convert(storage, "1", &space()).unwrap();
         assert_eq!(
             crate::markdown::to_markdown(&crate::model::normalize(converted.content)),
-            "![Chart](<confluence:attachment/10>)\n\n*Q3*\n\n[chart.png](<confluence:attachment/10>) ![](<https://example.org/a.png>)\n"
+            "![Chart](<confluence:attachment/10>)\n\n*Q3*\n\n[chart.png](<confluence:attachment/10>) *Not imported: gone.png![](<https://example.org/a.png>)*\n"
         );
         assert_eq!(converted.links.get("confluence:attachment/10"), Some(&Target::Attachment("attachment:10".into())));
         assert_eq!(

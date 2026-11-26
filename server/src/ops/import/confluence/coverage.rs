@@ -66,7 +66,7 @@ pub const ELEMENTS: &[Known] = &[
     known("image", Exact, "An image, its file an Attachment of the Page."),
     known("image from the web", Exact, "An image from its address."),
     known("image caption", Approximate, "A paragraph in italics after the image."),
-    known("missing attachment", LeftOut, "Nothing: the file is not in the export."),
+    known("missing attachment", LeftOut, "Its file name in italics, saying it was not imported: the file is not in the export."),
     known("mention", Approximate, "The person's name after an @, without a Mention."),
     known("emoticon", Exact, "The emoji."),
     known("date", Approximate, "The date as text."),

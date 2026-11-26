@@ -172,30 +172,37 @@ struct Created {
 
 /// Points the links and images in the content that refer to what was
 /// imported at it: a Page as a Page link, an Attachment by its address.
+/// What refers to something that did not come across, such as a file too
+/// large to attach or a Folder, keeps its text without the address, and an
+/// image says which file is missing, so nothing points nowhere.
 fn point_links(content: &mut [Block], links: &HashMap<String, Target>, created: &Created) {
     super::export::for_each_inline(content, &mut |inline| match inline {
         Inline::Image { src, .. } => {
             if let Some(Target::Attachment(key)) = links.get(src.as_str()) {
-                if let Some(url) = created.attachments.get(key) {
-                    *src = url.clone();
+                match created.attachments.get(key) {
+                    Some(url) => *src = url.clone(),
+                    None => *inline = not_imported(key),
                 }
             }
         }
-        Inline::Text { marks: Marks { link: Some(href), .. }, .. } => match links.get(href.as_str()) {
-            Some(Target::Entry(key)) => {
-                if let Some(page_id) = created.pages.get(key) {
-                    *inline = Inline::PageLink { page_id: page_id.clone() };
-                }
+        Inline::Text { marks, .. } => {
+            let Some(target) = marks.link.as_deref().and_then(|href| links.get(href)) else { return };
+            match target {
+                Target::Entry(key) => match created.pages.get(key) {
+                    Some(page_id) => *inline = Inline::PageLink { page_id: page_id.clone() },
+                    None => marks.link = None,
+                },
+                Target::Attachment(key) => marks.link = created.attachments.get(key).cloned(),
             }
-            Some(Target::Attachment(key)) => {
-                if let Some(url) = created.attachments.get(key) {
-                    *href = url.clone();
-                }
-            }
-            None => {}
-        },
+        }
         _ => {}
     });
+}
+
+/// What stands where an image was whose file did not come across.
+fn not_imported(key: &str) -> Inline {
+    let name = key.rsplit('/').next().unwrap_or(key);
+    Inline::Text { text: format!("Not imported: {name}"), marks: Marks { italic: true, ..Marks::default() } }
 }
 
 fn create_all(
@@ -657,6 +664,28 @@ mod tests {
         let later = &imported.entries[0].children[0].id;
         let chart = &attachments_of(&core, &grace, later)[0].2;
         assert_eq!(markdown_of(&core, &grace, &imported.entries[0].id), format!("See [Later](turtle:{later}) and ![chart](<{chart}>).\n"));
+    }
+
+    #[test]
+    fn what_links_to_something_that_did_not_come_across_keeps_its_text_but_not_the_address() {
+        let mut core = fresh();
+        core.core.set_attachment_limit(4);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let mut runbook = page("page:1", "Runbook", "![Flow](flow.png) See [the log](log.bin) and [Guides](folder:2).", &[
+            ("flow.png", Target::Attachment("Runbook/flow.png".into())),
+            ("log.bin", Target::Attachment("Runbook/log.bin".into())),
+            ("folder:2", Target::Entry("folder:2".into())),
+        ]);
+        for name in ["flow.png", "log.bin"] {
+            runbook.attachments.push(IncomingAttachment { key: format!("Runbook/{name}"), name: name.into(), content: b"too large".to_vec() });
+        }
+        let mut guides = page("folder:2", "Guides", "", &[]);
+        guides.kind = Kind::Folder;
+
+        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook, guides], problems: Vec::new() }).unwrap().output;
+
+        assert_eq!(markdown_of(&core, &grace, &imported.entries[0].id), "*Not imported: flow.png* See the log and Guides.\n");
     }
 
     #[test]
