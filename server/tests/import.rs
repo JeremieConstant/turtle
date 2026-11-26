@@ -39,7 +39,7 @@ async fn an_import_may_be_larger_than_other_requests_up_to_its_own_limit() {
 
     assert_eq!(imported["entries"][0]["title"], "Runbook");
     assert_eq!(confluence, 400);
-    assert!(not_an_export.contains("not a Confluence space exported as XML"), "{not_an_export}");
+    assert!(not_an_export.contains("not a Confluence space export"), "{not_an_export}");
     assert_eq!(confluence_too_large, 413);
     assert_eq!(too_large, 413);
     assert!(refused.contains("This ZIP is larger than 3 MB"), "{refused}");

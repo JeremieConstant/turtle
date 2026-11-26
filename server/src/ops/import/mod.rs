@@ -338,7 +338,20 @@ fn create_all(
         let entry = NewEntry { area_id: area_id.into(), parent_id: parent_id.map(Into::into), title: incoming.title };
         let mut created = tree::create_with_id(core, principal, entry, incoming.kind, incoming.id.as_deref())?.output;
         record::created(core, &created_so_far.import_id, &created.id)?;
-        for attachment in incoming.attachments {
+        // A Folder holds neither Attachments nor Tags, which a source such
+        // as Confluence may give one: they are told, and the rest comes in.
+        let (attachments, tags) = if incoming.kind == Kind::Folder {
+            for attachment in incoming.attachments {
+                created_so_far.problems.push(Problem::new(attachment.key, "It belongs to a Folder, which holds no Attachments, so it was left out."));
+            }
+            for tag in incoming.tags {
+                created_so_far.problems.push(Problem::new(incoming.key.clone(), format!("Its Tag \"{tag}\" was left out: a Folder has no Tags.")));
+            }
+            (Vec::new(), Vec::new())
+        } else {
+            (incoming.attachments, incoming.tags)
+        };
+        for attachment in attachments {
             if let Some(message) = too_large_to_attach(core, attachment.content.len() as u64) {
                 created_so_far.problems.push(Problem::new(attachment.key, message));
                 continue;
@@ -359,7 +372,7 @@ fn create_all(
                 created_so_far.content.push((created.id.clone(), incoming.content, incoming.links));
             }
         }
-        for tag in incoming.tags {
+        for tag in tags {
             match super::tags::add_tag(core, principal, super::tags::PageTag { page_id: created.id.clone(), tag: tag.clone() }) {
                 Ok(_) => {}
                 // A Tag that is not one, such as a Confluence label too long
@@ -791,6 +804,30 @@ mod tests {
         let later = &imported.entries[0].children[0].id;
         let chart = &attachments_of(&core, &grace, later)[0].2;
         assert_eq!(markdown_of(&core, &grace, &imported.entries[0].id), format!("See [Later](turtle:{later}) and ![chart](<{chart}>).\n"));
+    }
+
+    #[test]
+    fn a_folder_holds_no_attachments_or_tags_so_they_are_told_and_the_rest_comes_in() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let mut guides = page("Guides", "Guides", "", &[]);
+        guides.kind = Kind::Folder;
+        guides.tags.push("handbook".into());
+        guides.attachments.push(IncomingAttachment { key: "Guides/logo.png".into(), name: "logo.png".into(), content: b"a logo".to_vec() });
+        guides.children.push(page("page:2", "Set up", "Install it.", &[]));
+
+        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { source: "a test".into(), entries: vec![guides], problems: Vec::new() }, "test-import", &|_| {}).unwrap().imported;
+
+        assert_eq!(outline(&core, &grace, &area_id), ["Guides (folder)", "  Set up"]);
+        let problems: Vec<_> = imported.problems.iter().map(|problem| (problem.file.as_str(), problem.message.as_str())).collect();
+        assert_eq!(
+            problems,
+            [
+                ("Guides/logo.png", "It belongs to a Folder, which holds no Attachments, so it was left out."),
+                ("Guides", "Its Tag \"handbook\" was left out: a Folder has no Tags."),
+            ]
+        );
     }
 
     #[test]

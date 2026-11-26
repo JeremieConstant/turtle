@@ -1,18 +1,23 @@
-//! Importing a Confluence space from its XML export, and checking first how
+//! Importing a Confluence space from its export, and checking first how
 //! much of it comes across.
 //!
-//! The export is a ZIP holding `entities.xml`, every object of the space,
-//! and `attachments/<page ID>/<attachment ID>/<version>`, each version of
-//! each file. Only what is current comes across: a page's latest version,
-//! not its history, drafts or what is in Confluence's trash. Each page's
-//! content is converted from Confluence's storage format (`storage`), and
-//! what was found in it is tallied for the report (`coverage`).
+//! Confluence exports a space as a ZIP in one of two forms: XML, with
+//! `entities.xml` holding every object of the space (`xml`), or CSV, with
+//! one table per kind of object (`csv`). Both hold the attachments as
+//! `attachments/<page ID>/<attachment ID>/<version>`, each version of each
+//! file. Each is read into the same `Space`, and from there on the import
+//! is the same: only what is current comes across, a page's latest version
+//! and not its history, drafts or what is in Confluence's trash. Each
+//! page's content is converted from Confluence's storage format (`storage`),
+//! and what was found in it is tallied for the report (`coverage`).
 
 mod coverage;
+mod csv;
 mod dom;
 mod entities;
 mod report;
 mod storage;
+mod xml;
 
 pub use coverage::Coverage;
 
@@ -21,7 +26,6 @@ use super::{check_target, too_large_to_attach, write_bundle, Bundle, Incoming, I
 use crate::ops::tree::{Entry, Kind};
 use crate::ops::{Catalogue, Core, OpError, OpResult, Principal};
 use coverage::{NotImported, Tally, TooLarge};
-use entities::Object;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -30,12 +34,12 @@ use std::io::Read;
 pub(in crate::ops) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "check_confluence_import",
-        "Reads a Confluence space exported as XML, a ZIP sent in base64, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB.",
+        "Reads a Confluence space exported as CSV or XML, a ZIP sent in base64, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB. Mentions are matched with the Members and Guests the caller may see.",
         check_confluence_import,
     );
     catalogue.add(
         "import_confluence",
-        "Imports a Confluence space exported as XML, a ZIP sent in base64, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role.",
+        "Imports a Confluence space exported as CSV or XML, a ZIP sent in base64, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, mentions of people as Mentions of the Members and Guests with the same e-mail address, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role.",
         import_confluence,
     );
     catalogue.add(
@@ -45,7 +49,7 @@ pub(in crate::ops) fn register(catalogue: &mut Catalogue) {
     );
 }
 
-/// A Confluence space exported as XML.
+/// A Confluence space exported as CSV or XML.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ConfluenceExport {
     /// The ZIP Confluence exports a space as, in base64.
@@ -82,13 +86,13 @@ pub struct ImportedFromConfluence {
 
 pub fn check_confluence_import(core: &Core, principal: &Principal, input: ConfluenceExport) -> OpResult<Coverage> {
     crate::ops::areas::signed_in(principal)?;
-    Ok(read_export(core, input.content)?.coverage.into())
+    Ok(read_export(core, principal, input.content)?.coverage.into())
 }
 
 pub fn import_confluence(core: &Core, principal: &Principal, input: ToImportFromConfluence) -> OpResult<ImportedFromConfluence> {
     // Access is checked before the ZIP is read, so a refused import reads nothing.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
-    let read = read_export(core, input.content)?;
+    let read = read_export(core, principal, input.content)?;
     let coverage = read.coverage.clone();
     let import_id = super::record::new_id()?;
     let imported = write(core, principal, &input.area_id, input.parent_id.as_deref(), read, &import_id, &|_| {})?;
@@ -99,7 +103,7 @@ pub fn start_import_confluence(core: &Core, principal: &Principal, input: ToImpo
     // A refused import is refused at once, not once it is running.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
     running::start(core, principal, move |core, principal, following| {
-        let read = read_export(core, input.content)?;
+        let read = read_export(core, principal, input.content)?;
         following.read(&read.coverage);
         let step = |step| following.step(step);
         write(core, principal, &input.area_id, input.parent_id.as_deref(), read, following.import_id(), &step)
@@ -158,56 +162,79 @@ struct ReadExport {
     found: Vec<FoundOnPage>,
 }
 
-/// The objects of `entities.xml` the import reads; every other class is
-/// only counted.
-const READ_CLASSES: [&str; 7] = ["Space", "Page", "Attachment", "Label", "Labelling", "ConfluenceUserImpl", "Comment"];
+/// A Confluence export, held in memory as it was sent.
+type Archive = zip::ZipArchive<std::io::Cursor<Vec<u8>>>;
 
-fn read_export(core: &Core, content: String) -> Result<ReadExport, OpError> {
+fn read_export(core: &Core, principal: &Principal, content: String) -> Result<ReadExport, OpError> {
+    // Whom a mention can name: the Members and Guests the importer may see,
+    // by e-mail address in lower case.
+    let people_in_turtle: HashMap<String, String> = crate::ops::profiles::list_profiles(core, principal, crate::ops::accounts::Nothing {})?
+        .output
+        .profiles
+        .into_iter()
+        .map(|profile| (profile.email.to_lowercase(), profile.id))
+        .collect();
     let bytes = crate::ops::attachments::decode_content(&content)?;
     drop(content);
-    let mut archive =
-        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| OpError::InvalidInput("Choose a ZIP file.".into()))?;
-    let prefix = export_prefix(&archive)?;
-    let xml = {
-        let mut file = archive.by_name(&format!("{prefix}entities.xml")).map_err(|_| unreadable())?;
-        let mut xml = String::new();
-        file.read_to_string(&mut xml).map_err(|_| unreadable())?;
-        xml
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| OpError::InvalidInput("Choose a ZIP file.".into()))?;
+    let (space, prefix) = match export_in(&archive)? {
+        Export::Xml(prefix) => (xml::read(&mut archive, &prefix)?, prefix),
+        Export::Csv(prefix) => (csv::read(&mut archive, &prefix)?, prefix),
     };
-    let (objects, counts) = entities::read(&xml, |object| READ_CLASSES.contains(&object.class.as_str())).ok_or_else(unreadable)?;
-    let space = Space::of(objects)?;
-    let body_ids: HashSet<&str> = space.pages.iter().filter_map(|page| page.body_id.as_deref()).collect();
-    let (bodies, _) = entities::read(&xml, |object| object.class == "BodyContent" && body_ids.contains(object.id.as_str()))
-        .ok_or_else(unreadable)?;
-    drop(xml);
-    let bodies: HashMap<String, Object> = bodies.into_iter().map(|body| (body.id.clone(), body)).collect();
-    Ok(space.into_bundle(core, &bodies, &counts, &mut archive, &prefix))
+    Ok(space.into_bundle(core, people_in_turtle, &mut archive, &prefix))
 }
 
-/// Where in the ZIP the export lies: `entities.xml` at the top, or in a
-/// directory if the ZIP was made again around it.
-fn export_prefix(archive: &zip::ZipArchive<std::io::Cursor<Vec<u8>>>) -> Result<String, OpError> {
+/// Which form an export is in, and where in the ZIP it lies: at the top,
+/// or in a directory if the ZIP was made again around it.
+enum Export {
+    Xml(String),
+    Csv(String),
+}
+
+fn export_in(archive: &Archive) -> Result<Export, OpError> {
     let names: Vec<String> = archive.file_names().filter_map(Result::ok).map(|name| name.into_owned()).collect();
-    let found = names
-        .iter()
-        .filter_map(|name| name.as_str().strip_suffix("entities.xml").filter(|prefix| prefix.is_empty() || prefix.ends_with('/')))
-        .min_by_key(|prefix| prefix.len());
-    match found {
-        Some(prefix) => Ok(prefix.to_string()),
-        None if names.iter().any(|name| name.ends_with("content.csv") || name.ends_with("content.csv.gz")) => Err(OpError::InvalidInput(
-            "This is Confluence's CSV export, which Turtle cannot read yet. Export the space as XML instead and choose that ZIP.".into(),
-        )),
-        None => Err(OpError::InvalidInput(
-            "This ZIP is not a Confluence space exported as XML. In Confluence, export the space as XML and choose that ZIP.".into(),
-        )),
+    let prefix_of = |file: &str| {
+        names
+            .iter()
+            .filter_map(|name| name.as_str().strip_suffix(file).filter(|prefix| prefix.is_empty() || prefix.ends_with('/')))
+            .min_by_key(|prefix| prefix.len())
+            .map(str::to_string)
+    };
+    if let Some(prefix) = prefix_of("entities.xml") {
+        return Ok(Export::Xml(prefix));
+    }
+    if let Some(prefix) = prefix_of("content.csv.gz").or_else(|| prefix_of("content.csv")) {
+        return Ok(Export::Csv(prefix));
+    }
+    Err(OpError::InvalidInput(
+        "This ZIP is not a Confluence space export. In Confluence, export the space as CSV or XML and choose that ZIP.".into(),
+    ))
+}
+
+/// The one space an export holds.
+fn the_one_space<T>(spaces: &[T]) -> Result<&T, OpError> {
+    match spaces {
+        [space] => Ok(space),
+        [] => Err(no_space()),
+        _ => Err(several_spaces()),
     }
 }
 
-fn unreadable() -> OpError {
-    OpError::InvalidInput("The export's entities.xml could not be read. Export the space from Confluence again and choose the new ZIP.".into())
+/// The marker of content in Confluence's storage format, the XHTML it has
+/// written since version 4, among the kinds of content an export holds
+/// (`bodyType` in XML, `bodytypeid` in CSV); older wiki markup has another.
+const STORAGE_FORMAT: &str = "2";
+
+fn no_space() -> OpError {
+    OpError::InvalidInput("This export holds no space. In Confluence, export a space and choose that ZIP.".into())
 }
 
-/// The objects of the space that are imported, and how much is not.
+fn several_spaces() -> OpError {
+    OpError::InvalidInput("This export holds several spaces. In Confluence, export one space and choose that ZIP.".into())
+}
+
+/// A space as its export holds it, whatever the export's form: what is
+/// imported, and how much is not.
 struct Space {
     name: String,
     key: String,
@@ -217,16 +244,63 @@ struct Space {
     tags: HashMap<String, Vec<String>>,
     /// The name of each person, by their key.
     people: HashMap<String, String>,
-    not_imported: Vec<NotImported>,
+    /// The e-mail address of each person whose export tells it, by their key.
+    emails: HashMap<String, String>,
+    not_imported: Unimported,
 }
 
+/// What a space holds that is not imported, as far as its export tells.
+#[derive(Default)]
+struct Unimported {
+    comments: u32,
+    earlier_versions_of_pages: u32,
+    drafts: u32,
+    archived_pages: u32,
+    pages_in_trash: u32,
+    earlier_versions_of_attachments: u32,
+    personal_labels: u32,
+    other_labels: u32,
+    space_permissions: u32,
+    page_restrictions: u32,
+    blog_posts: u32,
+    whiteboards: u32,
+    databases: u32,
+}
+
+impl Unimported {
+    /// As the report lists it; what the space holds none of is left out there.
+    fn listed(self) -> Vec<NotImported> {
+        [
+            ("Comments", self.comments),
+            ("Earlier versions of pages", self.earlier_versions_of_pages),
+            ("Drafts", self.drafts),
+            ("Archived pages", self.archived_pages),
+            ("Pages in Confluence's trash", self.pages_in_trash),
+            ("Earlier versions of attachments", self.earlier_versions_of_attachments),
+            ("Personal labels", self.personal_labels),
+            ("Team labels and other labels that are not global", self.other_labels),
+            ("Space permissions", self.space_permissions),
+            ("Page restrictions", self.page_restrictions),
+            ("Blog posts", self.blog_posts),
+            ("Whiteboards", self.whiteboards),
+            ("Databases", self.databases),
+        ]
+        .into_iter()
+        .map(|(what, count)| NotImported { what: what.into(), count })
+        .collect()
+    }
+}
+
+/// A page or folder of the space, in its latest version.
 struct Page {
     id: String,
     title: String,
     parent: Option<String>,
     position: Option<i64>,
-    /// The ID of its content; a folder has none.
-    body_id: Option<String>,
+    kind: Kind,
+    /// A page's content in the storage format; nothing for a folder, or for
+    /// a page whose content is in another format or not in the export.
+    storage: Option<String>,
 }
 
 struct Attachment {
@@ -236,121 +310,46 @@ struct Attachment {
     version: String,
 }
 
-/// Whether an object is the current version of what it is: not an earlier
-/// one, a draft or in the trash.
-fn is_current(object: &Object) -> bool {
-    object.text("contentStatus").is_none_or(|status| status == "current") && !is_earlier_version(object)
+/// A label on a page, as an export tells it.
+struct Labelling<'a> {
+    page_id: &'a str,
+    name: &'a str,
+    /// `global` for a label of the space, `my` for someone's own.
+    namespace: &'a str,
 }
 
-fn is_earlier_version(object: &Object) -> bool {
-    object.points_to("originalVersion").is_some() || object.text("originalVersionId").is_some_and(|id| !id.is_empty())
+/// The labels of a space: its global labels as each page's Tags, and how
+/// many labels are not global and so not imported.
+struct Labels {
+    tags: HashMap<String, Vec<String>>,
+    personal: u32,
+    other: u32,
+}
+
+impl Labels {
+    /// The labels of the pages and folders imported.
+    fn of<'a>(labelled: impl Iterator<Item = Labelling<'a>>, imported: &HashSet<&str>) -> Labels {
+        let mut labels = Labels { tags: HashMap::new(), personal: 0, other: 0 };
+        for labelling in labelled.filter(|labelling| imported.contains(labelling.page_id)) {
+            match labelling.namespace {
+                "global" => labels.tags.entry(labelling.page_id.to_string()).or_default().push(labelling.name.to_string()),
+                "my" => labels.personal += 1,
+                _ => labels.other += 1,
+            }
+        }
+        labels
+    }
 }
 
 impl Space {
-    fn of(objects: Vec<Object>) -> Result<Space, OpError> {
-        let mut by_class: HashMap<&str, Vec<&Object>> = HashMap::new();
-        for object in &objects {
-            by_class.entry(object.class.as_str()).or_default().push(object);
-        }
-        let of = |class: &str| by_class.get(class).cloned().unwrap_or_default();
-        let space = match of("Space").as_slice() {
-            [space] => *space,
-            [] => return Err(OpError::InvalidInput("This export holds no space. In Confluence, export a space as XML and choose that ZIP.".into())),
-            _ => {
-                return Err(OpError::InvalidInput(
-                    "This export holds several spaces. In Confluence, export one space as XML and choose that ZIP.".into(),
-                ))
-            }
+    fn into_bundle(self, core: &Core, people_in_turtle: HashMap<String, String>, archive: &mut Archive, prefix: &str) -> ReadExport {
+        let mut lookup = storage::Lookup {
+            key: self.key.clone(),
+            people: self.people.clone(),
+            emails: self.emails.clone(),
+            people_in_turtle,
+            ..storage::Lookup::default()
         };
-        let in_space = |object: &Object| object.points_to("space").is_none_or(|id| id == space.id);
-        let all_pages = of("Page");
-        let pages: Vec<Page> = all_pages
-            .iter()
-            .filter(|page| is_current(page) && in_space(page))
-            .map(|page| Page {
-                id: page.id.clone(),
-                title: page.text("title").unwrap_or_default().to_string(),
-                parent: page.points_to("parent").map(str::to_string),
-                position: page.text("position").and_then(|position| position.parse().ok()),
-                body_id: page.collections.get("bodyContents").and_then(|ids| ids.first()).cloned(),
-            })
-            .collect();
-        let page_ids: HashSet<&str> = pages.iter().map(|page| page.id.as_str()).collect();
-        let all_attachments = of("Attachment");
-        let attachments = all_attachments
-            .iter()
-            .filter(|attachment| is_current(attachment))
-            .filter_map(|attachment| {
-                let page_id = attachment.points_to("containerContent").or_else(|| attachment.points_to("content"))?;
-                page_ids.contains(page_id).then(|| Attachment {
-                    id: attachment.id.clone(),
-                    page_id: page_id.to_string(),
-                    name: attachment.text("title").unwrap_or_default().to_string(),
-                    version: attachment.text("version").unwrap_or("1").to_string(),
-                })
-            })
-            .collect();
-        let labels: HashMap<&str, (&str, &str)> = of("Label")
-            .iter()
-            .map(|label| (label.id.as_str(), (label.text("name").unwrap_or_default(), label.text("namespace").unwrap_or_default())))
-            .collect();
-        let mut tags: HashMap<String, Vec<String>> = HashMap::new();
-        let (mut personal_labels, mut other_labels) = (0, 0);
-        for labelling in of("Labelling") {
-            let (Some(page_id), Some((name, namespace))) =
-                (labelling.points_to("content"), labelling.points_to("label").and_then(|id| labels.get(id)))
-            else {
-                continue;
-            };
-            if !page_ids.contains(page_id) {
-                continue;
-            }
-            match *namespace {
-                "global" => tags.entry(page_id.to_string()).or_default().push(name.to_string()),
-                "my" => personal_labels += 1,
-                _ => other_labels += 1,
-            }
-        }
-        let people = of("ConfluenceUserImpl")
-            .iter()
-            .filter_map(|person| Some((person.id.clone(), person.text("name")?.to_string())))
-            .collect();
-        let status_count = |objects: &[&Object], status: &str| {
-            objects.iter().filter(|object| in_space(object) && object.text("contentStatus") == Some(status) && !is_earlier_version(object)).count() as u32
-        };
-        let not_imported = vec![
-            NotImported { what: "Comments".into(), count: of("Comment").iter().filter(|comment| is_current(comment)).count() as u32 },
-            NotImported { what: "Earlier versions of pages".into(), count: all_pages.iter().filter(|page| is_earlier_version(page)).count() as u32 },
-            NotImported { what: "Drafts".into(), count: status_count(&all_pages, "draft") },
-            NotImported { what: "Archived pages".into(), count: status_count(&all_pages, "archived") },
-            NotImported { what: "Pages in Confluence's trash".into(), count: status_count(&all_pages, "deleted") },
-            NotImported {
-                what: "Earlier versions of attachments".into(),
-                count: all_attachments.iter().filter(|attachment| is_earlier_version(attachment)).count() as u32,
-            },
-            NotImported { what: "Personal labels".into(), count: personal_labels },
-            NotImported { what: "Team labels and other labels that are not global".into(), count: other_labels },
-        ];
-        Ok(Space {
-            name: space.text("name").unwrap_or_default().to_string(),
-            key: space.text("key").unwrap_or_default().to_string(),
-            pages,
-            attachments,
-            tags,
-            people,
-            not_imported,
-        })
-    }
-
-    fn into_bundle(
-        self,
-        core: &Core,
-        bodies: &HashMap<String, Object>,
-        counts: &HashMap<String, u32>,
-        archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>,
-        prefix: &str,
-    ) -> ReadExport {
-        let mut lookup = storage::Lookup { key: self.key.clone(), people: self.people.clone(), ..storage::Lookup::default() };
         // A page is known by its title, which is unique in a space, so
         // problems name it as people know it; the ID tells apart any two
         // the export holds with one title all the same.
@@ -358,8 +357,11 @@ impl Space {
         for page in &self.pages {
             let taken = keys.values().any(|key| key == &page.title);
             keys.insert(&page.id, if taken { format!("{} ({})", page.title, page.id) } else { page.title.clone() });
-            lookup.titles.insert(page.title.clone(), page.id.clone());
-            if page.body_id.is_some() {
+            // A page and a folder may share a title; a link by title is to the page.
+            if page.kind == Kind::Page || !lookup.titles.contains_key(&page.title) {
+                lookup.titles.insert(page.title.clone(), page.id.clone());
+            }
+            if page.kind == Kind::Page {
                 lookup.pages.insert(page.id.clone(), keys[page.id.as_str()].clone());
             }
         }
@@ -387,7 +389,7 @@ impl Space {
         let mut found = Vec::new();
         let mut incoming: HashMap<String, Incoming> = HashMap::new();
         for page in &self.pages {
-            let kind = if page.body_id.is_some() { Kind::Page } else { Kind::Folder };
+            let kind = page.kind;
             let mut entry = Incoming {
                 key: keys[page.id.as_str()].clone(),
                 kind,
@@ -400,15 +402,7 @@ impl Space {
                 children: Vec::new(),
             };
             if kind == Kind::Page {
-                let body = page.body_id.as_ref().and_then(|id| bodies.get(id));
-                let converted = match body {
-                    Some(body) if body.text("bodyType").is_none_or(|kind| kind == STORAGE_FORMAT) => {
-                        // The export writes `]]>` inside a body's CDATA as `]] >`.
-                        let storage = body.text("body").unwrap_or_default().replace("]] >", "]]>");
-                        storage::convert(&storage, &page.id, &lookup)
-                    }
-                    _ => None,
-                };
+                let converted = page.storage.as_deref().and_then(|storage| storage::convert(storage, &page.id, &lookup));
                 match converted {
                     Some(converted) => {
                         entry.content = converted.content;
@@ -425,16 +419,12 @@ impl Space {
             }
             incoming.insert(page.id.clone(), entry);
         }
-        let pages = self.pages.iter().filter(|page| page.body_id.is_some()).count() as u32;
+        let pages = self.pages.iter().filter(|page| page.kind == Kind::Page).count() as u32;
         let folders = self.pages.len() as u32 - pages;
         let entries = tree_of(&self.pages, &mut incoming);
-        let mut not_imported = self.not_imported;
-        for (class, what) in [("SpacePermission", "Space permissions"), ("ContentPermissionSet", "Page restrictions"), ("BlogPost", "Blog posts")] {
-            not_imported.push(NotImported { what: what.into(), count: counts.get(class).copied().unwrap_or(0) });
-        }
         let by_title: Vec<(String, Tally)> = found.iter().map(|(_, _, title, tally)| (title.clone(), tally.clone())).collect();
         let source = format!("the Confluence space {}", self.name);
-        let mut coverage = coverage::report(self.name, (pages, folders, attachment_count), &by_title, not_imported);
+        let mut coverage = coverage::report(self.name, (pages, folders, attachment_count), &by_title, self.not_imported.listed());
         coverage.attachment_limit_bytes = core.attachment_limit();
         coverage.too_large = too_large;
         let parents: HashMap<&str, (&str, Option<&str>)> =
@@ -446,10 +436,6 @@ impl Space {
         ReadExport { bundle: Bundle { source, entries, problems }, coverage, found }
     }
 }
-
-/// The `bodyType` of content in Confluence's storage format, the XHTML it
-/// has written since version 4; older wiki markup has another.
-const STORAGE_FORMAT: &str = "2";
 
 /// What became of reading an attachment's file.
 enum AttachmentFile {
@@ -476,7 +462,7 @@ fn path_to(parents: &HashMap<&str, (&str, Option<&str>)>, id: &str) -> Vec<Strin
 
 /// The file of an attachment's current version: as its version names it,
 /// or else the highest version there is.
-fn read_attachment(core: &Core, archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>, prefix: &str, attachment: &Attachment) -> AttachmentFile {
+fn read_attachment(core: &Core, archive: &mut Archive, prefix: &str, attachment: &Attachment) -> AttachmentFile {
     let Some(name) = attachment_file(archive, prefix, attachment) else {
         return AttachmentFile::Missing;
     };
@@ -494,7 +480,7 @@ fn read_attachment(core: &Core, archive: &mut zip::ZipArchive<std::io::Cursor<Ve
 }
 
 /// The name in the ZIP of an attachment's current version's file.
-fn attachment_file(archive: &zip::ZipArchive<std::io::Cursor<Vec<u8>>>, prefix: &str, attachment: &Attachment) -> Option<String> {
+fn attachment_file(archive: &Archive, prefix: &str, attachment: &Attachment) -> Option<String> {
     let directory = format!("{prefix}attachments/{}/{}/", attachment.page_id, attachment.id);
     let exact = format!("{directory}{}", attachment.version);
     let name = if archive.index_for_name(&exact).is_some() {
@@ -557,7 +543,9 @@ mod tests {
     fn report_on_a_real_export() {
         let path = std::env::var("CONFLUENCE_EXPORT").expect("CONFLUENCE_EXPORT names the ZIP");
         let content = base64::engine::general_purpose::STANDARD.encode(std::fs::read(path).unwrap());
-        let read = read_export(&crate::ops::testing::fresh(), content).unwrap();
+        let core = crate::ops::testing::fresh();
+        let reader = crate::ops::testing::member(&core, "Reader", false);
+        let read = read_export(&core, &reader, content).unwrap();
         println!("{}", serde_json::to_string_pretty(&read.coverage).unwrap());
         for problem in &read.bundle.problems {
             println!("problem: {}: {}", problem.file, problem.message);
@@ -687,17 +675,90 @@ mod tests {
                 body("201", "20", deploy),
                 body("210", "21", "<p>Old</p>"),
                 body("300", "30", "<p>Install it.</p>"),
-                body("301", "31", "<p>Ask <ac:link><ri:user ri:userkey=\"u1\" /></ac:link>.</p>"),
+                body("301", "31", "<p>Ask <ac:link><ri:user ri:userkey=\"u1\" /></ac:link> or <ac:link><ri:user ri:userkey=\"u2\" /></ac:link>.</p>"),
                 attachment("50", "20", "flow.png", "2", None),
                 attachment("51", "20", "flow.png", "1", Some("50")),
                 attachment("52", "20", "gone.pdf", "1", None),
                 label("60", "runbook", "global", "20"),
                 label("61", "favourite", "my", "20"),
                 label("62", &"long".repeat(20), "global", "30"),
-                r#"<object class="ConfluenceUserImpl" package="com.atlassian.confluence.user"><id name="key"><![CDATA[u1]]></id><property name="name"><![CDATA[grace]]></property></object>"#.into(),
+                // Confluence Cloud names a person by their e-mail address.
+                r#"<object class="ConfluenceUserImpl" package="com.atlassian.confluence.user"><id name="key"><![CDATA[u1]]></id><property name="name"><![CDATA[Member-Grace@Example.org]]></property></object>"#.into(),
+                r#"<object class="ConfluenceUserImpl" package="com.atlassian.confluence.user"><id name="key"><![CDATA[u2]]></id><property name="name"><![CDATA[ada@elsewhere.example]]></property></object>"#.into(),
             ],
             &[("attachments/20/50/1", b"old flow"), ("attachments/20/50/2", b"the flow")],
         )
+    }
+
+    /// A table of a CSV export with these columns and rows.
+    fn table(columns: &[&str], rows: &[Vec<&str>]) -> Vec<u8> {
+        let mut writer = ::csv::Writer::from_writer(Vec::new());
+        writer.write_record(columns).unwrap();
+        for row in rows {
+            writer.write_record(row).unwrap();
+        }
+        writer.into_inner().unwrap()
+    }
+
+    fn gzipped(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    /// The space `knowledge_base` describes, exported as CSV: the same pages,
+    /// a folder that is one, attachments, labels and earlier versions. One
+    /// table is gzipped as its name says; the others are not, as Confluence
+    /// often writes them.
+    fn knowledge_base_csv() -> String {
+        let deploy = "<h1>Deploy</h1><p>First read <ac:link><ri:page ri:content-title=\"Set up\" /></ac:link> in <ac:link><ri:page ri:content-title=\"Guides\" /></ac:link>.</p>\
+            <ac:image><ri:attachment ri:filename=\"flow.png\" /></ac:image>\
+            <ac:structured-macro ac:name=\"toc\" />\
+            <ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[a]]]]><![CDATA[></b]]></ac:plain-text-body></ac:structured-macro>";
+        let columns = ["contentid", "contenttype", "title", "version", "prevver", "content_status", "pageid", "spaceid", "child_position", "parentid"];
+        let content = table(
+            &columns,
+            &[
+                vec!["2", "PAGE", "Home", "1", "", "current", "", "1", "", ""],
+                vec!["3", "FOLDER", "Guides", "1", "", "current", "", "1", "1", "2"],
+                vec!["20", "PAGE", "Deploy", "2", "", "current", "", "1", "7", "3"],
+                vec!["21", "PAGE", "Deploy", "1", "20", "current", "", "1", "2", "3"],
+                vec!["30", "PAGE", "Set up", "1", "", "current", "", "1", "5", "3"],
+                vec!["31", "PAGE", "Contact", "1", "", "current", "", "1", "9", "2"],
+                vec!["40", "PAGE", "Unfinished", "1", "", "draft", "", "1", "", "2"],
+                vec!["41", "PAGE", "Old", "1", "", "deleted", "", "1", "", "2"],
+                vec!["50", "ATTACHMENT", "flow.png", "2", "", "current", "20", "1", "", ""],
+                vec!["51", "ATTACHMENT", "flow.png", "1", "50", "current", "20", "1", "", ""],
+                vec!["52", "ATTACHMENT", "gone.pdf", "1", "", "current", "20", "1", "", ""],
+                vec!["70", "COMMENT", "", "1", "", "current", "31", "", "", ""],
+            ],
+        );
+        let bodies = table(
+            &["bodycontentid", "body", "contentid", "bodytypeid"],
+            &[
+                vec!["200", "<p>Welcome</p>", "2", "2"],
+                vec!["201", deploy, "20", "2"],
+                vec!["210", "<p>Old</p>", "21", "2"],
+                vec!["300", "<p>Install it.</p>", "30", "2"],
+                vec!["301", "<p>Ask <ac:link><ri:user ri:account-id=\"u1\" /></ac:link> or <ac:link><ri:user ri:account-id=\"u2\" /></ac:link>.</p>", "31", "2"],
+            ],
+        );
+        let long = "long".repeat(20);
+        let labels = table(&["labelid", "name", "owner", "namespace"], &[vec!["60", "runbook", "", "global"], vec!["61", "favourite", "u1", "my"], vec!["62", &long, "", "global"]]);
+        let labellings = table(&["id", "labelid", "contentid"], &[vec!["600", "60", "20"], vec!["610", "61", "20"], vec!["620", "62", "30"]]);
+        let spaces = table(&["spaceid", "spacename", "spacekey"], &[vec!["1", "Knowledge Base", "KB"]]);
+        let users = table(&["user_key", "username"], &[vec!["u1", "u1"]]);
+        zip_of(&[
+            ("exportDescriptor.properties.gz", b"exportFormat=csv\nexportType=space\n"),
+            ("spaces.csv.gz", &spaces),
+            ("content.csv.gz", &gzipped(&content)),
+            ("bodycontent.csv.gz", &bodies),
+            ("label.csv.gz", &labels),
+            ("content_label.csv.gz", &labellings),
+            ("user_mapping.csv.gz", &users),
+            ("attachments/20/50/1", b"old flow"),
+            ("attachments/20/50/2", b"the flow"),
+        ])
     }
 
     fn area(core: &Core, admin: &Principal, name: &str) -> String {
@@ -723,11 +784,24 @@ mod tests {
 
     #[test]
     fn a_space_comes_across_with_its_tree_content_attachments_links_and_tags() {
+        // Grace is a Member with the e-mail address Confluence names her by, in another case; Ada is none.
+        the_knowledge_base_comes_across(knowledge_base(), "Ask [@Grace](turtle:member/member-grace) or @ada.\n");
+    }
+
+    #[test]
+    fn a_space_exported_as_csv_comes_across_as_the_same_space_exported_as_xml() {
+        // Confluence Cloud's CSV export holds no names of people, only their account IDs.
+        the_knowledge_base_comes_across(knowledge_base_csv(), "Ask @someone in Confluence or @someone in Confluence.\n");
+    }
+
+    /// Imports the space `knowledge_base` describes, in either form, and
+    /// finds what it holds; the mention on "Contact" reads as `contact`.
+    fn the_knowledge_base_comes_across(content: String, contact: &str) {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Wiki");
 
-        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content: knowledge_base() })
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content })
             .unwrap()
             .output;
 
@@ -740,7 +814,7 @@ mod tests {
             markdown_of(&core, &grace, deploy),
             format!("# Deploy\n\nFirst read [Set up](turtle:{set_up}) in Guides.\n\n![](<{}>)\n\n:confluence.toc[toc]\n\n```\na]]></b\n```\n", flow[0].url)
         );
-        assert_eq!(markdown_of(&core, &grace, &home.children[1].id), "Ask @grace.\n");
+        assert_eq!(markdown_of(&core, &grace, &home.children[1].id), contact);
         assert_eq!(get_page(&core, &grace, PageId { id: deploy.clone() }).unwrap().output.tags, ["runbook"]);
         let problems: Vec<_> = imported.problems.iter().map(|problem| (problem.file.as_str(), problem.message.as_str())).collect();
         assert_eq!(problems[0], ("Deploy/gone.pdf", "Its file is not in the export, so it was left out."));
@@ -807,16 +881,79 @@ mod tests {
                 ("heading", coverage::Outcome::Exact, 1),
                 ("image", coverage::Outcome::Exact, 1),
                 ("link to a page", coverage::Outcome::Exact, 1),
+                ("mention of a Member or Guest", coverage::Outcome::Exact, 1),
             ]
         );
         assert_eq!(coverage.elements[0].pages, ["Deploy"]);
-        // 8 of 11 elements exactly, 10 of 11 exactly or approximately.
-        assert_eq!((coverage.exact_percent, coverage.kept_percent), (72, 90));
+        // 9 of 12 elements exactly, 11 of 12 exactly or approximately.
+        assert_eq!((coverage.exact_percent, coverage.kept_percent), (75, 91));
         let not_imported: Vec<_> = coverage.not_imported.iter().map(|item| (item.what.as_str(), item.count)).collect();
         assert_eq!(
             not_imported,
             [("Earlier versions of pages", 1), ("Drafts", 1), ("Pages in Confluence's trash", 1), ("Earlier versions of attachments", 1), ("Personal labels", 1)]
         );
+    }
+
+    #[test]
+    fn the_report_on_a_csv_export_tells_what_it_holds_that_is_not_imported() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+
+        let coverage = check_confluence_import(&core, &grace, ConfluenceExport { content: knowledge_base_csv() }).unwrap().output;
+
+        assert_eq!((coverage.space.as_str(), coverage.pages, coverage.folders, coverage.attachments), ("Knowledge Base", 4, 1, 1));
+        let not_imported: Vec<_> = coverage.not_imported.iter().map(|item| (item.what.as_str(), item.count)).collect();
+        assert_eq!(
+            not_imported,
+            [
+                ("Comments", 1),
+                ("Earlier versions of pages", 1),
+                ("Drafts", 1),
+                ("Pages in Confluence's trash", 1),
+                ("Earlier versions of attachments", 1),
+                ("Personal labels", 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_page_a_csv_export_holds_no_content_for_comes_in_as_an_empty_page_not_a_folder() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Wiki");
+        let columns = ["contentid", "contenttype", "title", "content_status", "spaceid"];
+        let content = zip_of(&[
+            ("spaces.csv.gz", &table(&["spaceid", "spacename", "spacekey"], &[vec!["1", "KB", "KB"]])),
+            ("content.csv.gz", &table(&columns, &[vec!["2", "PAGE", "Empty", "current", "1"]])),
+            ("bodycontent.csv.gz", &table(&["body", "contentid", "bodytypeid"], &[])),
+        ]);
+
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content }).unwrap().output;
+
+        assert_eq!(outline(&core, &grace, &area_id), ["Empty", "Import report: KB (2023-11-14)"]);
+        assert!(imported.problems.is_empty(), "{:?}", imported.problems);
+    }
+
+    #[test]
+    fn a_link_by_title_goes_to_the_page_where_a_folder_shares_it_and_content_in_the_storage_format_wins() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Wiki");
+        let columns = ["contentid", "contenttype", "title", "content_status", "spaceid", "child_position"];
+        let link = "<p>See <ac:link><ri:page ri:content-title=\"Notes\" /></ac:link>.</p>";
+        let content = zip_of(&[
+            ("spaces.csv.gz", &table(&["spaceid", "spacename", "spacekey"], &[vec!["1", "KB", "KB"]])),
+            (
+                "content.csv.gz",
+                &table(&columns, &[vec!["2", "PAGE", "Home", "current", "1", "1"], vec!["3", "PAGE", "Notes", "current", "1", "2"], vec!["4", "FOLDER", "Notes", "current", "1", "3"]]),
+            ),
+            ("bodycontent.csv.gz", &table(&["body", "contentid", "bodytypeid"], &[vec!["h1. Wiki markup", "2", "0"], vec![link, "2", "2"], vec!["", "3", "2"]])),
+        ]);
+
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content }).unwrap().output;
+
+        let (home, notes) = (&imported.entries[0].id, &imported.entries[1].id);
+        assert_eq!(markdown_of(&core, &grace, home), format!("See [Notes](turtle:{notes}).\n"));
     }
 
     #[test]
@@ -891,7 +1028,7 @@ mod tests {
     }
 
     #[test]
-    fn a_zip_that_is_not_an_xml_export_is_refused_with_what_to_do() {
+    fn a_zip_that_is_no_export_or_cannot_be_read_is_refused_with_what_to_do() {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let message = |files: &[(&str, &[u8])]| {
@@ -903,12 +1040,12 @@ mod tests {
         };
 
         assert_eq!(
-            message(&[("content.csv.gz", b"contentid"), ("spaces.csv.gz", b"spaceid")]),
-            "This is Confluence's CSV export, which Turtle cannot read yet. Export the space as XML instead and choose that ZIP."
+            message(&[("Runbook.md", b"# Hi")]),
+            "This ZIP is not a Confluence space export. In Confluence, export the space as CSV or XML and choose that ZIP."
         );
         assert_eq!(
-            message(&[("Runbook.md", b"# Hi")]),
-            "This ZIP is not a Confluence space exported as XML. In Confluence, export the space as XML and choose that ZIP."
+            message(&[("spaces.csv.gz", b"spaceid,spacename,spacekey\n1,KB,KB\n"), ("content.csv.gz", b"\x1f\x8b broken")]),
+            "The export's content.csv could not be read. Export the space from Confluence again and choose the new ZIP."
         );
         assert_eq!(
             message(&[("entities.xml", b"<hibernate-generic><object class=\"Page\">")]),

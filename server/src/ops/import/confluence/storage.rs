@@ -21,6 +21,11 @@ pub(super) struct Lookup {
     pub attachment_keys: HashMap<String, String>,
     /// The name of each person, by their key.
     pub people: HashMap<String, String>,
+    /// The e-mail address of each person whose export tells it, by their key.
+    pub emails: HashMap<String, String>,
+    /// The ID of each Member or Guest the importer may see, by their e-mail
+    /// address in lower case.
+    pub people_in_turtle: HashMap<String, String>,
 }
 
 /// A Page's content, the links in it and what was found in it.
@@ -315,10 +320,21 @@ impl Converter<'_> {
                 (self.attachment_link(attachment), file.to_string())
             }
             Some(user) if user.name == "ri:user" => {
-                self.found.add("mention");
                 let key = user.attribute("ri:account-id").or_else(|| user.attribute("ri:userkey")).unwrap_or_default();
-                let name = self.lookup.people.get(key).map(String::as_str).unwrap_or("someone in Confluence");
-                (None, format!("@{name}"))
+                let name = self.lookup.people.get(key).map(String::as_str);
+                // The person's e-mail address, where the export tells it or,
+                // as Confluence Cloud does, names them by it, finds the
+                // Member or Guest with the same one.
+                let email = self.lookup.emails.get(key).map(String::as_str).or(name.filter(|name| name.contains('@')));
+                if let Some(person_id) = email.and_then(|email| self.lookup.people_in_turtle.get(&email.to_lowercase())) {
+                    self.found.add("mention of a Member or Guest");
+                    out.line.push(Inline::Mention { person_id: person_id.clone() });
+                    return;
+                }
+                self.found.add("mention");
+                // An address is not written into the Page, only what comes before its @.
+                let shown = name.map(|name| name.split('@').next().unwrap_or(name)).filter(|name| !name.is_empty());
+                (None, format!("@{}", shown.unwrap_or("someone in Confluence")))
             }
             Some(url) if url.name == "ri:url" => {
                 self.found.add("link");

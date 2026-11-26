@@ -1,6 +1,6 @@
 /*
  * Importing a ZIP of Markdown files, such as an Export, or a Confluence
- * space exported as XML, into an Area or beneath an Entry. A ZIP larger
+ * space exported as CSV or XML, into an Area or beneath an Entry. A ZIP larger
  * than this Turtle imports is refused before it is sent. Otherwise it is
  * sent in base64 to start the import, which then runs on the server while a
  * toast tells how far the upload and then the import have got; at the end,
@@ -54,7 +54,7 @@ export async function importFromFile(input: Omit<Input<'import'>, 'content'>, fi
 }
 
 /**
- * Imports a Confluence space exported as XML where `input` says, `into`
+ * Imports a Confluence space exported as CSV or XML where `input` says, `into`
  * naming that place. The report on it is a Page beside the import; the
  * toast tells how much came across and leads there.
  * Returns whether anything was imported, so the tree is loaded again.
