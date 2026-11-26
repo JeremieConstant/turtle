@@ -100,7 +100,10 @@
       await tick()
     }
     field.focus()
+    field.select()
   }
+
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform)
 
   function onkeydown(event: KeyboardEvent) {
     // A checkbox or a radio button is an input that nothing is typed into.
@@ -109,8 +112,8 @@
       event.target.closest(
         'input:not([type=checkbox], [type=radio]), textarea, select, [contenteditable]:not([contenteditable="false"])',
       ) !== null
-    if (asksForSearch(event, typing) && inShell(route)) {
-      // Otherwise the slash would land in the field it brings the focus to.
+    if (asksForSearch(event, typing, mac) && inShell(route)) {
+      // Otherwise the slash would land in the field it brings the focus to, and ⌘K would reach the browser.
       event.preventDefault()
       void focusSearch()
       return

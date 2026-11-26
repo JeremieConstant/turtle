@@ -7,6 +7,7 @@
    */
   import type { Editor as TipTap } from '@tiptap/core'
   import { toast } from 'svelte-sonner'
+  import { slide } from 'svelte/transition'
   import { Awareness } from 'y-protocols/awareness'
   import type * as Y from 'yjs'
   import { menuKeys, openMenu } from '../lib/menu'
@@ -15,7 +16,8 @@
   import { call } from '../lib/ops'
   import type { Area, QuickNote } from '../lib/operations.gen'
   import { currentPerson } from '../lib/person'
-  import { docFrom, stateOf, unsavedQuickNote } from '../lib/quickNote'
+  import { dur } from '../lib/motion'
+  import { docFrom, quickNoteTitle, stateOf, unsavedQuickNote } from '../lib/quickNote'
   import { router } from '../lib/router.svelte'
   import { pageAddress } from '../lib/routes'
   import { session } from '../lib/session.svelte'
@@ -45,6 +47,11 @@
   let body = $state.raw<{ doc: Y.Doc; connection: { awareness: Awareness } }>(bodyFrom(''))
   let editor = $state.raw<TipTap | null>(null)
   let saving = $state(false)
+  /** The body's first line of text, which is the title when none is typed. */
+  let firstLine = $state('')
+  /** Whether someone is writing in the box; the toolbar only shows then, so an empty box reads as a place to type. */
+  let writing = $state(false)
+  const titleToSave = $derived(quickNoteTitle(title, firstLine))
   let saved = $state.raw<QuickNote | null>(null)
   let quickNotes = $state.raw<QuickNote[]>([])
   let now = $state(Math.floor(Date.now() / 1000))
@@ -94,13 +101,26 @@
     }
   }
 
+  /** The text of the first line in the body that has any. */
+  function firstLineOf(running: TipTap): string {
+    let line = ''
+    running.state.doc.descendants(node => {
+      if (line) return false
+      if (node.isTextblock && node.textContent.trim()) line = node.textContent
+      return !node.isTextblock
+    })
+    return line
+  }
+
   function keep() {
+    if (editor) firstLine = firstLineOf(editor)
     unsaved.keep({ title, body: !editor || editor.isEmpty ? '' : stateOf(body.doc) })
     saved = null
   }
 
   function started(running: TipTap) {
     editor = running
+    firstLine = firstLineOf(running)
     running.on('update', keep)
   }
 
@@ -116,16 +136,17 @@
   }
 
   async function save() {
-    if (saving || !title.trim()) return
+    if (saving || !titleToSave) return
     saving = true
     const into = area
     try {
       saved = await call('create_quick_note', {
-        title,
+        title: titleToSave,
         editor_state: editor?.isEmpty === false ? stateOf(body.doc) : null,
         area_id: into.id,
       })
       title = ''
+      firstLine = ''
       body = bodyFrom('')
       unsaved.keep({ title: '', body: '' })
       // The Area's tree in the sidebar gets the new Page if it is open there.
@@ -177,6 +198,12 @@
     }
   }
 
+  /* A menu of the toolbar is part of the box, so moving into it is still writing. */
+  function leave(event: FocusEvent) {
+    const box = event.currentTarget as HTMLElement
+    if (!box.contains(event.relatedTarget as Node | null)) writing = false
+  }
+
   function ontitlekey(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
       event.preventDefault()
@@ -188,9 +215,9 @@
 </script>
 
 <section class="quick" aria-labelledby="quick-label">
-  <h2 id="quick-label" class="visually-hidden">Quick Note</h2>
+  <h2 id="quick-label" class="label">Quick Note</h2>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="box" {onkeydowncapture}>
+  <div class="box" {onkeydowncapture} onfocusin={() => (writing = true)} onfocusout={leave}>
     <input
       bind:this={titleField}
       bind:value={title}
@@ -201,8 +228,10 @@
       oninput={keep}
       onkeydown={ontitlekey}
     />
-    {#if editor}
-      <Toolbar {editor} inline />
+    {#if editor && (writing || title || firstLine)}
+      <div class="tools" transition:slide={{ duration: dur('--dur-fast') }}>
+        <Toolbar {editor} inline />
+      </div>
     {/if}
     <div class="body">
       {#key body}
@@ -213,6 +242,7 @@
           autofocus={false}
           compact
           label="Quick Note"
+          placeholder="Write something down. It becomes a Page you can find again."
           {attach}
           onready={started}
         />
@@ -241,7 +271,7 @@
           </button>
         {/if}
       </p>
-      <button class="btn primary" disabled={saving || !title.trim()} onclick={save}>
+      <button class="btn primary" disabled={saving || !titleToSave} onclick={save}>
         Save <kbd>{shortcut}</kbd>
       </button>
     </div>
@@ -310,8 +340,11 @@
 </div>
 
 <style>
-  .quick {
-    margin-top: var(--space-12);
+  .label {
+    margin: 0 0 var(--space-2);
+    color: var(--color-muted);
+    font-size: var(--text-s);
+    font-weight: var(--weight-medium);
   }
 
   .box {

@@ -49,25 +49,44 @@ test('without results the mark stays where it is', () => {
   expect(moveMark(0, 0, 'ArrowUp')).toBe(0)
 })
 
-const key = (key: string, held: Partial<Record<'metaKey' | 'ctrlKey' | 'altKey', boolean>> = {}) => ({
+const key = (key: string, held: Partial<Record<'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey', boolean>> = {}) => ({
   key,
   metaKey: false,
   ctrlKey: false,
   altKey: false,
+  shiftKey: false,
   ...held,
 })
 
 test('a slash outside a text field asks for the search', () => {
-  expect(asksForSearch(key('/'), false)).toBe(true)
+  expect(asksForSearch(key('/'), false, true)).toBe(true)
 })
 
 test('a slash typed into a text field is only a slash', () => {
-  expect(asksForSearch(key('/'), true)).toBe(false)
+  expect(asksForSearch(key('/'), true, true)).toBe(false)
 })
 
 test('other keys, and a slash that belongs to a shortcut of the browser, do not ask for the search', () => {
-  expect(asksForSearch(key('s'), false)).toBe(false)
-  expect(asksForSearch(key('/', { metaKey: true }), false)).toBe(false)
-  expect(asksForSearch(key('/', { ctrlKey: true }), false)).toBe(false)
-  expect(asksForSearch(key('/', { altKey: true }), false)).toBe(false)
+  expect(asksForSearch(key('s'), false, true)).toBe(false)
+  expect(asksForSearch(key('/', { metaKey: true }), false, true)).toBe(false)
+  expect(asksForSearch(key('/', { ctrlKey: true }), false, true)).toBe(false)
+  expect(asksForSearch(key('/', { altKey: true }), false, true)).toBe(false)
+})
+
+test('⌘K on a Mac asks for the search, even while typing', () => {
+  expect(asksForSearch(key('k', { metaKey: true }), false, true)).toBe(true)
+  expect(asksForSearch(key('k', { metaKey: true }), true, true)).toBe(true)
+  expect(asksForSearch(key('K', { metaKey: true }), true, true)).toBe(true)
+})
+
+test('off a Mac it is Ctrl+K', () => {
+  expect(asksForSearch(key('k', { ctrlKey: true }), true, false)).toBe(true)
+  expect(asksForSearch(key('k', { metaKey: true }), false, false)).toBe(false)
+  expect(asksForSearch(key('k', { ctrlKey: true }), false, true)).toBe(false)
+})
+
+test('K alone or with another modifier is left to whatever else uses it', () => {
+  expect(asksForSearch(key('k'), false, true)).toBe(false)
+  expect(asksForSearch(key('k', { metaKey: true, shiftKey: true }), false, true)).toBe(false)
+  expect(asksForSearch(key('k', { metaKey: true, altKey: true }), false, true)).toBe(false)
 })
