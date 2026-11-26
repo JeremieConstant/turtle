@@ -22,6 +22,10 @@ This covers people as much as Pages: a Profile, a person's name and their pictur
 
 Error messages are whole sentences that say what to do next ("Enter a title."), name things with glossary terms, and never expose internals. Internal failures are logged on the server, not described to the caller.
 
+## An import reports, it does not stop
+
+An import brings in all it can. What is wrong with one file, Page, Attachment, Tag or link becomes a Problem naming it, and the rest comes in; only what concerns the whole import, such as a missing Role or a ZIP that is no export, ends it. A `?` on a call made per imported item is the place to look: it ends the import part way, with some of the tree already created.
+
 ## A Version holds exactly its authors' changes
 
 People's edits arrive at an open Page at any moment. Code that reads a Page's content, changes it, and takes its unrecorded changes for a Version does all three under one `state` lock in `live.rs`, so an edit arriving in between can neither be undone nor credited to the wrong author.
