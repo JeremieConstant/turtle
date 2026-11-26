@@ -1,19 +1,37 @@
 # Roadmap
 
-Where Turtle is heading, in three parts: what is being built now, what comes after, and what Turtle will not become.
+Where Turtle is heading, in three parts: what has been built, what comes next, and what Turtle will not become.
 
-## Now: the MVP
+## Done: the MVP
 
-Turtle is building its MVP, tracked in [#1](https://github.com/turtle-wiki/turtle/issues/1) and described in [docs/mvp.md](docs/mvp.md) under [In the MVP](docs/mvp.md#in-the-mvp).
+The MVP is complete: Areas, Pages and Folders, live editing, Versions and the Trash, Search, Roles, Mail, Import and Export, and Agents through MCP. It was tracked in [#1](https://github.com/turtle-wiki/turtle/issues/1) and is described in [docs/mvp.md](docs/mvp.md). [Turtle 0.2.0](https://github.com/turtle-wiki/turtle/releases/tag/v0.2.0) is the first Release with all of it.
 
-Two milestones mark the way:
+## Next: one milestone per Release
 
-- **[First public showing](https://github.com/turtle-wiki/turtle/milestone/1)**: what Turtle needs before it is shown to people outside the project, such as a README, a contribution guide, a security policy and releases with readable notes.
-- **[1.0](https://github.com/turtle-wiki/turtle/milestone/2)**: the MVP complete, so that a team can rely on Turtle for its documentation.
+Each milestone below is one Release. Until 1.0, the data format and the API may change between them; Turtle brings an existing data directory up to date when it starts.
 
-## Next: after the MVP
-
-What follows the MVP, in roughly that order, is the list [After the MVP](docs/mvp.md#after-the-mvp) in `docs/mvp.md`.
+- **0.3: Moving in.** A team can bring its documentation from Confluence and learn Turtle without asking anyone.
+  - Import a Confluence space ([#85](https://github.com/turtle-wiki/turtle/issues/85))
+  - A first version of the user documentation
+- **0.4: Sharing beyond the team.** Access can be narrower and wider than a whole Area.
+  - Breaking Inheritance: a Page or Folder with Grants of its own
+  - Guests, invited to chosen Areas or Subtrees
+  - Share Links: read-only public access to an Area or Subtree
+- **0.5: Larger teams.** Turtle fits an organisation's sign-in and language.
+  - Groups as recipients of Grants
+  - OIDC sign-in
+  - A German interface ([#84](https://github.com/turtle-wiki/turtle/issues/84))
+  - Hand over a deactivated Member's Personal Area ([#40](https://github.com/turtle-wiki/turtle/issues/40))
+- **0.6: Working together.** Pages talk to each other and to the people writing them.
+  - Comments, inline and at the end of a Page
+  - Backlinks: which Pages link to this one
+  - Templates, as ordinary Pages that are copied
+  - The command palette: a leading `>` in the search runs the operations MCP exposes
+- **1.0: Something to rely on.** No new features, but promises.
+  - The data format and the API stay compatible within 1.x
+  - Every update from 0.6 on is tested against real data directories
+  - Backup, restore and updating are documented and tested
+  - An outside look at security
 
 ## Never
 
