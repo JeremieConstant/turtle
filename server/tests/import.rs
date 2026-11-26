@@ -47,3 +47,28 @@ async fn an_import_may_be_larger_than_other_requests_up_to_its_own_limit() {
     assert!(other_refused.contains("This request is larger than"), "{other_refused}");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_started_import_answers_at_once_and_is_followed_until_it_is_done() {
+    let mut server = TestServer::start_with_limits(1, 3).await;
+    let ada = server.sign_up().await;
+    let area = ada.call("create_area", json!({ "name": "Engineering" })).await["id"].as_str().unwrap().to_string();
+
+    let started = ada.call("start_import", json!({ "area_id": area, "content": zip_of_one_page(2 * MB) })).await;
+    let (too_large, _) = ada.try_call("start_import", json!({ "area_id": area, "content": zip_of_one_page(3 * MB + 100 * 1024) })).await;
+    let import_id = started["import_id"].as_str().unwrap();
+    let mut progress = started.clone();
+    for _ in 0..500 {
+        progress = ada.call("get_import_progress", json!({ "import_id": import_id })).await;
+        if progress["stage"] == "done" || progress["stage"] == "failed" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    assert_eq!(started["stage"], "reading");
+    assert_eq!(too_large, 413);
+    assert_eq!(progress["stage"], "done", "{progress}");
+    assert_eq!(progress["imported"]["entries"][0]["title"], "Runbook");
+    server.stop().await;
+}

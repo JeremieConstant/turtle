@@ -7,7 +7,11 @@
 //! source: the tree in order, IDs kept where they are free, Attachments,
 //! links pointed at what they name, Tags, and a report of what did not come
 //! across instead of a failure. An importer for another source, such as
-//! Confluence, is a new reader beside `markdown` and its own operation.
+//! Confluence, is a new reader beside `markdown` and its own operations.
+//!
+//! Each import is an operation that answers once all is done, and one that
+//! starts it and answers at once (`running`), so a large import can be
+//! followed while it runs instead of only waited for.
 
 use super::tree::{self, Entry, Kind, NewEntry};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
@@ -18,6 +22,9 @@ use serde::{Deserialize, Serialize};
 
 mod confluence;
 mod markdown;
+mod running;
+
+pub use running::Imports;
 
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
@@ -25,6 +32,18 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         "Imports a ZIP of Markdown files, sent in base64, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role.",
         import,
     );
+    catalogue.add(
+        "start_import",
+        "Starts what import does and answers at once, before anything is read, with the import's ID; get_import_progress then tells how far it has got and, once it is done, what import answers with. Meant for large ZIPs, which take a while to bring in. Needs the Write Role.",
+        start_import,
+    );
+    catalogue
+        .add(
+            "get_import_progress",
+            "Tells how far an import begun with start_import or start_import_confluence has got: reading the ZIP, creating Pages and Folders, writing their content, done or failed, with how many of how many. A Confluence import tells its report as soon as the space is read, before anything is created. Once done, it holds what the import created and what did not come across; once failed, why. Only whoever started an import can follow it, and it is forgotten an hour after it ends.",
+            get_import_progress,
+        )
+        .changes = false;
     confluence::register(catalogue);
 }
 
@@ -36,9 +55,40 @@ pub const DEFAULT_IMPORT_LIMIT: u64 = 200 * 1024 * 1024;
 /// Why a ZIP larger than the import limit is refused.
 pub fn too_large(core: &Core) -> OpError {
     OpError::InvalidInput(format!(
-        "This ZIP is larger than {}, the most this Turtle imports at once. Import it in parts, or ask whoever runs Turtle to raise the limit.",
+        "This ZIP is larger than {}, the most this Turtle imports at once. Import it in parts, or ask whoever runs Turtle to raise the limit with TURTLE_MAX_IMPORT_MB.",
         super::attachments::size_in_words(core.import_limit())
     ))
+}
+
+/// Why a file in an import does not come across when it is larger than
+/// the attachment limit, or nothing when it is not.
+pub(super) fn too_large_to_attach(core: &Core, bytes: u64) -> Option<String> {
+    let limit = core.attachment_limit();
+    (bytes > limit).then(|| {
+        format!(
+            "It is {}, larger than {}, the most this Turtle accepts for one file, so it was left out. Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB.",
+            size_rounded_up(bytes),
+            super::attachments::size_in_words(limit)
+        )
+    })
+}
+
+/// "31.5 MB": a size as people read it, rounded up, so a file just over a
+/// limit never reads as the limit itself.
+fn size_rounded_up(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    let tenths = |unit: u64| (bytes * 10).div_ceil(unit);
+    let shown = |tenths: u64, unit: &str| {
+        if tenths.is_multiple_of(10) { format!("{} {unit}", tenths / 10) } else { format!("{}.{} {unit}", tenths / 10, tenths % 10) }
+    };
+    if bytes >= MB {
+        shown(tenths(MB), "MB")
+    } else if bytes >= KB {
+        shown(tenths(KB), "KB")
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -52,7 +102,7 @@ pub struct ToImport {
 }
 
 /// What an import created, and what did not come across.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Imported {
     /// The Pages and Folders created at the top of the import, with what is
     /// beneath them.
@@ -62,7 +112,7 @@ pub struct Imported {
 }
 
 /// A file that did not come across, and why.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Problem {
     /// Where it is in what was imported, such as its path in the ZIP.
     pub file: String,
@@ -80,7 +130,21 @@ pub fn import(core: &Core, principal: &Principal, input: ToImport) -> OpResult<I
     // Access is checked before the ZIP is read, so a refused import reads nothing.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
     let bundle = markdown::read(input.content)?;
-    write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle)
+    write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, &|_| {})
+}
+
+pub fn start_import(core: &Core, principal: &Principal, input: ToImport) -> OpResult<running::ImportProgress> {
+    // A refused import is refused at once, not once it is running.
+    check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
+    running::start(core, principal, move |core, principal, following| {
+        let bundle = markdown::read(input.content)?;
+        let step = |step| following.step(step);
+        Ok(write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, &step)?.output)
+    })
+}
+
+pub fn get_import_progress(core: &Core, principal: &Principal, input: running::OfImport) -> OpResult<running::ImportProgress> {
+    running::progress(core, principal, &input.import_id)
 }
 
 /// What an importer read from its source, in a form that is the same
@@ -129,25 +193,58 @@ pub(super) enum Target {
     Attachment(String),
 }
 
-/// Creates what the bundle holds beneath `parent_id`, or at the top of the Area.
+/// How far writing a bundle has got, as it goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Step {
+    /// `done` of `total` Pages and Folders are created.
+    Creating { done: u32, total: u32 },
+    /// The content of `done` of `total` Pages is written.
+    Writing { done: u32, total: u32 },
+}
+
+/// Is told each step of writing a bundle.
+pub(super) type Progress<'a> = &'a (dyn Fn(Step) + 'a);
+
+/// Creates what the bundle holds beneath `parent_id`, or at the top of the
+/// Area, telling `progress` how far it has got.
 pub(super) fn write_bundle(
     core: &Core,
     principal: &Principal,
     area_id: &str,
     parent_id: Option<&str>,
     bundle: Bundle,
+    progress: Progress,
 ) -> OpResult<Imported> {
     // Checked even with nothing to create, so an empty import is refused like any other.
     check_target(core, principal, area_id, parent_id)?;
     // Content is written once everything is created, so a link can point
     // to a Page that comes later in the tree.
     let mut created = Created { problems: bundle.problems, ..Created::default() };
-    let entries = create_all(core, principal, area_id, parent_id, bundle.entries, &mut created)?;
-    for (page_id, mut content, links) in std::mem::take(&mut created.content) {
+    let to_create = count(&bundle.entries);
+    progress(Step::Creating { done: 0, total: to_create });
+    let mut creating = Creating { progress, done: 0, total: to_create };
+    let entries = create_all(core, principal, area_id, parent_id, bundle.entries, &mut created, &mut creating)?;
+    let contents = std::mem::take(&mut created.content);
+    let to_write = contents.len() as u32;
+    progress(Step::Writing { done: 0, total: to_write });
+    for (written, (page_id, mut content, links)) in contents.into_iter().enumerate() {
         point_links(&mut content, &links, &created);
         super::content::write_content(core, principal, &page_id, content)?;
+        progress(Step::Writing { done: written as u32 + 1, total: to_write });
     }
     Ok(Imported { entries, problems: created.problems }.into())
+}
+
+/// How many Pages and Folders there are, with everything beneath them.
+fn count(entries: &[Incoming]) -> u32 {
+    entries.iter().map(|entry| 1 + count(&entry.children)).sum()
+}
+
+/// How many Pages and Folders are created so far, and whom to tell.
+struct Creating<'a> {
+    progress: Progress<'a>,
+    done: u32,
+    total: u32,
 }
 
 /// Fails unless the principal may add Pages and Folders where the import goes.
@@ -205,12 +302,17 @@ fn create_all(
     parent_id: Option<&str>,
     incoming: Vec<Incoming>,
     created_so_far: &mut Created,
+    creating: &mut Creating,
 ) -> Result<Vec<Entry>, OpError> {
     let mut entries = Vec::new();
     for incoming in incoming {
         let entry = NewEntry { area_id: area_id.into(), parent_id: parent_id.map(Into::into), title: incoming.title };
         let mut created = tree::create_with_id(core, principal, entry, incoming.kind, incoming.id.as_deref())?.output;
         for attachment in incoming.attachments {
+            if let Some(message) = too_large_to_attach(core, attachment.content.len() as u64) {
+                created_so_far.problems.push(Problem::new(attachment.key, message));
+                continue;
+            }
             match super::attachments::attach(core, principal, created.id.clone(), &attachment.name, attachment.content) {
                 Ok(attached) => {
                     created_so_far.attachments.insert(attachment.key, attached.output.url);
@@ -238,7 +340,9 @@ fn create_all(
                 Err(error) => return Err(error),
             }
         }
-        created.children = create_all(core, principal, area_id, Some(&created.id), incoming.children, created_so_far)?;
+        creating.done += 1;
+        (creating.progress)(Step::Creating { done: creating.done, total: creating.total });
+        created.children = create_all(core, principal, area_id, Some(&created.id), incoming.children, created_so_far, creating)?;
         entries.push(created);
     }
     Ok(entries)
@@ -652,7 +756,7 @@ mod tests {
         later.attachments.push(IncomingAttachment { key: "attachment:9".into(), name: "chart.png".into(), content: b"a chart".to_vec() });
         home.children.push(later);
 
-        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![home], problems: Vec::new() }).unwrap().output;
+        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![home], problems: Vec::new() }, &|_| {}).unwrap().output;
 
         let later = &imported.entries[0].children[0].id;
         let chart = &attachments_of(&core, &grace, later)[0].2;
@@ -669,7 +773,7 @@ mod tests {
         runbook.attachments.push(IncomingAttachment { key: "Runbook/_attachments/big.bin".into(), name: "big.bin".into(), content: b"too large".to_vec() });
         runbook.attachments.push(IncomingAttachment { key: "Runbook/_attachments/ok.txt".into(), name: "ok.txt".into(), content: b"ok".to_vec() });
 
-        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook], problems: Vec::new() }).unwrap().output;
+        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook], problems: Vec::new() }, &|_| {}).unwrap().output;
 
         let runbook = &imported.entries[0].id;
         assert_eq!(markdown_of(&core, &grace, runbook), "Restart it.\n");
@@ -677,6 +781,50 @@ mod tests {
         assert_eq!(names, ["ok.txt"]);
         assert_eq!(imported.problems.len(), 1);
         assert_eq!(imported.problems[0].file, "Runbook/_attachments/big.bin");
-        assert!(imported.problems[0].message.starts_with("This file is larger than"), "{}", imported.problems[0].message);
+        assert_eq!(
+            imported.problems[0].message,
+            "It is 9 bytes, larger than 4 bytes, the most this Turtle accepts for one file, so it was left out. Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB."
+        );
+    }
+
+    #[test]
+    fn a_file_too_large_to_attach_is_told_by_its_size_rounded_up_and_the_setting_that_raises_the_limit() {
+        let mut core = fresh();
+        core.core.set_attachment_limit(25 * 1024 * 1024);
+
+        let message = too_large_to_attach(&core, 25 * 1024 * 1024 + 1).unwrap();
+
+        assert!(message.starts_with("It is 25.1 MB, larger than 25 MB,"), "{message}");
+        assert!(message.ends_with("raise that limit with TURTLE_MAX_ATTACHMENT_MB."), "{message}");
+        assert_eq!(too_large_to_attach(&core, 25 * 1024 * 1024), None);
+    }
+
+    #[test]
+    fn writing_a_bundle_tells_how_many_pages_and_folders_are_created_and_then_how_many_contents_are_written() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let mut runbook = page("Runbook.md", "Runbook", "Restart it.", &[]);
+        runbook.children.push(page("Runbook/Deploy.md", "Deploy", "Ship it.", &[]));
+        let steps = std::cell::RefCell::new(Vec::new());
+
+        write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook, page("Empty.md", "Empty", "", &[])], problems: Vec::new() }, &|step| {
+            steps.borrow_mut().push(step)
+        })
+        .unwrap();
+
+        assert_eq!(
+            steps.into_inner(),
+            [
+                Step::Creating { done: 0, total: 3 },
+                Step::Creating { done: 1, total: 3 },
+                Step::Creating { done: 2, total: 3 },
+                Step::Creating { done: 3, total: 3 },
+                // The empty Page has no content to write.
+                Step::Writing { done: 0, total: 2 },
+                Step::Writing { done: 1, total: 2 },
+                Step::Writing { done: 2, total: 2 },
+            ]
+        );
     }
 }

@@ -166,6 +166,15 @@ fn table() -> Vec<Row> {
             |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}),
             [INVALID, INVALID, REFUSED, HIDDEN, INVALID],
         ),
+        // An empty ZIP: what is checked is who may start an import, not how it ends.
+        ("start_import", |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}), [OK, OK, REFUSED, HIDDEN, OK]),
+        (
+            "start_import_confluence",
+            |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}),
+            [OK, OK, REFUSED, HIDDEN, OK],
+        ),
+        // Nobody has started an import, so there is none to follow.
+        ("get_import_progress", |_| json!({"import_id": "made-up"}), [HIDDEN; 5]),
         ("export_pdf", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         // Every Workspace has the PDF Style "standard", its default.
         ("list_pdf_styles", |_| json!({}), [OK; 5]),

@@ -119,6 +119,8 @@ An app that asks only to read can never change anything. */
 }
 
 export type Coverage = {
+  /** The largest attachment this Turtle accepts, in bytes. */
+  attachment_limit_bytes: number
   /** The attachments that become Attachments. */
   attachments: number
   /** Each kind of content found, the least well kept first. */
@@ -139,6 +141,9 @@ comes across exactly or approximately, in whole percent, rounded down. */
   pages: number
   /** The space's name, as Confluence has it. */
   space: string
+  /** The attachments larger than this Turtle accepts, which are left out.
+Whoever runs Turtle can raise the limit with TURTLE_MAX_ATTACHMENT_MB. */
+  too_large: TooLarge[]
 }
 
 export type CreatedToken = {
@@ -294,6 +299,24 @@ the reason. */
   problems: Problem[]
 }
 
+export type ImportProgress = {
+  /** A Confluence import's report on the space, as soon as it is read and
+before anything is created: what comes across and how well, and which
+attachments are too large for this Turtle. Absent for other imports. */
+  coverage?: Coverage | null
+  /** How much of the stage is done: Pages and Folders created while
+creating, Pages whose content is written while writing. */
+  done: number
+  /** Once it failed: why, as a sentence. What it created before is kept. */
+  error?: string | null
+  import_id: string
+  /** Once it is done: what was created and what did not come across. */
+  imported?: Imported | null
+  stage: Stage
+  /** How much there is to do in the stage; 0 while reading. */
+  total: number
+}
+
 export type Kind = "page" | "folder"
 
 export type Language = "en" | "de"
@@ -303,6 +326,15 @@ export type LastEdited = {
   at: number
   /** Members, Agents acting for a Member, and standalone Agents, told apart. */
   by: Author[]
+}
+
+export type Limits = {
+  /** The largest file, in bytes, that can be attached to a Page, also when
+it comes in with an import. Set with `TURTLE_MAX_ATTACHMENT_MB`. */
+  attachment_bytes: number
+  /** The largest ZIP, in bytes, that can be imported at once. Set with
+`TURTLE_MAX_IMPORT_MB`. */
+  import_bytes: number
 }
 
 export type Member = {
@@ -609,6 +641,9 @@ export type Session = {
   agent?: CallingAgent | null
   /** Present when this Turtle is a Demo, which is reset from time to time. */
   demo?: Demo | null
+  /** The largest file and the largest ZIP this Turtle accepts, so a client
+can refuse a larger one before sending it. Told only to those signed in. */
+  limits?: Limits | null
   /** The signed-in Member, if anyone is signed in. */
   member?: Member | null
   /** Which Release of Turtle this is, told only to those signed in: a
@@ -636,6 +671,8 @@ the link is then to be passed on. */
 passed on. */
   mailed_to?: string | null
 }
+
+export type Stage = "done" | "failed" | "reading" | "creating" | "writing"
 
 export type TagsInUse = {
   /** The one on the most Pages first; as many alphabetically. */
@@ -672,6 +709,13 @@ owner by hand. Its value was never shown to anyone. */
   last_used_at?: number | null
   name: string
   read_only: boolean
+}
+
+export type TooLarge = {
+  /** Its size in bytes. */
+  bytes: number
+  /** The page's title and the attachment's name, as problems name it. */
+  file: string
 }
 
 export type Trashed = {
@@ -1303,7 +1347,26 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: Imported
   }
-  /** Reads a Confluence space exported as XML, a ZIP sent in base64, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, and what the space holds that is not imported, such as comments and page history. */
+  /** Starts what import does and answers at once, before anything is read, with the import's ID; get_import_progress then tells how far it has got and, once it is done, what import answers with. Meant for large ZIPs, which take a while to bring in. Needs the Write Role. */
+  start_import: {
+    input: {
+      area_id: string
+      /** The ZIP, in base64. */
+      content: string
+      /** The Page or Folder to import beneath; the top of the Area if absent. */
+      parent_id?: string | null
+    }
+    output: ImportProgress
+  }
+  /** Tells how far an import begun with start_import or start_import_confluence has got: reading the ZIP, creating Pages and Folders, writing their content, done or failed, with how many of how many. A Confluence import tells its report as soon as the space is read, before anything is created. Once done, it holds what the import created and what did not come across; once failed, why. Only whoever started an import can follow it, and it is forgotten an hour after it ends. */
+  get_import_progress: {
+    input: {
+      /** The ID start_import or start_import_confluence answered with. */
+      import_id: string
+    }
+    output: ImportProgress
+  }
+  /** Reads a Confluence space exported as XML, a ZIP sent in base64, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB. */
   check_confluence_import: {
     input: {
       /** The ZIP Confluence exports a space as, in base64. */
@@ -1321,6 +1384,17 @@ of the Page. Needed only when several Sections have this heading. */
       parent_id?: string | null
     }
     output: ImportedFromConfluence
+  }
+  /** Starts what import_confluence does and answers at once, before anything is read, with the import's ID; get_import_progress then tells how far it has got, the report on the space as soon as it is read, and, once it is done, what was created and what did not come across. Meant for whole spaces, which take a while to bring in. Needs the Write Role. */
+  start_import_confluence: {
+    input: {
+      area_id: string
+      /** The ZIP Confluence exports a space as, in base64. */
+      content: string
+      /** The Page or Folder to import beneath; the top of the Area if absent. */
+      parent_id?: string | null
+    }
+    output: ImportProgress
   }
   /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role. */
   export_pdf: {

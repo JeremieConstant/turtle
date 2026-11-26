@@ -130,7 +130,7 @@ impl Tally {
 }
 
 /// How much of a Confluence space comes across into Turtle.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Coverage {
     /// The space's name, as Confluence has it.
     pub space: String,
@@ -152,10 +152,24 @@ pub struct Coverage {
     pub elements: Vec<Found>,
     /// What else the space holds that is not imported, such as comments.
     pub not_imported: Vec<NotImported>,
+    /// The attachments larger than this Turtle accepts, which are left out.
+    /// Whoever runs Turtle can raise the limit with TURTLE_MAX_ATTACHMENT_MB.
+    pub too_large: Vec<TooLarge>,
+    /// The largest attachment this Turtle accepts, in bytes.
+    pub attachment_limit_bytes: u64,
+}
+
+/// An attachment larger than this Turtle accepts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct TooLarge {
+    /// The page's title and the attachment's name, as problems name it.
+    pub file: String,
+    /// Its size in bytes.
+    pub bytes: u64,
 }
 
 /// A kind of content found in the pages, and what becomes of it.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Found {
     /// What Confluence content it is, such as `table` or `info macro`.
     pub name: String,
@@ -169,7 +183,7 @@ pub struct Found {
 }
 
 /// Something a space holds that is not imported, and how much of it.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct NotImported {
     /// What it is, such as "Comments".
     pub what: String,
@@ -216,5 +230,7 @@ pub fn report(space: String, counts: (u32, u32, u32), found: &[(String, Tally)],
         kept_percent: share(&|outcome| outcome <= Outcome::Approximate),
         elements,
         not_imported: not_imported.into_iter().filter(|item| item.count > 0).collect(),
+        too_large: Vec::new(),
+        attachment_limit_bytes: 0,
     }
 }
