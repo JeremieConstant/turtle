@@ -38,7 +38,7 @@ typst-layout = "0.15.1"
 [dev-dependencies]
 pdf-extract = "0.12.1"
 tempfile = "3.27.0"
-tokio-tungstenite = "0.29.0"
+tokio-tungstenite = "0.30.0"
 tower = { version = "0.5.3", features = ["util"] }
 
 [lints.clippy]
