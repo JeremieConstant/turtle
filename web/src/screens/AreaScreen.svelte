@@ -22,7 +22,7 @@
   import { areaAddress, pageAddress } from '../lib/routes'
   import { ask } from '../lib/confirm.svelte'
   import { exportToFile } from '../lib/exporting'
-  import { chooseZip, importFromFile } from '../lib/importing'
+  import { chooseZip, importConfluenceFromFile, importFromFile } from '../lib/importing'
   import { reportFailure } from '../lib/toasts'
   import { UNDO_DURATION } from '../lib/trash'
   import { createEntry } from '../lib/tree'
@@ -154,11 +154,11 @@
     router.navigate(pageAddress(page.id, page.title))
   }
 
-  /** Imports a ZIP the person chooses at the top of the Area. */
-  async function importIntoArea() {
+  /** Imports a ZIP the person chooses at the top of the Area with `importing`. */
+  async function importIntoArea(importing: typeof importFromFile) {
     if (!area) return
     const file = await chooseZip()
-    if (file && (await importFromFile({ area_id: id }, file, area.name))) await reload()
+    if (file && (await importing({ area_id: id }, file, area.name))) await reload()
   }
 
   /** A Folder has no screen of its own: it opens in the sidebar's tree. */
@@ -211,7 +211,10 @@
               Export as Markdown
             </button>
             {#if writable}
-              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(importIntoArea)}>Import Markdown</button>
+              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => importIntoArea(importFromFile))}>Import Markdown</button>
+              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => importIntoArea(importConfluenceFromFile))}>
+                Import from Confluence
+              </button>
             {/if}
             {#if area.role === 'admin' && !area.personal}
               <hr />

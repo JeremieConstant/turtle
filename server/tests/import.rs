@@ -32,7 +32,15 @@ async fn an_import_may_be_larger_than_other_requests_up_to_its_own_limit() {
     let (too_large, refused) = ada.try_call("import", json!({ "area_id": area, "content": zip_of_one_page(3 * MB + 100 * 1024) })).await;
     let (other, other_refused) = ada.try_call("replace_page", json!({ "page_id": page, "markdown": "a".repeat(2 * MB) })).await;
 
+    // A Confluence import has the same limit: this ZIP is no export, which is
+    // only found once it is past the limit.
+    let (confluence, not_an_export) = ada.try_call("check_confluence_import", json!({ "content": zip_of_one_page(2 * MB) })).await;
+    let (confluence_too_large, _) = ada.try_call("import_confluence", json!({ "area_id": area, "content": zip_of_one_page(3 * MB + 100 * 1024) })).await;
+
     assert_eq!(imported["entries"][0]["title"], "Runbook");
+    assert_eq!(confluence, 400);
+    assert!(not_an_export.contains("not a Confluence space exported as XML"), "{not_an_export}");
+    assert_eq!(confluence_too_large, 413);
     assert_eq!(too_large, 413);
     assert!(refused.contains("This ZIP is larger than 3 MB"), "{refused}");
     assert_eq!(other, 413);

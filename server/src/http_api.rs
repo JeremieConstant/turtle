@@ -5,7 +5,7 @@
 use crate::ops::{self, Catalogue, Core, OpError, Principal, SessionChange};
 use axum::extract::rejection::StringRejection;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Extension, Json, Router};
@@ -30,7 +30,10 @@ pub fn input_limit(core: &Core) -> DefaultBodyLimit {
     DefaultBodyLimit::max(base64_input_of(core.attachment_limit()))
 }
 
-/// The largest request `import` is called with: a ZIP, in base64. It has a
+/// The operations called with a ZIP to import, which have the import limit.
+const IMPORTS: [&str; 3] = ["import", "import_confluence", "check_confluence_import"];
+
+/// The largest request an import is called with: a ZIP, in base64. It has a
 /// limit of its own, far above the rest, which is checked before anyone is
 /// known; only someone signed in gets as far as the import.
 fn import_input_limit(core: &Core) -> DefaultBodyLimit {
@@ -51,8 +54,11 @@ pub fn router(core: Arc<Core>, client_address_header: Option<HeaderName>) -> Rou
         client_address_header,
     });
     // The limit given with a route takes the place of the one around them all.
-    Router::new()
-        .route("/api/import", post(call_import).layer(import_limit))
+    let mut router = Router::new();
+    for operation in IMPORTS {
+        router = router.route(&format!("/api/{operation}"), post(call_import).layer(import_limit));
+    }
+    router
         .route("/api/{operation}", post(call))
         .layer(limit)
         .with_state(api)
@@ -68,13 +74,16 @@ async fn call(
     call_operation(api, operation, connection, headers, body).await
 }
 
+/// An import, named by the last part of its route, which has the import limit.
 async fn call_import(
     State(api): State<Arc<Api>>,
+    uri: Uri,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     body: Result<String, StringRejection>,
 ) -> Response {
-    call_operation(api, "import".into(), connection, headers, body).await
+    let operation = uri.path().rsplit('/').next().unwrap_or_default().to_string();
+    call_operation(api, operation, connection, headers, body).await
 }
 
 async fn call_operation(
@@ -87,7 +96,7 @@ async fn call_operation(
     let body = match body {
         Ok(body) => body,
         Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
-            let message = if operation == "import" {
+            let message = if IMPORTS.contains(&operation.as_str()) {
                 ops::import::too_large(&api.core)
             } else {
                 OpError::InvalidInput("This request is larger than Turtle accepts. Send less at once.".into())

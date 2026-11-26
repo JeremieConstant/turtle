@@ -10,7 +10,7 @@
   import { tick } from 'svelte'
   import { copyLink, entryMenuItems, type EntryMenuItem } from '../lib/entryMenu'
   import { exportToFile } from '../lib/exporting'
-  import { chooseZip, importFromFile } from '../lib/importing'
+  import { chooseZip, importConfluenceFromFile, importFromFile } from '../lib/importing'
   import { menuKeys, openMenu } from '../lib/menu'
   import { navigation } from '../lib/navigation.svelte'
   import type { Area, Entry, Kind } from '../lib/operations.gen'
@@ -30,6 +30,7 @@
     rename: 'Rename…',
     move: 'Move…',
     'import-markdown': 'Import Markdown…',
+    'import-confluence': 'Import from Confluence…',
     'copy-link': 'Copy link',
     'export-pdf': 'Export as PDF…',
     'export-markdown': 'Export as Markdown',
@@ -44,7 +45,7 @@
   /** The Entry the menu is open for, and the Area it is in. */
   let target = $state.raw<{ entry: Entry; area: Area } | null>(null)
   let pdfDialog: PdfExportDialog
-  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'import-markdown' | 'copy-link' | 'export-pdf' | 'export-markdown' | 'trash'>
+  type DialogPurpose = Exclude<EntryMenuItem, 'move' | 'import-markdown' | 'import-confluence' | 'copy-link' | 'export-pdf' | 'export-markdown' | 'trash'>
   /** What the dialog asks for, what its button says, and what it creates. */
   const DIALOGS: Record<DialogPurpose, { label: (title: string) => string; action: string; kind?: Kind }> = {
     'new-page': { label: title => `Title of the new Page beneath ${title}`, action: 'Create Page', kind: 'page' },
@@ -84,8 +85,8 @@
       void exportToFile({ area_id: area.id, entry_id: entry.id }, entry.title)
       return
     }
-    if (item === 'import-markdown') {
-      void importBeneath(target.entry, target.area)
+    if (item === 'import-markdown' || item === 'import-confluence') {
+      void importBeneath(target.entry, target.area, item === 'import-confluence' ? importConfluenceFromFile : importFromFile)
       return
     }
     if (item === 'move') {
@@ -117,10 +118,10 @@
     if (created?.kind === 'page') router.navigate(pageAddress(created.id, created.title))
   }
 
-  /** Imports a ZIP the person chooses beneath an Entry, and shows it there. */
-  async function importBeneath(entry: Entry, area: Area) {
+  /** Imports a ZIP the person chooses beneath an Entry with `importing`, and shows it there. */
+  async function importBeneath(entry: Entry, area: Area, importing: typeof importFromFile) {
     const file = await chooseZip()
-    if (!file || !(await importFromFile({ area_id: area.id, parent_id: entry.id }, file, entry.title))) return
+    if (!file || !(await importing({ area_id: area.id, parent_id: entry.id }, file, entry.title))) return
     collapsed.delete(entry.id)
     try {
       await navigation.loadTree(area.id)

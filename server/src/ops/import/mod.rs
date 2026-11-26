@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+mod confluence;
 mod markdown;
 
 pub(super) fn register(catalogue: &mut Catalogue) {
@@ -24,6 +25,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         "Imports a ZIP of Markdown files, sent in base64, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role.",
         import,
     );
+    confluence::register(catalogue);
 }
 
 /// The largest ZIP that can be imported at once, unless whoever runs Turtle
@@ -119,7 +121,7 @@ pub(super) struct IncomingAttachment {
 }
 
 /// What a link in imported content points to.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Target {
     /// The Page with this key, which becomes a Page link.
     Entry(String),
@@ -220,13 +222,21 @@ fn create_all(
             }
         }
         if incoming.kind == Kind::Page {
-            created_so_far.pages.insert(incoming.key, created.id.clone());
+            created_so_far.pages.insert(incoming.key.clone(), created.id.clone());
             if !incoming.content.is_empty() {
                 created_so_far.content.push((created.id.clone(), incoming.content, incoming.links));
             }
         }
         for tag in incoming.tags {
-            super::tags::add_tag(core, principal, super::tags::PageTag { page_id: created.id.clone(), tag })?;
+            match super::tags::add_tag(core, principal, super::tags::PageTag { page_id: created.id.clone(), tag: tag.clone() }) {
+                Ok(_) => {}
+                // A Tag that is not one, such as a Confluence label too long
+                // for a Tag, is told, and the Page keeps the rest.
+                Err(OpError::InvalidInput(message)) => created_so_far
+                    .problems
+                    .push(Problem::new(incoming.key.clone(), format!("Its Tag \"{tag}\" was left out: {message}"))),
+                Err(error) => return Err(error),
+            }
         }
         created.children = create_all(core, principal, area_id, Some(&created.id), incoming.children, created_so_far)?;
         entries.push(created);

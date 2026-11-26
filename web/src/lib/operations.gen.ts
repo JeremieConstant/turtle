@@ -118,6 +118,29 @@ An app that asks only to read can never change anything. */
   redirect_domain: string
 }
 
+export type Coverage = {
+  /** The attachments that become Attachments. */
+  attachments: number
+  /** Each kind of content found, the least well kept first. */
+  elements: Found[]
+  /** The Pages whose content comes across exactly. */
+  exact_pages: number
+  /** Of all the elements and macros found in the pages, the share that
+comes across exactly, in whole percent, rounded down. */
+  exact_percent: number
+  /** The folders that become Folders. */
+  folders: number
+  /** Of all the elements and macros found in the pages, the share that
+comes across exactly or approximately, in whole percent, rounded down. */
+  kept_percent: number
+  /** What else the space holds that is not imported, such as comments. */
+  not_imported: NotImported[]
+  /** The pages that become Pages. */
+  pages: number
+  /** The space's name, as Confluence has it. */
+  space: string
+}
+
 export type CreatedToken = {
   token: TokenSummary
   /** The value an Agent sends as `Authorization: Bearer <value>`. Shown
@@ -197,6 +220,18 @@ export type FontStyle = {
   weight: number
 }
 
+export type Found = {
+  /** What it becomes in Turtle, as a sentence. */
+  becomes: string
+  /** How often it was found. */
+  count: number
+  /** What Confluence content it is, such as `table` or `info macro`. */
+  name: string
+  outcome: Outcome
+  /** The titles of the first few pages it was found on. */
+  pages: string[]
+}
+
 export type Fragment = {
   /** Whether this piece is a word that matched. */
   highlighted: boolean
@@ -245,6 +280,17 @@ export type Imported = {
 beneath them. */
   entries: Entry[]
   /** Each file that did not come across, with the reason. Empty when all did. */
+  problems: Problem[]
+}
+
+export type ImportedFromConfluence = {
+  /** How much of the space came across. */
+  coverage: Coverage
+  /** The Pages and Folders created at the top of the import, with what is
+beneath them. */
+  entries: Entry[]
+  /** Each page or attachment that did not come across, or not whole, with
+the reason. */
   problems: Problem[]
 }
 
@@ -317,6 +363,14 @@ export type MovedEntry = {
   /** Where it was: moving it there puts it back. */
   was: Place
 }
+
+export type NotImported = {
+  count: number
+  /** What it is, such as "Comments". */
+  what: string
+}
+
+export type Outcome = "exact" | "approximate" | "placeholder" | "left_out"
 
 export type Page = {
   /** The Area the Page is in. */
@@ -1248,6 +1302,25 @@ of the Page. Needed only when several Sections have this heading. */
       parent_id?: string | null
     }
     output: Imported
+  }
+  /** Reads a Confluence space exported as XML, a ZIP sent in base64, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, and what the space holds that is not imported, such as comments and page history. */
+  check_confluence_import: {
+    input: {
+      /** The ZIP Confluence exports a space as, in base64. */
+      content: string
+    }
+    output: Coverage
+  }
+  /** Imports a Confluence space exported as XML, a ZIP sent in base64, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role. */
+  import_confluence: {
+    input: {
+      area_id: string
+      /** The ZIP Confluence exports a space as, in base64. */
+      content: string
+      /** The Page or Folder to import beneath; the top of the Area if absent. */
+      parent_id?: string | null
+    }
+    output: ImportedFromConfluence
   }
   /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role. */
   export_pdf: {

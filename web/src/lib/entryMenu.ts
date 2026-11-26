@@ -12,6 +12,7 @@ export type EntryMenuItem =
   | 'rename'
   | 'move'
   | 'import-markdown'
+  | 'import-confluence'
   | 'copy-link'
   | 'export-pdf'
   | 'export-markdown'
@@ -24,7 +25,7 @@ export type EntryMenuItem =
  * as a PDF first. Moving to the Trash comes last, apart from the rest.
  */
 export function entryMenuItems(kind: Kind, role: Role): EntryMenuItem[] {
-  const changing: EntryMenuItem[] = role === 'read' ? [] : ['new-page', 'new-folder', 'rename', 'move', 'import-markdown']
+  const changing: EntryMenuItem[] = role === 'read' ? [] : ['new-page', 'new-folder', 'rename', 'move', 'import-markdown', 'import-confluence']
   const link: EntryMenuItem[] = kind === 'page' ? ['copy-link'] : []
   return [...changing, ...link, 'export-pdf', 'export-markdown', ...(role === 'read' ? [] : (['trash'] as const))]
 }

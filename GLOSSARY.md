@@ -75,7 +75,7 @@ An Area or Subtree as a ZIP of Markdown files that is readable without Turtle: d
 _Avoid_: Backup, download, dump
 
 **Import**:
-Pages, Folders and Attachments brought into an Area, or beneath a Page or Folder, from a ZIP: an Export, or any folder of Markdown files, whose relative links become Page links. What cannot come across is reported file by file, and the rest comes in.
+Pages, Folders and Attachments brought into an Area, or beneath a Page or Folder, from a ZIP: an Export, any folder of Markdown files, whose relative links become Page links, or a Confluence space exported as XML. What cannot come across is reported file by file, and the rest comes in. An import from Confluence also reports how much of the space came across: each kind of Confluence content found, whether it comes across exactly, approximately, as a placeholder naming it or not at all, and what the space holds that is not imported, such as comments and page history; this report can be had before importing, without importing.
 _Avoid_: Upload, ingest
 
 **PDF Export**:

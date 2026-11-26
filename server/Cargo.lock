@@ -3957,6 +3957,7 @@ dependencies = [
  "lettre",
  "pdf-extract",
  "pulldown-cmark",
+ "quick-xml 0.42.0",
  "rusqlite",
  "schemars",
  "serde",

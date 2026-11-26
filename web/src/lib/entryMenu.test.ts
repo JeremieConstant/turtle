@@ -7,7 +7,7 @@ vi.mock('svelte-sonner', () => ({ toast }))
 beforeEach(() => toast.mockClear())
 
 test('with Write or Admin, a Page offers creating beneath it, renaming, moving, importing beneath it, copying its link, exporting it as a PDF or as Markdown and moving it to the Trash', () => {
-  const all = ['new-page', 'new-folder', 'rename', 'move', 'import-markdown', 'copy-link', 'export-pdf', 'export-markdown', 'trash']
+  const all = ['new-page', 'new-folder', 'rename', 'move', 'import-markdown', 'import-confluence', 'copy-link', 'export-pdf', 'export-markdown', 'trash']
   expect(entryMenuItems('page', 'write')).toEqual(all)
   expect(entryMenuItems('page', 'admin')).toEqual(all)
 })
@@ -17,7 +17,7 @@ test('with only Read, a Page offers copying its link and exporting', () => {
 })
 
 test('a Folder has no address of its own, so it offers no link', () => {
-  expect(entryMenuItems('folder', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'move', 'import-markdown', 'export-pdf', 'export-markdown', 'trash'])
+  expect(entryMenuItems('folder', 'write')).toEqual(['new-page', 'new-folder', 'rename', 'move', 'import-markdown', 'import-confluence', 'export-pdf', 'export-markdown', 'trash'])
   expect(entryMenuItems('folder', 'read')).toEqual(['export-pdf', 'export-markdown'])
 })
 
