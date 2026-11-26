@@ -94,6 +94,10 @@ _Avoid_: Custom font, Schriftart
 A recorded state of a Page with its authors, the people whose changes arrived since the previous Version; it can be compared with other Versions and restored.
 _Avoid_: Revision, snapshot, history entry
 
+**Release**:
+A numbered, published state of Turtle itself, such as 0.2.0, with its release notes.
+_Avoid_: Version (that is a Page's), build
+
 **Trash**:
 Where deleted Pages, Folders and Areas are kept for 30 days so they can be brought back. Every Area has its own Trash for its Pages and Folders; a deleted Area is out of reach of its own Admins, so only a Workspace Admin brings it back.
 _Avoid_: Recycle bin, archive, Papierkorb

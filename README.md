@@ -30,13 +30,13 @@ docker compose pull && docker compose up -d
 
 The image is `ghcr.io/turtle-wiki/turtle`: `latest` is the newest release, `X.Y` and `X.Y.Z` a release line or one release, and `edge` whatever is on `main`. Settings from [Start](#start) go under `environment:` in `compose.yml`; set `TURTLE_PUBLIC_URL` there once Turtle has an address of its own. [Connect AI](#connect-ai) says how to let Claude or another MCP client in.
 
-Without Docker, Turtle is one file built from source, as [Build](#build) describes:
+Without Docker, Turtle is one file. Each [release](https://github.com/turtle-wiki/turtle/releases) has it ready-built for Linux on x86-64 and ARM64, statically linked so it runs on any distribution, and for macOS on Apple silicon, with a `SHA256SUMS` file to check the downloads against. Unpack it and start it:
 
 ```bash
-./server/target/release/turtle
+tar -xzf turtle-*.tar.gz && ./turtle-*/turtle
 ```
 
-It then listens on <http://127.0.0.1:4100>.
+It then listens on <http://127.0.0.1:4100>; `turtle --version` says which Release it is. The macOS binary is not signed, so macOS blocks it on its first start until the quarantine flag is removed with `xattr -d com.apple.quarantine turtle`. On other platforms, build Turtle from source as [Build](#build) describes.
 
 ## Build
 

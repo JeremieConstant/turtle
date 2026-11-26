@@ -482,6 +482,14 @@ export type QuickNoteList = {
   quick_notes: QuickNote[]
 }
 
+export type Release = {
+  /** The Release's notes on GitHub, in a release build only. */
+  notes?: string | null
+  /** `0.2.0` in a release build, `0.2.0+3f9c2a1` in any other, and
+`0.2.0+dev` when the commit is not known. */
+  number: string
+}
+
 export type Restored = {
   /** The new Version, which says what the restored one said. None when the
 Page already said that and its last Version did too. */
@@ -535,6 +543,9 @@ export type Session = {
   demo?: Demo | null
   /** The signed-in Member, if anyone is signed in. */
   member?: Member | null
+  /** Which Release of Turtle this is, told only to those signed in: a
+stranger would learn which Release to attack. */
+  release?: Release | null
   /** Whether Turtle sends mail: invitations and password reset links are
 then mailed, and a Member who forgot their password can ask for a
 reset link when signing in. */

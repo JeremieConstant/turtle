@@ -3,8 +3,8 @@
    * The sidebar of every screen in the shell: the search, the Areas the
    * person can read with the tree of the open one beneath its name, ending in
    * its Trash for those who can see it, and at
-   * the foot the menu with one's own Profile, the settings, the appearance
-   * and signing out.
+   * the foot the menu with one's own Profile, the settings, the appearance,
+   * signing out and which Release of Turtle this is.
    */
   import { onDestroy, untrack } from 'svelte'
   import { APPEARANCES, appearance, chooseAppearance, type Appearance } from '../lib/appearance.svelte'
@@ -276,6 +276,14 @@
   </div>
   <hr />
   <button type="button" class="menu-item" role="menuitem" onclick={signOut}>Sign out</button>
+  {#if session.release}
+    {@const { number, notes } = session.release}
+    {#if notes}
+      <a class="menu-label release" href={notes} target="_blank" rel="noopener noreferrer">Turtle {number}</a>
+    {:else}
+      <p class="menu-label release">Turtle {number}</p>
+    {/if}
+  {/if}
 </div>
 
 <NameDialog bind:this={areaDialog} label="Name of the new Area" action="Create Area" onsubmit={createArea} />
@@ -489,6 +497,17 @@
     color: var(--color-muted);
     font-size: var(--text-xs);
     font-weight: var(--weight-medium);
+  }
+
+  .release {
+    display: block;
+    font-weight: var(--weight-normal);
+    text-decoration: none;
+  }
+
+  a.release:hover {
+    color: var(--color-text-2);
+    text-decoration: underline;
   }
 
   .choice {

@@ -13,6 +13,7 @@ mod oauth;
 mod ops;
 mod pdf;
 mod public_url;
+mod release;
 mod search;
 mod store;
 mod web_app;
@@ -67,10 +68,19 @@ struct App {
 async fn main() -> anyhow::Result<()> {
     // `turtle catalogue` prints every operation with its schemas; the web
     // app's types are generated from it.
-    if std::env::args().nth(1).as_deref() == Some("catalogue") {
-        println!("{:#}", ops::catalogue().describe());
-        return Ok(());
+    match std::env::args().nth(1).as_deref() {
+        Some("catalogue") => {
+            println!("{:#}", ops::catalogue().describe());
+            return Ok(());
+        }
+        // Says which Release this is, without opening the data directory.
+        Some("--version") => {
+            println!("turtle {}", release::RELEASE.number);
+            return Ok(());
+        }
+        _ => {}
     }
+    println!("Starting Turtle {}.", release::RELEASE.number);
 
     // Everything Turtle keeps lives in one directory.
     let data_dir = PathBuf::from(
