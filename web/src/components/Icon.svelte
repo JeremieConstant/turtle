@@ -39,6 +39,7 @@
     caret: 'M5 6.5l3 3 3-3',
     // A menu of choices marks the one in force; words alone would not show which.
     check: 'M3.5 8.5l3 3 6-7',
+    person: 'M8 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3 13.5c.6-2.3 2.6-3.5 5-3.5s4.4 1.2 5 3.5',
     // Dots drawn as strokes of almost no length, so they need a thicker stroke to show.
     more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
   } as const

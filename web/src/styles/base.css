@@ -176,6 +176,24 @@ dialog[open] {
   background: var(--color-text-2);
 }
 
+/* A button that steps back: no frame until it is pointed at, for what is
+   at hand but not the point of the screen. Pressed, it takes the accent. */
+.btn.ghost {
+  border-color: transparent;
+  background: none;
+  color: var(--color-text-2);
+}
+
+.btn.ghost:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.btn.ghost[aria-pressed='true'] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+
 /* The button that removes or ends something. */
 .btn.danger {
   border-color: var(--color-danger);

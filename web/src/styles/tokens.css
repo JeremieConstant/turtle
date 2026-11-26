@@ -9,10 +9,12 @@
  * light-dark() pair, even where it equals another token's: the appearance
  * test checks this.
  *
- * The palette is monochrome. Colour appears only where it means something:
- * focus and the drop target (--color-focus), the people editing a Page
- * (--color-person-*), an Agent's change (--color-agent), and the kind of a
- * callout (--color-callout-*).
+ * The palette is monochrome with one accent, a sage green. Colour appears
+ * only where it means something: where you are and what has the focus
+ * (--color-accent, --color-focus), the people editing a Page
+ * (--color-person-*), an Agent's change (--color-agent), which Area
+ * something is in (--color-area-*), and the kind of a callout
+ * (--color-callout-*).
  */
 :root {
   /* Each colour is light-dark(light, dark): the browser picks by color-scheme,
@@ -36,8 +38,12 @@
   --color-faint: light-dark(#b0b0aa, #5c5c58);
 
   /* Meaning */
-  --color-focus: light-dark(#2f6bdc, #6b9bf5);
-  --color-focus-soft: light-dark(rgb(47 107 220 / 0.1), rgb(107 155 245 / 0.18));
+  /* The accent: the selected row, the focus, and what was just saved. Sparingly, so it keeps meaning "here". */
+  --color-accent: light-dark(#4f7356, #9cc4a2);
+  --color-accent-soft: light-dark(rgb(79 115 86 / 0.13), rgb(156 196 162 / 0.16));
+  --color-accent-text: light-dark(#2f4d35, #cfe5d2);
+  --color-focus: light-dark(#4f7356, #9cc4a2);
+  --color-focus-soft: light-dark(rgb(79 115 86 / 0.16), rgb(156 196 162 / 0.22));
   --color-agent: light-dark(#0f7b6c, #3fbfa8);
   --color-agent-soft: light-dark(rgb(15 123 108 / 0.1), rgb(63 191 168 / 0.14));
   /* How strongly another person's selection is tinted in their colour. */
@@ -54,6 +60,20 @@
   --color-person-4: light-dark(#1d4ed8, #74a0f7);
   --color-person-5: light-dark(#4d7c0f, #94c94a);
   --color-person-6: light-dark(#b45309, #f0a64a);
+  /* The colour of an Area's mark, picked from its ID, so it is the same
+     everywhere and for everyone: a muted fill and the letter on it. */
+  --color-area-1: light-dark(#dde8df, #2c3d30);
+  --color-area-1-text: light-dark(#3a5a40, #b9d9be);
+  --color-area-2: light-dark(#dde5ef, #28364a);
+  --color-area-2-text: light-dark(#34506f, #b4c9e3);
+  --color-area-3: light-dark(#efe6d8, #43392a);
+  --color-area-3-text: light-dark(#6b5330, #e3cfa8);
+  --color-area-4: light-dark(#f0dfe0, #47302f);
+  --color-area-4-text: light-dark(#7a3f43, #eebcbf);
+  --color-area-5: light-dark(#e6e0f0, #382f48);
+  --color-area-5-text: light-dark(#53447a, #cfc3ea);
+  --color-area-6: light-dark(#dbebeb, #263f40);
+  --color-area-6-text: light-dark(#2f5f61, #acdcdd);
   /* Text on one of the colours above, and on the danger colour. */
   --color-on-color: light-dark(#ffffff, #191918);
   --color-danger: light-dark(#b42318, #ff8a80);
@@ -187,6 +207,11 @@
   --size-icon-button: 26px;
   --size-chevron: 18px;
   --size-mark: 20px;
+  /* An Area's mark: a rounded square with its first letter. */
+  --size-area-mark: 18px;
+  --size-area-mark-l: 28px;
+  --text-area-mark: 0.6875rem;
+  --text-area-mark-l: 0.9375rem;
   /* A person on a Page, as a round mark with their initials. */
   --size-avatar: 26px;
   --size-avatar-text: 0.6875rem;

@@ -20,6 +20,7 @@
   import { reportFailure } from '../lib/toasts'
   import { createEntry, foldable } from '../lib/tree'
   import { collapsed, ui } from '../lib/ui.svelte'
+  import AreaMark from './AreaMark.svelte'
   import Icon from './Icon.svelte'
   import Logo from './Logo.svelte'
   import NameDialog from './NameDialog.svelte'
@@ -162,23 +163,7 @@
   }
 </script>
 
-<nav class="side" aria-label="Areas">
-  <div class="top">
-    <a class="brand" href="/" onclick={event => router.follow(event, '/')}>
-      <Logo size="var(--size-mark)" />
-      Turtle
-    </a>
-  </div>
-
-  <div class="search"><SearchBox area={searchArea} /></div>
-
-  <div class="areas">
-    {#if navigation.areas === null}
-      {#if navigation.areasFailed}
-        <p class="note">The Areas could not be loaded. Reload the page to try again.</p>
-      {/if}
-    {:else}
-      {#each navigation.areas as area (area.id)}
+{#snippet areaRow(area: Area)}
         {@const open = ui.openArea === area.id}
         {@const tree = navigation.tree(area.id)}
         {@const address = areaAddress(area.id, area.name)}
@@ -207,6 +192,7 @@
               aria-current={currentAreaId === area.id ? 'page' : undefined}
               onclick={event => openArea(event, area)}
             >
+              <AreaMark {area} />
               <span class="title">{area.name}</span>
             </a>
             <div class="tools">
@@ -259,6 +245,32 @@
             </div>
           {/if}
         </section>
+{/snippet}
+
+<nav class="side" aria-label="Areas">
+  <div class="top">
+    <a class="brand" href="/" onclick={event => router.follow(event, '/')}>
+      <Logo size="var(--size-mark)" />
+      Turtle
+    </a>
+  </div>
+
+  <div class="search"><SearchBox area={searchArea} /></div>
+
+  <div class="areas">
+    {#if navigation.areas === null}
+      {#if navigation.areasFailed}
+        <p class="note">The Areas could not be loaded. Reload the page to try again.</p>
+      {/if}
+    {:else}
+      {#each navigation.areas.filter(area => area.personal) as area (area.id)}
+        {@render areaRow(area)}
+      {/each}
+      {#if navigation.areas.some(area => !area.personal)}
+        <h2 class="group">Areas</h2>
+      {/if}
+      {#each navigation.areas.filter(area => !area.personal) as area (area.id)}
+        {@render areaRow(area)}
       {/each}
       <button type="button" class="new-area" onclick={() => areaDialog.open()}>
         <Icon name="plus" size={14} /> New Area
@@ -426,7 +438,11 @@
   }
 
   .area-head.current::before {
-    background: var(--color-selected);
+    background: var(--color-accent-soft);
+  }
+
+  .area-head.current .area-name {
+    color: var(--color-accent-text);
   }
 
   .chevron {
@@ -461,6 +477,7 @@
     min-width: 0;
     display: flex;
     align-items: center;
+    gap: var(--space-2);
     align-self: stretch;
     padding: 0 var(--space-1);
     font-size: var(--text-m);
@@ -470,6 +487,17 @@
 
   .area.open .area-name {
     font-weight: var(--weight-strong);
+  }
+
+  /* Shared Areas under a small heading, apart from the Personal Area above. */
+  .group {
+    margin: var(--space-4) 0 var(--space-1);
+    padding: 0 var(--space-2);
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--tracking-small);
+    text-transform: uppercase;
   }
 
   .title {
@@ -536,8 +564,8 @@
   }
 
   .trash-row[aria-current='page'] {
-    background: var(--color-selected);
-    color: var(--color-text);
+    background: var(--color-accent-soft);
+    color: var(--color-accent-text);
   }
 
   .trash-row .title {

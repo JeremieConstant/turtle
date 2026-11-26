@@ -29,18 +29,13 @@
 </script>
 
 <aside>
-  <h2>Markdown</h2>
+  <h2 class="section-title heading">Markdown</h2>
   <pre>{text}</pre>
 </aside>
 
 <style>
-  h2 {
-    margin: 0 0 var(--space-2);
-    color: var(--color-muted);
-    font-size: var(--text-s);
-    font-weight: var(--weight-strong);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-small);
+  .heading {
+    margin-bottom: var(--space-2);
   }
 
   pre {
