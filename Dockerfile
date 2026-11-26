@@ -12,6 +12,10 @@ COPY web/ ./
 RUN npx vite build --logLevel warn
 
 FROM docker.io/library/rust:1.100-slim-bookworm AS server
+# How the build names its Release (see server/build.rs): `image.yml` passes
+# the commit, and `true` for the image of a tag. Without them it is X.Y.Z+dev.
+ARG TURTLE_COMMIT=
+ARG TURTLE_RELEASE_BUILD=false
 WORKDIR /src/server
 COPY server/ ./
 COPY --from=web /src/web/dist /src/web/dist

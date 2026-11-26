@@ -56,6 +56,10 @@ Review also reads the code against [CODING_STANDARDS.md](CODING_STANDARDS.md). N
 
 A commit that finishes an issue ends its message with `Closes #N`. A commit towards an issue that is not finished yet uses `Refs #N`. A bare `(#N)` in the title does not close the issue.
 
+## Releases
+
+How a Release is made, and the template for its notes, is in [docs/releasing.md](docs/releasing.md).
+
 ## AI-assisted contributions
 
 Contributions written with AI are welcome on the same terms: the checks pass, the commits are signed off by you, and the pull request explains in your own words what it changes and why.

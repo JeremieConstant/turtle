@@ -1,0 +1,111 @@
+name: Release
+
+# Turns a pushed tag vX.Y.Z into a GitHub Release with ready-built binaries
+# and the handwritten notes from docs/releases/vX.Y.Z.md. The container image
+# is published by image.yml on the same tag; the two do not wait for each
+# other. docs/releasing.md describes the steps around it.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Stops before anything is built when the tag does not match the versions
+  # or has no notes.
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      number: ${{ steps.check.outputs.number }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: scripts/check-release-tag.sh "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+  # Each target builds on a runner of its own kind, as in image.yml. The
+  # Linux binaries link musl statically, so they run on any Linux.
+  build:
+    needs: verify
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    env:
+      ARCHIVE: turtle-${{ needs.verify.outputs.number }}-${{ matrix.target }}
+      # The binary names its plain Release and links its notes (server/build.rs).
+      TURTLE_RELEASE_BUILD: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # The C code inside (SQLite, ring, zstd) is compiled against musl too;
+      # without naming musl-gcc, the aarch64 build would take glibc's gcc.
+      - if: contains(matrix.target, 'musl')
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          target=${{ matrix.target }}
+          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # The operation types are committed and checked by CI, so the bundle is
+      # built without generating them, as in the Dockerfile.
+      - name: Build the web app
+        working-directory: web
+        run: npm ci && npx vite build --logLevel warn
+      - name: Build the server, which embeds the web app
+        run: cargo build --release --locked --manifest-path server/Cargo.toml --target ${{ matrix.target }}
+      - name: Check that the binary names its Release
+        run: |
+          printed=$(server/target/${{ matrix.target }}/release/turtle --version)
+          echo "$printed"
+          [ "$printed" = "turtle ${{ needs.verify.outputs.number }}" ]
+      - name: Pack the binary with the licence and the README
+        run: |
+          mkdir "$ARCHIVE"
+          cp server/target/${{ matrix.target }}/release/turtle LICENSE README.md "$ARCHIVE/"
+          tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}.tar.gz
+          retention-days: 1
+
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: archives
+          pattern: turtle-*
+          merge-multiple: true
+      - name: List the checksums of every archive
+        working-directory: archives
+        run: sha256sum turtle-*.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - name: Create the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ needs.verify.outputs.number }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          if [ "$PRERELEASE" = true ]; then kind=(--prerelease --latest=false); else kind=(--latest); fi
+          gh release create "$GITHUB_REF_NAME" archives/* \
+            --verify-tag \
+            --title "Turtle $NUMBER" \
+            --notes-file "docs/releases/$GITHUB_REF_NAME.md" \
+            "${kind[@]}"

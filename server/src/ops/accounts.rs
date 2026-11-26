@@ -66,6 +66,10 @@ pub struct Session {
     /// Present when this Turtle is a Demo, which is reset from time to time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub demo: Option<Demo>,
+    /// Which Release of Turtle this is, told only to those signed in: a
+    /// stranger would learn which Release to attack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<crate::release::Release>,
 }
 
 /// What a Demo tells everyone, signed in or not.
@@ -130,6 +134,7 @@ pub fn get_session(core: &Core, principal: &Principal, _: Nothing) -> OpResult<S
         member,
         agent,
         demo: core.demo().map(|settings| demo_for_everyone(core, &db, settings)).transpose()?,
+        release: (!matches!(principal, Principal::Anonymous)).then(|| crate::release::RELEASE.clone()),
     }
     .into())
 }
@@ -407,6 +412,7 @@ mod tests {
                 member: None,
                 agent: None,
                 demo: None,
+                release: None,
             }
         );
 
@@ -416,17 +422,26 @@ mod tests {
         assert!(created.output.workspace_admin);
 
         let ada = signed_in(&core, &created);
-        let after = get_session(&core, &ada, Nothing {}).unwrap();
-        assert_eq!(
-            after.output,
-            Session {
-                setup_required: false,
-                sends_mail: false,
-                member: Some(created.output),
-                agent: None,
-                demo: None,
-            }
-        );
+        let after = get_session(&core, &ada, Nothing {}).unwrap().output;
+        assert!(!after.setup_required);
+        assert_eq!(after.member, Some(created.output));
+        assert_eq!(after.agent, None);
+        assert_eq!(after.demo, None);
+    }
+
+    #[test]
+    fn only_someone_signed_in_learns_which_release_this_is() {
+        let core = fresh();
+        let created = create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        let ada = signed_in(&core, &created);
+
+        let stranger = get_session(&core, &Principal::Anonymous, Nothing {}).unwrap().output;
+        assert_eq!(stranger.release, None);
+
+        let release = get_session(&core, &ada, Nothing {}).unwrap().output.release.expect("no Release");
+        // A test build is not a release build, so it names its commit and links no notes.
+        assert!(release.number.starts_with(&format!("{}+", env!("CARGO_PKG_VERSION"))), "{release:?}");
+        assert_eq!(release.notes, None);
     }
 
     #[test]

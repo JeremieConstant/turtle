@@ -73,6 +73,10 @@ async fn an_agent_reads_and_writes_through_the_mcp_endpoint_with_a_token() {
     let initialized: Value = serde_json::from_str(&response.body).unwrap();
     assert_eq!(initialized["result"]["protocolVersion"], "2025-06-18");
     assert!(initialized["result"]["capabilities"]["tools"].is_object(), "{initialized}");
+    // The MCP server names the same Release as the account menu.
+    let session = ada.call("get_session", json!({})).await;
+    assert_eq!(initialized["result"]["serverInfo"]["version"], session["release"]["number"], "{session}");
+    assert!(session["release"]["number"].is_string(), "{session}");
     let notified = mcp(&server, Some(&token), json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
     assert_eq!(notified.status, 202);
     for invalid in [json!([]), json!(5), json!({ "jsonrpc": "2.0", "id": 9 })] {

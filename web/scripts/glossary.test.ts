@@ -44,7 +44,7 @@ test('no term of the glossary is on the list of words to avoid', () => {
  * still judges whether a name means the glossary's sense.
  */
 const PROGRAMMING_WORDS = new Set([
-  'account', 'archive', 'backup', 'block', 'chapter', 'directory', 'document', 'download',
+  'account', 'archive', 'backup', 'block', 'build', 'chapter', 'directory', 'document', 'download',
   'draft', 'dump', 'element', 'extension', 'home', 'item', 'label', 'layout', 'node', 'note',
   'owner', 'panel', 'report', 'root', 'secret', 'share', 'site', 'space', 'summary', 'upload',
   'user',

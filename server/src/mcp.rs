@@ -150,7 +150,7 @@ fn initialize(params: &Value) -> Value {
     json!({
         "protocolVersion": version,
         "capabilities": { "tools": { "listChanged": false } },
-        "serverInfo": { "name": "turtle", "title": "Turtle", "version": env!("CARGO_PKG_VERSION") },
+        "serverInfo": { "name": "turtle", "title": "Turtle", "version": crate::release::RELEASE.number },
         "instructions": INSTRUCTIONS,
     })
 }
