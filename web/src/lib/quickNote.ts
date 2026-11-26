@@ -70,3 +70,21 @@ export function unsavedQuickNote(memberId: string, storage: UnsavedStorage | nul
     },
   }
 }
+
+/** How long a title taken from the first line may grow before it is cut at a word. */
+const TITLE_FROM_LINE = 80
+
+/**
+ * The title a Quick Note is saved under: the one typed, or else its first
+ * line, so that writing a title is never what holds a Quick Note back. Empty
+ * when there is neither, and then there is nothing to save.
+ */
+export function quickNoteTitle(typed: string, firstLine: string): string {
+  const title = typed.trim()
+  if (title) return title
+  const line = firstLine.replace(/\s+/g, ' ').trim()
+  if (line.length <= TITLE_FROM_LINE) return line
+  const cut = line.slice(0, TITLE_FROM_LINE)
+  const atWord = cut.lastIndexOf(' ')
+  return `${(atWord > 0 ? cut.slice(0, atWord) : cut).trimEnd()}…`
+}

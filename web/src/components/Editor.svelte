@@ -2,6 +2,7 @@
   import { Editor } from '@tiptap/core'
   import Collaboration from '@tiptap/extension-collaboration'
   import CollaborationCaret from '@tiptap/extension-collaboration-caret'
+  import { Placeholder } from '@tiptap/extensions'
   import type { Awareness } from 'y-protocols/awareness'
   import type * as Y from 'yjs'
   import { AgentChanges } from '../lib/agent-changes'
@@ -17,6 +18,7 @@
     autofocus = editable,
     label = 'Page content',
     compact = false,
+    placeholder = '',
     attach,
     pageId = null,
     onready,
@@ -33,6 +35,8 @@
     label?: string
     /** Fits a short text in a box rather than a whole Page. */
     compact?: boolean
+    /** Shown while the content is empty, to say what goes in. */
+    placeholder?: string
     /** Attaches a pasted or dropped file to the Page. */
     attach: ImageOptions['attach']
     /** The Page the content is in; absent for content in no Page yet. */
@@ -73,6 +77,7 @@
           }),
         }),
         AgentChanges,
+        ...(placeholder ? [Placeholder.configure({ placeholder })] : []),
       ],
       editable,
       autofocus,
@@ -104,6 +109,14 @@
   .compact :global(.tiptap) {
     min-height: var(--height-quick-note);
     padding-bottom: 0;
+  }
+
+  .editor :global(.tiptap p.is-editor-empty:first-child::before) {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: var(--color-muted);
+    pointer-events: none;
   }
 
   .editor :global(.tiptap > *) {

@@ -26,12 +26,16 @@ export function moveMark(marked: number, count: number, key: 'ArrowDown' | 'Arro
 }
 
 /**
- * Whether a key press asks for the search field: a slash on its own, while
- * nothing is being typed. With a modifier it belongs to the browser.
+ * Whether a key press asks for the search field: ⌘K, or Ctrl+K off a Mac, at
+ * any time, or a slash on its own while nothing is being typed. A slash with
+ * a modifier belongs to the browser.
  */
 export function asksForSearch(
-  event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey'>,
+  event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
   typing: boolean,
+  mac: boolean,
 ): boolean {
+  const command = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+  if (event.key.toLowerCase() === 'k' && command && !event.altKey && !event.shiftKey) return true
   return event.key === '/' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey
 }

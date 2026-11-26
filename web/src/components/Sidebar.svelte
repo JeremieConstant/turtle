@@ -31,7 +31,8 @@
   const currentAreaId = $derived(route.screen === 'area' ? route.id : null)
   const currentTrashOf = $derived(route.screen === 'trash' ? route.areaId : null)
   /** The Area the search covers unless it is widened: the one being looked at. */
-  const searchAreaId = $derived(currentAreaId ?? (currentPageId ? ui.openArea : null) ?? undefined)
+  const searchAreaId = $derived(currentAreaId ?? (currentPageId ? ui.openArea : null))
+  const searchArea = $derived(navigation.areas?.find(area => area.id === searchAreaId))
 
   void navigation.refreshAreas()
   // The next person to sign in here starts from nothing.
@@ -62,6 +63,30 @@
   const collapseAll = (area: Area) => foldable(navigation.tree(area.id) ?? []).forEach(id => collapsed.add(id))
   const expandAll = (area: Area) => foldable(navigation.tree(area.id) ?? []).forEach(id => collapsed.delete(id))
 
+  /* The chevron shows and hides the tree without leaving the screen. With
+     Option or Alt held it also opens or closes everything inside, as in Finder. */
+  function toggleArea(event: MouseEvent, area: Area) {
+    const opening = ui.openArea !== area.id
+    ui.openArea = opening ? area.id : null
+    if (event.altKey) (opening ? expandAll : collapseAll)(area)
+  }
+
+  /* ---- The menu of an Area ---------------------------------------------- */
+
+  let areaMenu: HTMLDivElement
+  /** The Area whose menu is open. */
+  let menuFor = $state.raw<Area | null>(null)
+
+  function openAreaMenu(event: MouseEvent, area: Area) {
+    menuFor = area
+    openMenu(areaMenu, event.currentTarget as HTMLElement)
+  }
+
+  function fold(all: (area: Area) => void) {
+    areaMenu.hidePopover()
+    if (menuFor) all(menuFor)
+  }
+
   /* ---- New Area, and new Page or Folder at the top of an Area ---------- */
 
   let areaDialog: NameDialog
@@ -70,6 +95,8 @@
   /** The Area the "New" menu was opened for, and what was picked there. */
   let newIn = $state.raw<Area | null>(null)
   let newKind = $state<Kind>('page')
+  /** The Area whose "New" menu is open now, which keeps its tools showing. */
+  let newMenuFor = $state<string | null>(null)
 
   async function createArea(name: string) {
     const area = await call('create_area', { name })
@@ -79,6 +106,7 @@
 
   function openNewMenu(event: MouseEvent, area: Area) {
     newIn = area
+    newMenuFor = area.id
     openMenu(newMenu, event.currentTarget as HTMLElement)
   }
 
@@ -142,10 +170,7 @@
     </a>
   </div>
 
-  <!-- The start screen is a search field itself. -->
-  {#if route.screen !== 'home'}
-    <div class="search"><SearchBox areaId={searchAreaId} /></div>
-  {/if}
+  <div class="search"><SearchBox area={searchArea} /></div>
 
   <div class="areas">
     {#if navigation.areas === null}
@@ -160,38 +185,56 @@
         {@const trashSize = navigation.trashSize(area.id)}
         {@const toTrash = trashAddress(area.id, area.name)}
         <section class="area" class:open>
-          <div class="area-head">
+          <div
+            class="area-head"
+            class:current={currentAreaId === area.id}
+            class:menu-open={menuFor?.id === area.id || newMenuFor === area.id}
+          >
+            <button
+              type="button"
+              class="chevron"
+              class:open
+              aria-expanded={open}
+              aria-label={open ? `Hide the Pages of ${area.name}` : `Show the Pages of ${area.name}`}
+              title={open ? 'Hide Pages (⌥-click: fold everything)' : 'Show Pages (⌥-click: unfold everything)'}
+              onclick={event => toggleArea(event, area)}
+            >
+              <Icon name="chevron" size={14} />
+            </button>
             <a
               class="area-name"
               href={address}
               aria-current={currentAreaId === area.id ? 'page' : undefined}
-              aria-expanded={open}
               onclick={event => openArea(event, area)}
             >
               <span class="title">{area.name}</span>
             </a>
-            {#if open}
-              <div class="tools">
-                <button type="button" class="icon-btn" title="Collapse all" aria-label="Collapse all in {area.name}" onclick={() => collapseAll(area)}>
-                  <Icon name="collapse" size={14} />
+            <div class="tools">
+              {#if open}
+                <button
+                  type="button"
+                  class="icon-btn"
+                  title="More"
+                  aria-label="More for {area.name}"
+                  aria-haspopup="menu"
+                  onclick={event => openAreaMenu(event, area)}
+                >
+                  <Icon name="more" size={14} />
                 </button>
-                <button type="button" class="icon-btn" title="Expand all" aria-label="Expand all in {area.name}" onclick={() => expandAll(area)}>
-                  <Icon name="expand" size={14} />
+              {/if}
+              {#if area.role !== 'read'}
+                <button
+                  type="button"
+                  class="icon-btn"
+                  title="New Page or Folder"
+                  aria-label="New in {area.name}"
+                  aria-haspopup="menu"
+                  onclick={event => openNewMenu(event, area)}
+                >
+                  <Icon name="plus" size={14} />
                 </button>
-                {#if area.role !== 'read'}
-                  <button
-                    type="button"
-                    class="icon-btn"
-                    title="New"
-                    aria-label="New in {area.name}"
-                    aria-haspopup="menu"
-                    onclick={event => openNewMenu(event, area)}
-                  >
-                    <Icon name="plus" size={14} />
-                  </button>
-                {/if}
-              </div>
-            {/if}
+              {/if}
+            </div>
           </div>
           {#if open && tree}
             <div class="tree" transition:unfold>
@@ -236,7 +279,30 @@
   </div>
 </nav>
 
-<div class="menu" role="menu" tabindex="-1" aria-label={newIn ? `New in ${newIn.name}` : 'New'} popover bind:this={newMenu} onkeydown={menuKeys}>
+<div
+  class="menu"
+  role="menu"
+  tabindex="-1"
+  aria-label={menuFor ? `More for ${menuFor.name}` : 'More'}
+  popover
+  bind:this={areaMenu}
+  onkeydown={menuKeys}
+  ontoggle={event => event.newState === 'closed' && (menuFor = null)}
+>
+  <button type="button" class="menu-item" role="menuitem" onclick={() => fold(expandAll)}>Unfold all Folders</button>
+  <button type="button" class="menu-item" role="menuitem" onclick={() => fold(collapseAll)}>Fold all Folders</button>
+</div>
+
+<div
+  class="menu"
+  role="menu"
+  tabindex="-1"
+  aria-label={newIn ? `New in ${newIn.name}` : 'New'}
+  popover
+  bind:this={newMenu}
+  onkeydown={menuKeys}
+  ontoggle={event => event.newState === 'closed' && (newMenuFor = null)}
+>
   <button type="button" class="menu-item" role="menuitem" onclick={() => askForTitle('page')}>Page</button>
   <button type="button" class="menu-item" role="menuitem" onclick={() => askForTitle('folder')}>Folder</button>
 </div>
@@ -335,6 +401,7 @@
     scrollbar-width: thin;
   }
 
+  /* The whole row is the Area: hover and selection span it, and its tools sit inside it on the right. */
   .area-head {
     position: sticky;
     top: 0;
@@ -345,26 +412,60 @@
     background: var(--color-side);
   }
 
+  .area-head::before {
+    content: '';
+    position: absolute;
+    inset: calc((var(--height-control) - var(--height-row)) / 2) 0;
+    z-index: -1;
+    border-radius: var(--radius-s);
+    transition: background var(--dur-fast) var(--ease-out);
+  }
+
+  .area-head:hover::before {
+    background: var(--color-hover);
+  }
+
+  .area-head.current::before {
+    background: var(--color-selected);
+  }
+
+  .chevron {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--size-chevron);
+    height: var(--size-chevron);
+    margin-left: var(--space-half);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--color-muted);
+  }
+
+  .chevron:hover {
+    background: var(--color-line);
+    color: var(--color-text);
+  }
+
+  .chevron :global(svg) {
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+
+  .chevron.open :global(svg) {
+    transform: rotate(90deg);
+  }
+
   .area-name {
     flex: 1;
     min-width: 0;
     display: flex;
     align-items: center;
-    height: var(--height-row);
-    padding: 0 var(--space-2);
-    border-radius: var(--radius-s);
+    align-self: stretch;
+    padding: 0 var(--space-1);
     font-size: var(--text-m);
     font-weight: var(--weight-medium);
     text-decoration: none;
-    transition: background var(--dur-fast) var(--ease-out);
-  }
-
-  .area-name:hover {
-    background: var(--color-hover);
-  }
-
-  .area-name[aria-current='page'] {
-    background: var(--color-selected);
   }
 
   .area.open .area-name {
@@ -377,10 +478,25 @@
     white-space: nowrap;
   }
 
+  /* Shown while the row is pointed at or has the focus, so the name keeps the room otherwise. */
   .tools {
     display: flex;
     gap: var(--space-half);
-    padding-left: var(--space-1);
+    padding-right: var(--space-half);
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+
+  .area-head:hover .tools,
+  .area-head:focus-within .tools,
+  .area-head.menu-open .tools {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .tools {
+      opacity: 1;
+    }
   }
 
   .tree {

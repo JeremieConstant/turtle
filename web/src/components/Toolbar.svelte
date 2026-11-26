@@ -208,10 +208,12 @@
       statusAt = transaction.doc.nodeAt(moved)?.type.name === 'status' ? moved : null
       if (statusAt === null) statusPopover?.hidePopover()
     }
-    watched.view.dom.addEventListener(EDIT_STATUS, clicked)
+    // Held here: the editor may be destroyed before this is torn down, as when a Quick Note is saved.
+    const dom = watched.view.dom
+    dom.addEventListener(EDIT_STATUS, clicked)
     watched.on('transaction', follow)
     return () => {
-      watched.view.dom.removeEventListener(EDIT_STATUS, clicked)
+      dom.removeEventListener(EDIT_STATUS, clicked)
       watched.off('transaction', follow)
     }
   })

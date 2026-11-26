@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import * as Y from 'yjs'
-import { docFrom, stateOf, unsavedQuickNote, type UnsavedStorage } from './quickNote'
+import { docFrom, quickNoteTitle, stateOf, unsavedQuickNote, type UnsavedStorage } from './quickNote'
 
 function memoryStorage(): UnsavedStorage {
   const items = new Map<string, string>()
@@ -63,4 +63,23 @@ test('a body document comes back whole from its state, and from nonsense as an e
 
   expect(back.getXmlFragment('default').toString()).toBe('<paragraph>Ask about the invoice</paragraph>')
   expect(docFrom('not a state').getXmlFragment('default').length).toBe(0)
+})
+
+test('a typed title is what a Quick Note is saved under', () => {
+  expect(quickNoteTitle('  Standup  ', 'Ask about the release')).toBe('Standup')
+})
+
+test('without a typed title, the first line becomes the title', () => {
+  expect(quickNoteTitle('', 'Ask   about the\trelease')).toBe('Ask about the release')
+  expect(quickNoteTitle('   ', 'Call the printer people')).toBe('Call the printer people')
+})
+
+test('a long first line is cut at the last word that fits', () => {
+  const line =
+    'The printer on the second floor jams whenever someone sends a document with more than forty pages to it at once'
+  expect(quickNoteTitle('', line)).toBe('The printer on the second floor jams whenever someone sends a document with…')
+})
+
+test('with neither a title nor a line there is nothing to save', () => {
+  expect(quickNoteTitle(' ', '  ')).toBe('')
 })

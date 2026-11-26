@@ -128,7 +128,6 @@
   --text-h3: 1.1875rem;
   --text-h2: 1.4375rem;
   --text-h1: 2rem;
-  --text-search: 1.25rem;
   /* Relative to the surrounding text. */
   --text-code-inline: 0.9em;
   /* The rhythm of a Page's content, relative to its text. */
@@ -183,8 +182,7 @@
   --height-tag: 22px;
   --size-tag-remove: 14px;
   --height-search: 48px;
-  --height-search-l: 56px;
-  /* How far down the start screen its search field sits. */
+  /* How far down the start screen the Quick Note box sits. */
   --space-start-top: max(var(--space-16), 14vh);
   --size-icon-button: 26px;
   --size-chevron: 18px;
