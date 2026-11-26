@@ -31,7 +31,7 @@ pub fn input_limit(core: &Core) -> DefaultBodyLimit {
 }
 
 /// The operations called with a ZIP to import, which have the import limit.
-const IMPORTS: [&str; 3] = ["import", "import_confluence", "check_confluence_import"];
+const IMPORTS: [&str; 5] = ["import", "start_import", "import_confluence", "start_import_confluence", "check_confluence_import"];
 
 /// The largest request an import is called with: a ZIP, in base64. It has a
 /// limit of its own, far above the rest, which is checked before anyone is

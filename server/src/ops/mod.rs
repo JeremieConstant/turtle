@@ -42,7 +42,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 use crate::public_url::PublicUrl;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Tells the time in seconds since the Unix epoch.
@@ -89,6 +89,11 @@ pub struct Core {
     demo_warning: std::sync::Once,
     /// Recent failed attempts at signing in and at using single-use links.
     attempts: attempts::Attempts,
+    /// The imports running, and those that ended a short while ago.
+    imports: import::Imports,
+    /// The core itself, once it is shared, for work that goes on after an
+    /// operation has answered.
+    me: OnceLock<Weak<Core>>,
 }
 
 impl Core {
@@ -124,6 +129,8 @@ impl Core {
             demo: None,
             demo_warning: std::sync::Once::new(),
             attempts: attempts::Attempts::default(),
+            imports: import::Imports::default(),
+            me: OnceLock::new(),
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -295,6 +302,31 @@ impl Core {
     /// Seconds since the Unix epoch.
     pub fn now(&self) -> i64 {
         (self.clock)()
+    }
+
+    /// The core as Turtle runs it, shared by everything that serves
+    /// requests, which lets operations leave work to go on after they answer.
+    pub fn shared(self) -> Arc<Core> {
+        let core = Arc::new(self);
+        let _ = core.me.set(Arc::downgrade(&core));
+        core
+    }
+
+    /// Does `work` on a thread of its own, after the operation calling this
+    /// has answered. A core that is not shared, as in most tests, does it at
+    /// once instead, so the operation answers once it is done.
+    pub(crate) fn in_background(&self, work: impl FnOnce(&Core) + Send + 'static) {
+        match self.me.get().and_then(Weak::upgrade) {
+            Some(core) => {
+                std::thread::spawn(move || work(&core));
+            }
+            None => work(self),
+        }
+    }
+
+    /// The imports running, and those that ended a short while ago.
+    pub(crate) fn imports(&self) -> &import::Imports {
+        &self.imports
     }
 }
 
@@ -623,6 +655,26 @@ pub(crate) mod testing {
     }
 
     impl std::ops::Deref for TestCore {
+        type Target = Core;
+        fn deref(&self) -> &Core {
+            &self.core
+        }
+    }
+
+    /// A test core shared as Turtle shares it, so work an operation leaves
+    /// to go on after it answers runs on a thread of its own.
+    pub struct SharedTestCore {
+        pub core: Arc<Core>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl TestCore {
+        pub fn shared(self) -> SharedTestCore {
+            SharedTestCore { core: self.core.shared(), _dir: self._dir }
+        }
+    }
+
+    impl std::ops::Deref for SharedTestCore {
         type Target = Core;
         fn deref(&self) -> &Core {
             &self.core

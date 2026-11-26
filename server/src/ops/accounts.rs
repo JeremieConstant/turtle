@@ -70,6 +70,21 @@ pub struct Session {
     /// stranger would learn which Release to attack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release: Option<crate::release::Release>,
+    /// The largest file and the largest ZIP this Turtle accepts, so a client
+    /// can refuse a larger one before sending it. Told only to those signed in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
+}
+
+/// The largest files this Turtle accepts, which whoever runs it sets.
+#[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Limits {
+    /// The largest file, in bytes, that can be attached to a Page, also when
+    /// it comes in with an import. Set with `TURTLE_MAX_ATTACHMENT_MB`.
+    pub attachment_bytes: u64,
+    /// The largest ZIP, in bytes, that can be imported at once. Set with
+    /// `TURTLE_MAX_IMPORT_MB`.
+    pub import_bytes: u64,
 }
 
 /// What a Demo tells everyone, signed in or not.
@@ -135,6 +150,8 @@ pub fn get_session(core: &Core, principal: &Principal, _: Nothing) -> OpResult<S
         agent,
         demo: core.demo().map(|settings| demo_for_everyone(core, &db, settings)).transpose()?,
         release: (!matches!(principal, Principal::Anonymous)).then(|| crate::release::RELEASE.clone()),
+        limits: (!matches!(principal, Principal::Anonymous))
+            .then(|| Limits { attachment_bytes: core.attachment_limit(), import_bytes: core.import_limit() }),
     }
     .into())
 }
@@ -413,6 +430,7 @@ mod tests {
                 agent: None,
                 demo: None,
                 release: None,
+                limits: None,
             }
         );
 
@@ -427,6 +445,21 @@ mod tests {
         assert_eq!(after.member, Some(created.output));
         assert_eq!(after.agent, None);
         assert_eq!(after.demo, None);
+    }
+
+    #[test]
+    fn someone_signed_in_learns_the_largest_file_and_zip_this_turtle_accepts() {
+        let mut core = fresh();
+        core.core.set_attachment_limit(5 * 1024 * 1024);
+        core.core.set_import_limit(300 * 1024 * 1024);
+        let created = create_first_account(&core, &Principal::Anonymous, ada()).unwrap();
+        let ada = signed_in(&core, &created);
+
+        let stranger = get_session(&core, &Principal::Anonymous, Nothing {}).unwrap().output;
+        let signed_in = get_session(&core, &ada, Nothing {}).unwrap().output;
+
+        assert_eq!(stranger.limits, None);
+        assert_eq!(signed_in.limits, Some(Limits { attachment_bytes: 5_242_880, import_bytes: 314_572_800 }));
     }
 
     #[test]

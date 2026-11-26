@@ -147,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
     core.set_public_url(public_url);
     core.set_mailer(mailer.map(|smtp| Arc::new(smtp) as Arc<dyn mail::Mailer>));
     core.set_demo(demo);
-    let core = Arc::new(core);
+    let core = core.shared();
     // Whether Turtle looks reachable only from its intranet may take a name
     // lookup; it is found out now, off the async workers, so the Connect AI
     // page need not wait for it.
