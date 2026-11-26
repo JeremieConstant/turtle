@@ -28,7 +28,16 @@
   import Icon from './Icon.svelte'
   import Toolbar from './Toolbar.svelte'
 
-  let { personal, memberId }: { personal: Area; memberId: string } = $props()
+  let {
+    personal,
+    memberId,
+    onsaved,
+  }: {
+    personal: Area
+    memberId: string
+    /** Called once a Quick Note is saved, so what lists recent Pages can show it. */
+    onsaved?: () => void
+  } = $props()
 
   /** How many Quick Notes are listed; the rest are found in the Areas. */
   const LISTED = 5
@@ -151,6 +160,7 @@
       unsaved.keep({ title: '', body: '' })
       // The Area's tree in the sidebar gets the new Page if it is open there.
       if (navigation.tree(into.id)) navigation.loadTree(into.id).catch(() => {})
+      onsaved?.()
       await load()
     } catch (caught) {
       reportFailure(caught, 'The Quick Note could not be saved. It is still in the box; try again.')
@@ -215,7 +225,7 @@
 </script>
 
 <section class="quick" aria-labelledby="quick-label">
-  <h2 id="quick-label" class="label">Quick Note</h2>
+  <h2 id="quick-label" class="section-title heading">Quick Note</h2>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="box" {onkeydowncapture} onfocusin={() => (writing = true)} onfocusout={leave}>
     <input
@@ -340,11 +350,8 @@
 </div>
 
 <style>
-  .label {
-    margin: 0 0 var(--space-2);
-    color: var(--color-muted);
-    font-size: var(--text-s);
-    font-weight: var(--weight-medium);
+  .heading {
+    margin-bottom: var(--space-3);
   }
 
   .box {
@@ -449,7 +456,7 @@
   }
 
   .saved {
-    color: var(--color-text);
+    color: var(--color-accent-text);
     animation: saved-in var(--dur-base) var(--ease-out);
   }
 

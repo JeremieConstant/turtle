@@ -204,11 +204,11 @@
       <ConnectionStatus {status} />
       {#if editor}
         <!-- People never see Markdown unless they ask for it: this is that switch. -->
-        <button type="button" class="btn" aria-pressed={markdownShown} onclick={() => (markdownShown = !markdownShown)}>
+        <button type="button" class="btn ghost" aria-pressed={markdownShown} onclick={() => (markdownShown = !markdownShown)}>
           Markdown
         </button>
       {/if}
-      <button type="button" class="btn" aria-pressed={versionsShown} onclick={() => (versionsShown = !versionsShown)}>
+      <button type="button" class="btn ghost" aria-pressed={versionsShown} onclick={() => (versionsShown = !versionsShown)}>
         Versions
       </button>
     </div>

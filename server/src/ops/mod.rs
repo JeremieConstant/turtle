@@ -27,6 +27,7 @@ pub mod pdf_styles;
 pub mod permissions;
 pub mod profiles;
 pub mod quick_notes;
+pub mod recent;
 pub mod search;
 pub mod tags;
 pub mod tokens;
@@ -585,6 +586,7 @@ pub fn catalogue() -> Catalogue {
     tree::register(&mut catalogue);
     trash::register(&mut catalogue);
     quick_notes::register(&mut catalogue);
+    recent::register(&mut catalogue);
     search::register(&mut catalogue);
     tags::register(&mut catalogue);
     versions::register(&mut catalogue);

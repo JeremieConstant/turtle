@@ -192,8 +192,8 @@
   }
 
   .row.current {
-    background: var(--color-selected);
-    color: var(--color-text);
+    background: var(--color-accent-soft);
+    color: var(--color-accent-text);
     font-weight: var(--weight-medium);
   }
 

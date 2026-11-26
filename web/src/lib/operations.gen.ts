@@ -482,6 +482,20 @@ export type QuickNoteList = {
   quick_notes: QuickNote[]
 }
 
+export type RecentPage = {
+  /** The Area the Page is in. */
+  area: Area
+  /** The ID of the Page, which opens with `get_page`. */
+  id: string
+  /** Its newest Version: when it was recorded and whose changes it holds. */
+  last_edited: LastEdited
+  title: string
+}
+
+export type RecentPageList = {
+  pages: RecentPage[]
+}
+
 export type Release = {
   /** The Release's notes on GitHub, in a release build only. */
   notes?: string | null
@@ -1075,6 +1089,14 @@ document update, in base64. The web app sends it in place of
       limit?: number | null
     }
     output: QuickNoteList
+  }
+  /** Lists the Pages the caller can read whose newest Version is the most recent, newest first, whoever wrote it. A Page nobody has written in yet is left out, and so is what is in the Trash. */
+  list_recent_pages: {
+    input: {
+      /** How many to list, from 1 to 50; 5 if absent. */
+      limit?: number | null
+    }
+    output: RecentPageList
   }
   /** Searches the titles, the content and the Attachment file names of the Pages the caller can read, in one Area or everywhere. Tolerates typos and English and German word forms, and ranks matches in a title first. A word written #tag limits the results to Pages that carry that Tag; with several, a Page must carry them all, and with no other words the Pages come in the order of their titles. Pages the caller cannot read never appear. */
   search: {

@@ -112,6 +112,7 @@ fn table() -> Vec<Row> {
         // Written into the Area, a Quick Note takes the Write Role there, as any new Page does.
         ("create_quick_note", |f| json!({"title": "Idea", "area_id": f.area_id}), [OK, OK, REFUSED, HIDDEN, OK]),
         ("list_quick_notes", |_| json!({}), [OK; 5]),
+        ("list_recent_pages", |_| json!({}), [OK; 5]),
         ("get_page", |f| json!({"id": f.page_id}), [OK, OK, OK, HIDDEN, OK]),
         ("get_tree", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         ("search", |f| json!({"query": "notes", "area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),

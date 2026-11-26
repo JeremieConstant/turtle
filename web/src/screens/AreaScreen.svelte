@@ -5,6 +5,7 @@
    * thing to do there, creating the first Page, to whoever may write.
    */
   import { untrack } from 'svelte'
+  import AreaMark from '../components/AreaMark.svelte'
   import EntryMenu from '../components/EntryMenu.svelte'
   import EntryMenuButton, { openFromRow } from '../components/EntryMenuButton.svelte'
   import Grants from '../components/Grants.svelte'
@@ -88,8 +89,8 @@
 
   let renameDialog = $state<NameDialog>()
   let pdfDialog = $state<PdfExportDialog>()
-  let exportMenu = $state() as HTMLDivElement
-  let firstPageDialog = $state<NameDialog>()
+  let moreMenu = $state() as HTMLDivElement
+  let newPageDialog = $state<NameDialog>()
   let menu = $state<EntryMenu>()
   /** The Entry whose menu is open, so its row stays marked. */
   let menuFor = $state<string | null>(null)
@@ -139,9 +140,17 @@
     })
   }
 
-  async function createFirstPage(title: string) {
+  /** Closes the menu before what was picked there opens a dialog of its own. */
+  function fromMenu(picked: () => unknown) {
+    moreMenu.hidePopover()
+    void picked()
+  }
+
+  /* A new Page lands at the top of the Area. */
+  async function createPage(title: string) {
     const page = await createEntry('page', { area_id: id, title })
     await reload()
+    if (navigation.tree(id)) navigation.loadTree(id).catch(() => {})
     router.navigate(pageAddress(page.id, page.title))
   }
 
@@ -174,38 +183,42 @@
       <p class="sub">This Area could not be loaded. Reload the page to try again.</p>
     {:else if area}
       <div class="head">
-        <h1>{area.name}</h1>
+        <div class="name">
+          <AreaMark {area} large />
+          <h1>{area.name}</h1>
+        </div>
         <div class="actions">
-          <div class="split">
-            <button type="button" class="btn" onclick={() => area && pdfDialog?.open(id, undefined, area.name)}>Export as PDF</button>
-            <button
-              type="button"
-              class="btn more"
-              aria-label="More ways to export"
-              aria-haspopup="menu"
-              onclick={event => openMenu(exportMenu, event.currentTarget)}
-            >
-              <Icon name="chevron" size={14} />
-            </button>
-          </div>
-          <div class="menu" role="menu" tabindex="-1" aria-label="More ways to export" popover bind:this={exportMenu} onkeydown={menuKeys}>
-            <button
-              type="button"
-              class="menu-item"
-              role="menuitem"
-              onclick={() => {
-                exportMenu.hidePopover()
-                if (area) void exportToFile({ area_id: id }, area.name)
-              }}>Export as Markdown</button
-            >
-          </div>
           {#if writable}
-            <button type="button" class="btn" onclick={importIntoArea}>Import Markdown</button>
+            <button type="button" class="btn primary" onclick={() => newPageDialog?.open()}>
+              <Icon name="plus" size={14} /> New Page
+            </button>
           {/if}
-          {#if area.role === 'admin' && !area.personal}
-            <button type="button" class="btn" onclick={() => renameDialog?.open(area?.name)}>Rename</button>
-            <button type="button" class="btn" onclick={deleteArea}>Delete</button>
-          {/if}
+          <button
+            type="button"
+            class="btn icon-only"
+            title="More"
+            aria-label="More for {area.name}"
+            aria-haspopup="menu"
+            onclick={event => openMenu(moreMenu, event.currentTarget)}
+          >
+            <Icon name="more" size={16} />
+          </button>
+          <div class="menu" role="menu" tabindex="-1" aria-label="More for {area.name}" popover bind:this={moreMenu} onkeydown={menuKeys}>
+            <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => area && pdfDialog?.open(id, undefined, area.name))}>
+              Export as PDF
+            </button>
+            <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => area && exportToFile({ area_id: id }, area.name))}>
+              Export as Markdown
+            </button>
+            {#if writable}
+              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(importIntoArea)}>Import Markdown</button>
+            {/if}
+            {#if area.role === 'admin' && !area.personal}
+              <hr />
+              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => renameDialog?.open(area?.name))}>Rename</button>
+              <button type="button" class="menu-item destructive" role="menuitem" onclick={() => fromMenu(deleteArea)}>Delete Area…</button>
+            {/if}
+          </div>
         </div>
       </div>
       {#if area.personal}
@@ -238,7 +251,7 @@
         <div class="empty">
           <p>This Area has no Pages yet.</p>
           {#if writable}
-            <button type="button" class="btn primary" onclick={() => firstPageDialog?.open()}>
+            <button type="button" class="btn primary" onclick={() => newPageDialog?.open()}>
               <Icon name="plus" size={14} /> Create the first Page
             </button>
           {/if}
@@ -257,7 +270,12 @@
   <EntryMenu bind:this={menu} onclose={() => (menuFor = null)} />
   <PdfExportDialog bind:this={pdfDialog} />
   <NameDialog bind:this={renameDialog} label="Name of the Area" action="Rename" onsubmit={rename} />
-  <NameDialog bind:this={firstPageDialog} label="Title of the first Page" action="Create Page" onsubmit={createFirstPage} />
+  <NameDialog
+    bind:this={newPageDialog}
+    label={entries?.length ? `Title of the new Page in ${area?.name}` : 'Title of the first Page'}
+    action="Create Page"
+    onsubmit={createPage}
+  />
 {/if}
 
 <style>
@@ -279,25 +297,26 @@
     gap: var(--space-2);
   }
 
-  /* The main way to export, and an arrow for the others, as one button. */
-  .split {
+  .name {
     display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
   }
 
-  .split .btn:first-child {
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-  }
-
-  .split .more {
-    margin-left: calc(-1 * var(--line));
+  .icon-only {
     padding-inline: var(--space-2);
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
   }
 
-  .split .more :global(svg) {
-    transform: rotate(90deg);
+  .menu hr {
+    height: var(--line);
+    margin: var(--space-1) var(--space-2);
+    border: 0;
+    background: var(--color-line);
+  }
+
+  .destructive {
+    color: var(--color-danger);
   }
 
   .menu {
@@ -308,7 +327,9 @@
   }
 
   h1 {
+    min-width: 0;
     margin: 0;
+    overflow-wrap: anywhere;
     font-size: var(--text-h1);
     font-weight: var(--weight-strong);
     letter-spacing: var(--tracking-display);
