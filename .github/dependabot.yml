@@ -16,6 +16,14 @@ updates:
     groups:
       rust-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # axum's WebSocket library, kept at axum's version (see Cargo.toml): a
+      # second copy compiles and passes the tests, but its errors stop
+      # matching. These move by hand when axum moves.
+      - dependency-name: tungstenite
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: tokio-tungstenite
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: npm
     directory: /web
@@ -31,6 +39,10 @@ updates:
         patterns: ["@tiptap/*", "yjs", "y-*"]
       web-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # A new TypeScript major waits until svelte-check accepts it as a peer.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -44,3 +56,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Node moves by hand from one LTS major to the next, together with
+      # node-version in .github/workflows/check.yml, which Dependabot would
+      # leave behind.
+      - dependency-name: library/node
+        update-types: ["version-update:semver-major"]

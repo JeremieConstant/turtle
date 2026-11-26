@@ -71,6 +71,20 @@ expect "a merge commit without a sign-off passes" 0 "Every commit is signed off 
 
 rm -rf "$dir"
 repo
+commit --author "Bot <bot@example.com>" -m "Bot change"
+SIGN_OFF_EXEMPT_AUTHOR="Bot <bot@example.com>" \
+  expect "an unsigned commit by the exempt author passes" 0 "Every commit is signed off by its author."
+expect "the same commit fails when no author is exempt" 1 "Bot change"
+
+rm -rf "$dir"
+repo
+commit --author "Bot <bot@example.com>" -m "Bot change"
+commit -m "Unsigned change pushed onto the bot's branch"
+SIGN_OFF_EXEMPT_AUTHOR="Bot <bot@example.com>" \
+  expect "another author's unsigned commit still fails beside the exempt one" 1 "Unsigned change pushed onto"
+
+rm -rf "$dir"
+repo
 commit -s -m "Signed change"
 base=no-such-branch
 expect "a base that does not exist fails" 2 "no-such-branch"

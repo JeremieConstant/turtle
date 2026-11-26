@@ -4,6 +4,10 @@
 # Origin that CONTRIBUTING.md asks for. CI runs it on every pull request.
 # Merge commits are left out: they bring in work, they do not add any.
 #
+# A bot cannot sign off. When SIGN_OFF_EXEMPT_AUTHOR holds an author as
+# "Name <email>", that author's commits are left out too; CI sets it only on
+# pull requests the bot opened, so anyone else's commits are still checked.
+#
 #   scripts/check-sign-off.sh origin/main HEAD
 set -euo pipefail
 
@@ -28,6 +32,9 @@ commits=$(git rev-list --no-merges "$base..$head")
 unsigned=()
 for commit in $commits; do
   author=$(git show -s --format='%an <%ae>' "$commit")
+  if [ "$author" = "${SIGN_OFF_EXEMPT_AUTHOR:-}" ]; then
+    continue
+  fi
   sign_offs=$(git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$commit")
   if ! grep -qxF -- "$author" <<< "$sign_offs"; then
     unsigned+=("$(git show -s --format='%h %s (by %an <%ae>)' "$commit")")
