@@ -26,6 +26,8 @@ jobs:
 
   # Every commit a pull request adds is signed off by its author; see
   # CONTRIBUTING.md. Commits already on the base branch are not checked.
+  # Dependabot cannot sign off, so on its own pull requests its commits are
+  # left out; a commit someone else pushes there is still checked.
   sign-off:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -35,3 +37,5 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - run: scripts/check-sign-off.sh "origin/$GITHUB_BASE_REF" HEAD
+        env:
+          SIGN_OFF_EXEMPT_AUTHOR: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>' || '' }}
