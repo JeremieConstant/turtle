@@ -1,0 +1,46 @@
+# Keeps dependencies current with a few grouped pull requests a week. Each one
+# runs the Check workflow like any other. A release must be a week old before
+# it is proposed, so a broken or compromised one is usually pulled by then.
+# Security updates are not delayed: they come from the repository's
+# Dependabot security updates setting, apart from this schedule.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    groups:
+      rust-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    groups:
+      # Tiptap's packages and the Yjs ones it builds on move together.
+      editor:
+        patterns: ["@tiptap/*", "yjs", "y-*"]
+      web-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
