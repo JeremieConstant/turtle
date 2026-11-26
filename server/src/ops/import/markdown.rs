@@ -48,7 +48,7 @@ pub(super) fn read(content: String) -> Result<Bundle, OpError> {
     collect_attached(&entries, &mut attached);
     attach_linked(&mut entries, &mut attached);
     hand_over_content(&mut entries, &mut files);
-    Ok(Bundle { entries, problems })
+    Ok(Bundle { source: "a ZIP of Markdown files".into(), entries, problems })
 }
 
 /// Moves each Attachment's bytes out of the files, where each is found once.

@@ -159,6 +159,9 @@ fn table() -> Vec<Row> {
         ("export", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         // An empty ZIP: what is checked is who may import, not what.
         ("import", |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("list_imports", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
+        // ops::import::record tests who may undo an import that exists.
+        ("undo_import", |_| json!({"import_id": "made-up"}), [HIDDEN; 5]),
         // An empty ZIP is no export: who may import is checked before what.
         ("check_confluence_import", |_| json!({"content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}), [INVALID; 5]),
         (

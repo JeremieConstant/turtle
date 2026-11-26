@@ -4,12 +4,16 @@
  * than this Turtle imports is refused before it is sent. Otherwise it is
  * sent in base64 to start the import, which then runs on the server while a
  * toast tells how far the upload and then the import have got; at the end,
- * the toast tells what did not come across.
+ * the toast tells what did not come across, and for Confluence leads to the
+ * report Page.
  */
 import { toast } from 'svelte-sonner'
 import { base64Of, fileSize } from './attachments'
-import type { Coverage, ImportProgress, Imported, Outcome } from './operations.gen'
+import type { Coverage, ImportProgress, Imported } from './operations.gen'
 import { call, callTellingUpload, OperationError, type Input } from './ops'
+import { router } from './router.svelte'
+import { REPORT_LABEL } from './imports'
+import { pageAddress } from './routes'
 import { session } from './session.svelte'
 
 /** How long to wait between asking how far an import has got, in milliseconds. */
@@ -49,12 +53,10 @@ export async function importFromFile(input: Omit<Input<'import'>, 'content'>, fi
   return true
 }
 
-/** How many kinds of content each line of the report names at most, before "and N more". */
-const KINDS_PER_LINE = 6
-
 /**
  * Imports a Confluence space exported as XML where `input` says, `into`
- * naming that place, and tells in a toast how much of it came across.
+ * naming that place. The report on it is a Page beside the import; the
+ * toast tells how much came across and leads there.
  * Returns whether anything was imported, so the tree is loaded again.
  */
 export async function importConfluenceFromFile(
@@ -65,36 +67,25 @@ export async function importConfluenceFromFile(
   const ended = await run(file, (content, uploaded) => callTellingUpload('start_import_confluence', { ...input, content }, uploaded))
   if (!ended?.coverage) return false
   const { coverage, imported } = ended
-  const named = (outcome: Outcome) => {
-    const found = coverage.elements.filter(element => element.outcome === outcome)
-    const shown = found.slice(0, KINDS_PER_LINE).map(element => `${element.name} (${element.count})`)
-    if (found.length > KINDS_PER_LINE) shown.push(`${found.length - KINDS_PER_LINE} more`)
-    return shown.join(', ')
-  }
+  const toCheck = coverage.pages - coverage.exact_pages
   const lines = [
-    `${coverage.pages} Pages, ${coverage.folders} Folders and ${coverage.attachments} Attachments. ${coverage.exact_pages} of the Pages came across exactly.`,
-    `Of the content, ${coverage.exact_percent} % came across exactly and ${coverage.kept_percent} % at least approximately.`,
+    `${coverage.exact_percent} % of the content came across exactly, ${coverage.kept_percent} % at least approximately. ` +
+      (toCheck === 0 ? 'Every Page came across exactly.' : `${toCheck} of the ${coverage.pages} Pages are to check.`),
   ]
-  const tooLarge = tooLargeLine(coverage)
-  if (tooLarge) lines.push(tooLarge)
-  for (const [outcome, label] of [
-    ['left_out', 'Left out'],
-    ['placeholder', 'Placeholders'],
-    ['approximate', 'Approximately'],
-  ] as const) {
-    const names = named(outcome)
-    if (names) lines.push(`${label}: ${names}.`)
-  }
-  if (coverage.not_imported.length > 0) {
-    lines.push(`Not imported: ${coverage.not_imported.map(item => `${item.what} (${item.count})`).join(', ')}.`)
-  }
-  // The files too large are told once above, not again one by one.
-  const tooLargeFiles = new Set(coverage.too_large.map(file => file.file))
-  for (const problem of imported.problems) {
-    if (!tooLargeFiles.has(problem.file)) lines.push(`Did not come across: ${problem.file}: ${problem.message}`)
-  }
-  // Long enough to read the report, which says what to look into.
-  toast.success(`Imported ${coverage.space} into ${into}`, { id: ended.toast, description: lines.join('\n'), duration: 30_000 })
+  const files = imported.problems.length
+  const what = toCheck === 0 ? 'them' : 'them and the Pages to check'
+  lines.push(
+    files === 0
+      ? `The report beside the import ${toCheck === 0 ? 'tells more' : 'lists them'}.`
+      : `${files === 1 ? 'One file' : `${files} files`} did not come across. The report beside the import lists ${what}.`,
+  )
+  const report = imported.report_page_id
+  toast.success(`Imported ${coverage.space} into ${into}`, {
+    id: ended.toast,
+    description: lines.join('\n'),
+    duration: 15_000,
+    action: report ? { label: 'Open report', onClick: () => router.navigate(pageAddress(report, REPORT_LABEL)) } : undefined,
+  })
   return true
 }
 
@@ -137,7 +128,10 @@ async function run(
     toast.error(caught instanceof OperationError ? caught.message : `${file.name} could not be imported. Try again.`, { id })
     return null
   }
+  /** Whether it got as far as creating Pages and Folders, which a failure keeps. */
+  let creating = false
   while (progress.stage !== 'done' && progress.stage !== 'failed') {
+    creating ||= progress.stage === 'creating' || progress.stage === 'writing'
     toast.loading(title, { id, description: stageOf(progress) })
     await new Promise(resolve => setTimeout(resolve, ASKED_EVERY))
     try {
@@ -151,7 +145,10 @@ async function run(
     }
   }
   if (progress.stage === 'failed' || !progress.imported) {
-    toast.error(progress.error ?? `${file.name} could not be imported. Try again.`, { id })
+    const failed = progress.error ?? `${file.name} could not be imported. Try again.`
+    // What it created before it failed is kept, and can be undone.
+    const kept = creating ? ' What it created before is kept; to undo it, choose Imports in the menu of the Area.' : ''
+    toast.error(failed + kept, { id })
     return null
   }
   return { toast: id, imported: progress.imported, coverage: progress.coverage ?? null }

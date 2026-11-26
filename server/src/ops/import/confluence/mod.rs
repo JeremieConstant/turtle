@@ -11,6 +11,7 @@
 mod coverage;
 mod dom;
 mod entities;
+mod report;
 mod storage;
 
 pub use coverage::Coverage;
@@ -64,9 +65,14 @@ pub struct ToImportFromConfluence {
 /// What an import from Confluence created, and how much came across.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImportedFromConfluence {
+    /// The import as list_imports names it, to undo it with undo_import.
+    pub import_id: String,
     /// The Pages and Folders created at the top of the import, with what is
-    /// beneath them.
+    /// beneath them; the report Page is apart.
     pub entries: Vec<Entry>,
+    /// The Page holding the report on the import, beside what was imported;
+    /// absent if it could not be created, which `problems` then tells.
+    pub report_page_id: Option<String>,
     /// Each page or attachment that did not come across, or not whole, with
     /// the reason.
     pub problems: Vec<super::Problem>,
@@ -83,8 +89,10 @@ pub fn import_confluence(core: &Core, principal: &Principal, input: ToImportFrom
     // Access is checked before the ZIP is read, so a refused import reads nothing.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
     let read = read_export(core, input.content)?;
-    let imported = write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), read.bundle, &|_| {})?.output;
-    Ok(ImportedFromConfluence { entries: imported.entries, problems: imported.problems, coverage: read.coverage }.into())
+    let coverage = read.coverage.clone();
+    let import_id = super::record::new_id()?;
+    let imported = write(core, principal, &input.area_id, input.parent_id.as_deref(), read, &import_id, &|_| {})?;
+    Ok(ImportedFromConfluence { import_id, entries: imported.entries, report_page_id: imported.report_page_id, problems: imported.problems, coverage }.into())
 }
 
 pub fn start_import_confluence(core: &Core, principal: &Principal, input: ToImportFromConfluence) -> OpResult<ImportProgress> {
@@ -94,14 +102,60 @@ pub fn start_import_confluence(core: &Core, principal: &Principal, input: ToImpo
         let read = read_export(core, input.content)?;
         following.read(&read.coverage);
         let step = |step| following.step(step);
-        Ok(write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), read.bundle, &step)?.output)
+        write(core, principal, &input.area_id, input.parent_id.as_deref(), read, following.import_id(), &step)
     })
+}
+
+/// Creates what was read, then the report on it as a Page beside it.
+fn write(
+    core: &Core,
+    principal: &Principal,
+    area_id: &str,
+    parent_id: Option<&str>,
+    read: ReadExport,
+    import_id: &str,
+    progress: super::Progress,
+) -> Result<super::Imported, OpError> {
+    let ReadExport { bundle, coverage, found } = read;
+    let written = write_bundle(core, principal, area_id, parent_id, bundle, import_id, progress)?;
+    let pages: Vec<report::Checked> = found
+        .into_iter()
+        .filter_map(|found| Some(report::Checked { page_id: written.pages.get(&found.key)?.clone(), path: found.path, tally: found.tally }))
+        .collect();
+    let date = super::record::date_of(core.now());
+    let markdown = report::markdown(&coverage, &pages, &written.imported.problems, &date);
+    let entry = crate::ops::tree::NewEntry { area_id: area_id.into(), parent_id: parent_id.map(Into::into), title: report::title(&coverage, &date) };
+    let mut imported = written.imported;
+    // Everything is created by now: a report that cannot be is told, and the import stands.
+    match crate::ops::tree::create_page(core, principal, crate::ops::tree::NewPage { entry, markdown: Some(markdown) }) {
+        Ok(page) => {
+            super::record::created(core, import_id, &page.output.id)?;
+            super::record::report(core, import_id, &page.output.id)?;
+            imported.report_page_id = Some(page.output.id);
+        }
+        Err(OpError::InvalidInput(message) | OpError::NotPermitted(message)) => {
+            imported.problems.push(super::Problem::new("Import report", format!("The report could not be created as a Page: {message}")));
+        }
+        Err(error) => return Err(error),
+    }
+    Ok(imported)
+}
+
+/// What one page's content held, and where the page is, for the report.
+struct FoundOnPage {
+    /// The page's key in the Bundle.
+    key: String,
+    /// The titles of the pages and folders above it, from the top down.
+    path: Vec<String>,
+    tally: Tally,
 }
 
 /// A space read from its export: what to create, and the report on it.
 struct ReadExport {
     bundle: Bundle,
     coverage: Coverage,
+    /// What each page's content held, in the order the pages were read.
+    found: Vec<FoundOnPage>,
 }
 
 /// The objects of `entities.xml` the import reads; every other class is
@@ -359,13 +413,13 @@ impl Space {
                     Some(converted) => {
                         entry.content = converted.content;
                         entry.links = converted.links;
-                        found.push((page.title.clone(), converted.found));
+                        found.push((page.id.clone(), keys[page.id.as_str()].clone(), page.title.clone(), converted.found));
                     }
                     None => {
                         problems.push(Problem::new(keys[page.id.as_str()].clone(), "Its content could not be read, so the Page was created empty."));
                         let mut unread = Tally::default();
                         unread.add("unreadable page content");
-                        found.push((page.title.clone(), unread));
+                        found.push((page.id.clone(), keys[page.id.as_str()].clone(), page.title.clone(), unread));
                     }
                 }
             }
@@ -378,10 +432,18 @@ impl Space {
         for (class, what) in [("SpacePermission", "Space permissions"), ("ContentPermissionSet", "Page restrictions"), ("BlogPost", "Blog posts")] {
             not_imported.push(NotImported { what: what.into(), count: counts.get(class).copied().unwrap_or(0) });
         }
-        let mut coverage = coverage::report(self.name, (pages, folders, attachment_count), &found, not_imported);
+        let by_title: Vec<(String, Tally)> = found.iter().map(|(_, _, title, tally)| (title.clone(), tally.clone())).collect();
+        let source = format!("the Confluence space {}", self.name);
+        let mut coverage = coverage::report(self.name, (pages, folders, attachment_count), &by_title, not_imported);
         coverage.attachment_limit_bytes = core.attachment_limit();
         coverage.too_large = too_large;
-        ReadExport { bundle: Bundle { entries, problems }, coverage }
+        let parents: HashMap<&str, (&str, Option<&str>)> =
+            self.pages.iter().map(|page| (page.id.as_str(), (page.title.as_str(), page.parent.as_deref()))).collect();
+        let found = found
+            .into_iter()
+            .map(|(id, key, _, tally)| FoundOnPage { key, path: path_to(&parents, &id), tally })
+            .collect();
+        ReadExport { bundle: Bundle { source, entries, problems }, coverage, found }
     }
 }
 
@@ -395,6 +457,21 @@ enum AttachmentFile {
     /// Larger than this Turtle accepts, so it is not read at all.
     TooLarge { bytes: u64, message: String },
     Missing,
+}
+
+/// The titles of the pages and folders above a page, from the top down,
+/// given each one's title and parent by ID.
+fn path_to(parents: &HashMap<&str, (&str, Option<&str>)>, id: &str) -> Vec<String> {
+    let mut path = Vec::new();
+    let mut at = parents.get(id).and_then(|(_, parent)| *parent);
+    // A parent chain that loops back is cut, rather than followed forever.
+    while let Some(parent) = at.filter(|_| path.len() < 200) {
+        let Some((title, above)) = parents.get(parent) else { break };
+        path.push(title.to_string());
+        at = *above;
+    }
+    path.reverse();
+    path
 }
 
 /// The file of an attachment's current version: as its version names it,
@@ -654,7 +731,7 @@ mod tests {
             .unwrap()
             .output;
 
-        assert_eq!(outline(&core, &grace, &area_id), ["Home", "  Guides (folder)", "    Set up", "    Deploy", "  Contact"]);
+        assert_eq!(outline(&core, &grace, &area_id), ["Home", "  Guides (folder)", "    Set up", "    Deploy", "  Contact", "Import report: Knowledge Base (2023-11-14)"]);
         let home = &imported.entries[0];
         let (set_up, deploy) = (&home.children[0].children[0].id, &home.children[0].children[1].id);
         let flow = &list_attachments(&core, &grace, PageId { id: deploy.clone() }).unwrap().output.attachments;
@@ -670,6 +747,41 @@ mod tests {
         assert_eq!(problems[1].0, "Set up");
         assert!(problems[1].1.starts_with("Its Tag \"longlong"), "{}", problems[1].1);
         assert_eq!(problems.len(), 2);
+    }
+
+    #[test]
+    fn the_report_is_a_page_beside_the_import_listing_the_pages_to_check_and_stays_marked_once_the_import_is_undone() {
+        use crate::ops::import::record::{list_imports, undo_import, ImportToUndo, ImportsOfArea};
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Wiki");
+
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content: knowledge_base() })
+            .unwrap()
+            .output;
+
+        let home = &imported.entries[0];
+        let (deploy, contact) = (&home.children[0].children[1].id, &home.children[1].id);
+        let report = markdown_of(&core, &grace, imported.report_page_id.as_deref().unwrap());
+        assert!(report.starts_with("This Page tells how the Confluence space **Knowledge Base** came across when it was imported on 2023-11-14. To undo the import, choose **Imports** in the menu of this Area."), "{report}");
+        let to_check: Vec<&str> = report.lines().filter(|line| line.starts_with("- [ ]")).collect();
+        assert_eq!(
+            to_check,
+            [
+                format!("- [ ] [Deploy](turtle:{deploy}) (in Home › Guides): Placeholders: toc macro. Approximately: link to a folder."),
+                format!("- [ ] [Contact](turtle:{contact}) (in Home): Approximately: mention."),
+            ]
+        );
+        assert!(report.contains("- Deploy/gone.pdf: Its file is not in the export, so it was left out."), "{report}");
+        let listed = list_imports(&core, &grace, ImportsOfArea { area_id: area_id.clone() }).unwrap().output.imports;
+        assert_eq!(listed[0].source, "the Confluence space Knowledge Base");
+        let report_page_id = imported.report_page_id.unwrap();
+        assert_eq!(listed[0].report_page_id.as_deref(), Some(report_page_id.as_str()));
+
+        undo_import(&core, &grace, ImportToUndo { import_id: imported.import_id }).unwrap();
+
+        assert_eq!(outline(&core, &grace, &area_id), ["Import report: Knowledge Base (2023-11-14)"]);
+        assert!(markdown_of(&core, &grace, &report_page_id).starts_with("> [!WARNING]\n> This import was undone on 2023-11-14."));
     }
 
     #[test]
@@ -761,7 +873,7 @@ mod tests {
         // Four Pages of the space hold content to write.
         assert_eq!((progress.done, progress.total), (4, 4));
         assert_eq!(progress.imported.unwrap().entries[0].title, "Home");
-        assert_eq!(outline(&core, &grace, &area_id), ["Home", "  Guides (folder)", "    Set up", "    Deploy", "  Contact"]);
+        assert_eq!(outline(&core, &grace, &area_id), ["Home", "  Guides (folder)", "    Set up", "    Deploy", "  Contact", "Import report: Knowledge Base (2023-11-14)"]);
     }
 
     #[test]

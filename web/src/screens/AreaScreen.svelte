@@ -11,6 +11,7 @@
   import Grants from '../components/Grants.svelte'
   import Icon from '../components/Icon.svelte'
   import NameDialog from '../components/NameDialog.svelte'
+  import ImportsDialog from '../components/ImportsDialog.svelte'
   import PdfExportDialog from '../components/PdfExportDialog.svelte'
   import { toast } from 'svelte-sonner'
   import { menuKeys, openMenu } from '../lib/menu'
@@ -89,6 +90,7 @@
 
   let renameDialog = $state<NameDialog>()
   let pdfDialog = $state<PdfExportDialog>()
+  let importsDialog = $state<ImportsDialog>()
   let moreMenu = $state() as HTMLDivElement
   let newPageDialog = $state<NameDialog>()
   let menu = $state<EntryMenu>()
@@ -216,6 +218,7 @@
                 Import from Confluence
               </button>
             {/if}
+            <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => area && importsDialog?.open(area))}>Imports</button>
             {#if area.role === 'admin' && !area.personal}
               <hr />
               <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => renameDialog?.open(area?.name))}>Rename</button>
@@ -272,6 +275,7 @@
 
   <EntryMenu bind:this={menu} onclose={() => (menuFor = null)} />
   <PdfExportDialog bind:this={pdfDialog} />
+  <ImportsDialog bind:this={importsDialog} onundone={reload} />
   <NameDialog bind:this={renameDialog} label="Name of the Area" action="Rename" onsubmit={rename} />
   <NameDialog
     bind:this={newPageDialog}

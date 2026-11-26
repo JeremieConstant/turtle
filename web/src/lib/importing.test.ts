@@ -12,6 +12,8 @@ const toast = vi.hoisted(() =>
 vi.mock('svelte-sonner', () => ({ toast }))
 const session = vi.hoisted(() => ({ limits: { attachment_bytes: 25 * 1024 * 1024, import_bytes: 200 * 1024 * 1024 } }))
 vi.mock('./session.svelte', () => ({ session }))
+const router = vi.hoisted(() => ({ navigate: vi.fn() }))
+vi.mock('./router.svelte', () => ({ router }))
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -58,29 +60,26 @@ async function ended<T>(importing: Promise<T>): Promise<T> {
   return importing
 }
 
-test('a Confluence export is started where asked, followed until it is done, and the report is told in the toast', async () => {
+test('a Confluence export is started where asked, followed until it is done, and the toast leads to the report Page', async () => {
   callTellingUpload.mockResolvedValue(progress({}))
+  const imported = { import_id: 'i1', entries: [], problems: [], report_page_id: 'r1' }
   call
     .mockResolvedValueOnce(progress({ stage: 'creating', done: 40, total: 108, coverage: coverage() }))
-    .mockResolvedValueOnce(progress({ stage: 'done', done: 86, total: 86, coverage: coverage(), imported: { entries: [], problems: [] } }))
+    .mockResolvedValueOnce(progress({ stage: 'done', done: 86, total: 86, coverage: coverage(), imported }))
 
-  const imported = await ended(importConfluenceFromFile({ area_id: 'a1', parent_id: 'f1' }, zip, 'Archive'))
+  const done = await ended(importConfluenceFromFile({ area_id: 'a1', parent_id: 'f1' }, zip, 'Archive'))
 
-  expect(imported).toBe(true)
+  expect(done).toBe(true)
   expect(callTellingUpload).toHaveBeenCalledWith('start_import_confluence', { area_id: 'a1', parent_id: 'f1', content: 'UEsDBA==' }, expect.any(Function))
   expect(call).toHaveBeenCalledWith('get_import_progress', { import_id: 'i1' })
-  expect(toast.success).toHaveBeenCalledWith('Imported Knowledge Base into Archive', {
-    id: 'import-toast',
-    description: [
-      '86 Pages, 22 Folders and 212 Attachments. 53 of the Pages came across exactly.',
-      'Of the content, 97 % came across exactly and 99 % at least approximately.',
-      'Left out: missing attachment (2).',
-      'Placeholders: toc macro (1).',
-      'Approximately: panel macro (14).',
-      'Not imported: Comments (5), Earlier versions of pages (294).',
-    ].join('\n'),
-    duration: 30_000,
-  })
+  const [title, options] = toast.success.mock.calls[0] as [string, { id: string; description: string; duration: number; action: { label: string; onClick: () => void } }]
+  expect(title).toBe('Imported Knowledge Base into Archive')
+  expect(options.description).toBe(
+    '97 % of the content came across exactly, 99 % at least approximately. 33 of the 86 Pages are to check.\nThe report beside the import lists them.',
+  )
+  expect(options.action.label).toBe('Open report')
+  options.action.onClick()
+  expect(router.navigate).toHaveBeenCalledWith('/p/r1/import-report')
 })
 
 test('the toast tells how much of the ZIP is uploaded and then how far the import has got', async () => {
@@ -91,7 +90,7 @@ test('the toast tells how much of the ZIP is uploaded and then how far the impor
   call
     .mockResolvedValueOnce(progress({ stage: 'creating', done: 40, total: 108 }))
     .mockResolvedValueOnce(progress({ stage: 'writing', done: 12, total: 86 }))
-    .mockResolvedValueOnce(progress({ stage: 'done', imported: { entries: [], problems: [] } }))
+    .mockResolvedValueOnce(progress({ stage: 'done', imported: { import_id: 'i1', entries: [], problems: [] } }))
 
   await ended(importFromFile({ area_id: 'a1' }, zip, 'Wiki'))
 
@@ -113,7 +112,7 @@ test('attachments too large for this Turtle are told as soon as the space is rea
     { file: 'Deploy/gone.pdf', message: 'Its file is not in the export, so it was left out.' },
   ]
   callTellingUpload.mockResolvedValue(progress({}))
-  call.mockResolvedValueOnce(progress({ stage: 'done', coverage: tooLarge, imported: { entries: [], problems } }))
+  call.mockResolvedValueOnce(progress({ stage: 'done', coverage: tooLarge, imported: { import_id: 'i1', entries: [], problems } }))
   const toldLine =
     'Left out as larger than 25 MB, the most this Turtle accepts for one file: Deploy/video.mp4 (31.5 MB). Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB.'
 
@@ -121,11 +120,7 @@ test('attachments too large for this Turtle are told as soon as the space is rea
 
   expect(stageOf(progress({ stage: 'creating', done: 1, total: 9, coverage: tooLarge }))).toBe(`Creating Pages and Folders: 1 of 9\n${toldLine}`)
   const [, { description }] = toast.success.mock.calls[0] as [string, { description: string }]
-  const lines = description.split('\n')
-  expect(lines[2]).toBe(toldLine)
-  expect(lines.filter(line => line.startsWith('Did not come across'))).toEqual([
-    'Did not come across: Deploy/gone.pdf: Its file is not in the export, so it was left out.',
-  ])
+  expect(description.split('\n')[1]).toBe('2 files did not come across. The report beside the import lists them and the Pages to check.')
 })
 
 test('a ZIP larger than this Turtle imports is refused before it is sent', async () => {
@@ -159,10 +154,24 @@ test('when the import fails while running, nothing is reported as imported and t
   expect(toast.error).toHaveBeenCalledWith('This is Confluence’s CSV export, which Turtle cannot read yet.', { id: 'import-toast' })
 })
 
+test('an import that fails once it has created Pages says that they are kept and how to undo them', async () => {
+  callTellingUpload.mockResolvedValue(progress({}))
+  call
+    .mockResolvedValueOnce(progress({ stage: 'creating', done: 3, total: 9 }))
+    .mockResolvedValueOnce(progress({ stage: 'failed', error: 'Something went wrong.' }))
+
+  await ended(importConfluenceFromFile({ area_id: 'a1' }, zip, 'Wiki'))
+
+  expect(toast.error).toHaveBeenCalledWith(
+    'Something went wrong. What it created before is kept; to undo it, choose Imports in the menu of the Area.',
+    { id: 'import-toast' },
+  )
+})
+
 test('what did not come across from Markdown is named file by file', async () => {
   const problems = [{ file: 'Runbook/_attachments/big.bin', message: 'It is 30 MB, larger than 25 MB, …' }]
   callTellingUpload.mockResolvedValue(progress({}))
-  call.mockResolvedValueOnce(progress({ stage: 'done', imported: { entries: [], problems } }))
+  call.mockResolvedValueOnce(progress({ stage: 'done', imported: { import_id: 'i1', entries: [], problems } }))
 
   await ended(importFromFile({ area_id: 'a1' }, zip, 'Wiki'))
 

@@ -82,6 +82,11 @@ pub(super) struct Following<'a> {
 }
 
 impl Following<'_> {
+    /// The import's ID, which it is followed and recorded by.
+    pub fn import_id(&self) -> &str {
+        self.import_id
+    }
+
     /// Tells a step of writing what was read.
     pub fn step(&self, step: Step) {
         let (stage, done, total) = match step {
@@ -109,7 +114,7 @@ pub(super) fn start(
     work: impl FnOnce(&Core, &Principal, &Following) -> Result<Imported, OpError> + Send + 'static,
 ) -> OpResult<ImportProgress> {
     let owner = owner_of(principal)?;
-    let import_id = crate::ops::accounts::random_hex(16)?;
+    let import_id = super::record::new_id()?;
     let progress = ImportProgress {
         import_id: import_id.clone(),
         stage: Stage::Reading,

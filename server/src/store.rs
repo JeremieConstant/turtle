@@ -360,6 +360,27 @@ const MIGRATIONS: &[&str] = &[
     // what they uploaded, its file in profile-pictures beside the database
     // under the SHA-256 of its content (ADR-0009).
     "ALTER TABLE members ADD COLUMN picture_hash TEXT;",
+    // Each import, so it can be looked at and undone later: who started it,
+    // from what, the Pages and Folders it created and, for an import from
+    // Confluence, the Page holding its report. An Entry it created that is
+    // removed for good leaves the record.
+    "CREATE TABLE imports (
+         id TEXT PRIMARY KEY,
+         area_id TEXT NOT NULL REFERENCES areas (id) ON DELETE CASCADE,
+         source TEXT NOT NULL,
+         started_at INTEGER NOT NULL,
+         member_id TEXT REFERENCES members (id) ON DELETE SET NULL,
+         agent_id TEXT REFERENCES agents (id) ON DELETE SET NULL,
+         agent TEXT NOT NULL DEFAULT '',
+         report_page_id TEXT REFERENCES nodes (id) ON DELETE SET NULL,
+         undone_at INTEGER
+     );
+     CREATE INDEX imports_by_area ON imports (area_id, started_at);
+     CREATE TABLE import_entries (
+         import_id TEXT NOT NULL REFERENCES imports (id) ON DELETE CASCADE,
+         node_id TEXT NOT NULL REFERENCES nodes (id) ON DELETE CASCADE,
+         PRIMARY KEY (import_id, node_id)
+     );",
 ];
 
 pub fn open(path: &Path) -> anyhow::Result<Connection> {

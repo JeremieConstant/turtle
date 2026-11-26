@@ -284,19 +284,32 @@ export type Imported = {
   /** The Pages and Folders created at the top of the import, with what is
 beneath them. */
   entries: Entry[]
+  /** The import as list_imports names it, to undo it with undo_import. */
+  import_id: string
   /** Each file that did not come across, with the reason. Empty when all did. */
   problems: Problem[]
+  /** The Page holding the import's report, for an import from Confluence. */
+  report_page_id?: string | null
 }
 
 export type ImportedFromConfluence = {
   /** How much of the space came across. */
   coverage: Coverage
   /** The Pages and Folders created at the top of the import, with what is
-beneath them. */
+beneath them; the report Page is apart. */
   entries: Entry[]
+  /** The import as list_imports names it, to undo it with undo_import. */
+  import_id: string
   /** Each page or attachment that did not come across, or not whole, with
 the reason. */
   problems: Problem[]
+  /** The Page holding the report on the import, beside what was imported;
+absent if it could not be created, which `problems` then tells. */
+  report_page_id?: string | null
+}
+
+export type ImportList = {
+  imports: ImportRecord[]
 }
 
 export type ImportProgress = {
@@ -315,6 +328,26 @@ creating, Pages whose content is written while writing. */
   stage: Stage
   /** How much there is to do in the stage; 0 while reading. */
   total: number
+}
+
+export type ImportRecord = {
+  /** How many of the Pages and Folders it created, its report aside, are
+still there, not in the Trash, for the caller to see. */
+  created_count: number
+  id: string
+  /** The Page holding its report, while the caller may read it. */
+  report_page_id?: string | null
+  /** What was imported, such as "the Confluence space Knowledge Base". */
+  source: string
+  /** Seconds since the Unix epoch. */
+  started_at: number
+  /** Who started it; absent once they no longer exist. */
+  started_by?: Author | null
+  /** Whether the caller may undo it: it is not undone yet, and they may
+change all that it created. */
+  undoable: boolean
+  /** When it was undone, in seconds since the Unix epoch; absent if not. */
+  undone_at?: number | null
 }
 
 export type Kind = "page" | "folder"
@@ -761,6 +794,15 @@ export type Tree = {
   /** How many deleted Pages and Folders are in the Trash of the Area, for
 someone with the Write Role, who can see it; None for anyone else. */
   trash?: number | null
+}
+
+export type Undone = {
+  /** The titles of the Pages and Folders created beneath them since the
+import, which went to the Trash with them; those the caller may not
+read are left out. */
+  taken_along: string[]
+  /** How many of the Pages and Folders the import created went to the Trash. */
+  trashed: number
 }
 
 export type UploadedFont = {
@@ -1395,6 +1437,21 @@ of the Page. Needed only when several Sections have this heading. */
       parent_id?: string | null
     }
     output: ImportProgress
+  }
+  /** Lists the imports into an Area, newest first: where each came from, when and by whom it was started, how many of the Pages and Folders it created are still there for the caller to see, the Page holding its report if it has one, whether the caller may undo it, and whether it was undone. Needs the Read Role on the Area. */
+  list_imports: {
+    input: {
+      area_id: string
+    }
+    output: ImportList
+  }
+  /** Undoes an import: moves every Page and Folder it created that is still there to the Trash, from where each can be restored. What was created beneath them since goes to the Trash with them and is named in the answer. Its report stays, marked as undone. An import is undone once, by someone who may change all that it created. */
+  undo_import: {
+    input: {
+      /** The ID list_imports, or the import itself, gave. */
+      import_id: string
+    }
+    output: Undone
   }
   /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role. */
   export_pdf: {

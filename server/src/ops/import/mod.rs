@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 
 mod confluence;
 mod markdown;
+pub(super) mod record;
 mod running;
 
 pub use running::Imports;
@@ -45,6 +46,7 @@ pub(super) fn register(catalogue: &mut Catalogue) {
         )
         .changes = false;
     confluence::register(catalogue);
+    record::register(catalogue);
 }
 
 /// The largest ZIP that can be imported at once, unless whoever runs Turtle
@@ -104,11 +106,23 @@ pub struct ToImport {
 /// What an import created, and what did not come across.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Imported {
+    /// The import as list_imports names it, to undo it with undo_import.
+    pub import_id: String,
     /// The Pages and Folders created at the top of the import, with what is
     /// beneath them.
     pub entries: Vec<Entry>,
     /// Each file that did not come across, with the reason. Empty when all did.
     pub problems: Vec<Problem>,
+    /// The Page holding the import's report, for an import from Confluence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_page_id: Option<String>,
+}
+
+/// What writing a Bundle created: what the import answers with, and the ID
+/// each imported Page got, by its key.
+pub(super) struct Written {
+    pub imported: Imported,
+    pub pages: HashMap<String, String>,
 }
 
 /// A file that did not come across, and why.
@@ -130,7 +144,8 @@ pub fn import(core: &Core, principal: &Principal, input: ToImport) -> OpResult<I
     // Access is checked before the ZIP is read, so a refused import reads nothing.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
     let bundle = markdown::read(input.content)?;
-    write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, &|_| {})
+    let import_id = record::new_id()?;
+    Ok(write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, &import_id, &|_| {})?.imported.into())
 }
 
 pub fn start_import(core: &Core, principal: &Principal, input: ToImport) -> OpResult<running::ImportProgress> {
@@ -139,7 +154,7 @@ pub fn start_import(core: &Core, principal: &Principal, input: ToImport) -> OpRe
     running::start(core, principal, move |core, principal, following| {
         let bundle = markdown::read(input.content)?;
         let step = |step| following.step(step);
-        Ok(write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, &step)?.output)
+        Ok(write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, following.import_id(), &step)?.imported)
     })
 }
 
@@ -150,6 +165,8 @@ pub fn get_import_progress(core: &Core, principal: &Principal, input: running::O
 /// What an importer read from its source, in a form that is the same
 /// whatever the source: the Pages and Folders to create, in tree order.
 pub(super) struct Bundle {
+    /// What is imported, as a phrase: "a ZIP of Markdown files".
+    pub source: String,
     pub entries: Vec<Incoming>,
     /// What the importer could not read, to report alongside what the
     /// writing could not bring across.
@@ -213,13 +230,15 @@ pub(super) fn write_bundle(
     area_id: &str,
     parent_id: Option<&str>,
     bundle: Bundle,
+    import_id: &str,
     progress: Progress,
-) -> OpResult<Imported> {
+) -> Result<Written, OpError> {
     // Checked even with nothing to create, so an empty import is refused like any other.
     check_target(core, principal, area_id, parent_id)?;
+    record::begin(core, principal, import_id, area_id, &bundle.source)?;
     // Content is written once everything is created, so a link can point
     // to a Page that comes later in the tree.
-    let mut created = Created { problems: bundle.problems, ..Created::default() };
+    let mut created = Created { import_id: import_id.to_string(), problems: bundle.problems, ..Created::default() };
     let to_create = count(&bundle.entries);
     progress(Step::Creating { done: 0, total: to_create });
     let mut creating = Creating { progress, done: 0, total: to_create };
@@ -232,7 +251,8 @@ pub(super) fn write_bundle(
         super::content::write_content(core, principal, &page_id, content)?;
         progress(Step::Writing { done: written as u32 + 1, total: to_write });
     }
-    Ok(Imported { entries, problems: created.problems }.into())
+    let imported = Imported { import_id: import_id.to_string(), entries, problems: created.problems, report_page_id: None };
+    Ok(Written { imported, pages: created.pages })
 }
 
 /// How many Pages and Folders there are, with everything beneath them.
@@ -257,6 +277,8 @@ fn check_target(core: &Core, principal: &Principal, area_id: &str, parent_id: Op
 /// What has been created so far, and what is left to write once all is.
 #[derive(Default)]
 struct Created {
+    /// The import, to record what it creates.
+    import_id: String,
     /// The ID each imported Page got, by its key.
     pages: HashMap<String, String>,
     /// The address each imported Attachment got, by its key.
@@ -315,6 +337,7 @@ fn create_all(
     for incoming in incoming {
         let entry = NewEntry { area_id: area_id.into(), parent_id: parent_id.map(Into::into), title: incoming.title };
         let mut created = tree::create_with_id(core, principal, entry, incoming.kind, incoming.id.as_deref())?.output;
+        record::created(core, &created_so_far.import_id, &created.id)?;
         for attachment in incoming.attachments {
             if let Some(message) = too_large_to_attach(core, attachment.content.len() as u64) {
                 created_so_far.problems.push(Problem::new(attachment.key, message));
@@ -763,7 +786,7 @@ mod tests {
         later.attachments.push(IncomingAttachment { key: "attachment:9".into(), name: "chart.png".into(), content: b"a chart".to_vec() });
         home.children.push(later);
 
-        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![home], problems: Vec::new() }, &|_| {}).unwrap().output;
+        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { source: "a test".into(), entries: vec![home], problems: Vec::new() }, "test-import", &|_| {}).unwrap().imported;
 
         let later = &imported.entries[0].children[0].id;
         let chart = &attachments_of(&core, &grace, later)[0].2;
@@ -787,7 +810,7 @@ mod tests {
         let mut guides = page("folder:2", "Guides", "", &[]);
         guides.kind = Kind::Folder;
 
-        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook, guides], problems: Vec::new() }, &|_| {}).unwrap().output;
+        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { source: "a test".into(), entries: vec![runbook, guides], problems: Vec::new() }, "test-import", &|_| {}).unwrap().imported;
 
         assert_eq!(markdown_of(&core, &grace, &imported.entries[0].id), "*Not imported: flow.png* See the log and Guides.\n");
     }
@@ -802,7 +825,7 @@ mod tests {
         runbook.attachments.push(IncomingAttachment { key: "Runbook/_attachments/big.bin".into(), name: "big.bin".into(), content: b"too large".to_vec() });
         runbook.attachments.push(IncomingAttachment { key: "Runbook/_attachments/ok.txt".into(), name: "ok.txt".into(), content: b"ok".to_vec() });
 
-        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook], problems: Vec::new() }, &|_| {}).unwrap().output;
+        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { source: "a test".into(), entries: vec![runbook], problems: Vec::new() }, "test-import", &|_| {}).unwrap().imported;
 
         let runbook = &imported.entries[0].id;
         assert_eq!(markdown_of(&core, &grace, runbook), "Restart it.\n");
@@ -837,7 +860,7 @@ mod tests {
         runbook.children.push(page("Runbook/Deploy.md", "Deploy", "Ship it.", &[]));
         let steps = std::cell::RefCell::new(Vec::new());
 
-        write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook, page("Empty.md", "Empty", "", &[])], problems: Vec::new() }, &|step| {
+        write_bundle(&core, &grace, &area_id, None, Bundle { source: "a test".into(), entries: vec![runbook, page("Empty.md", "Empty", "", &[])], problems: Vec::new() }, "test-import", &|step| {
             steps.borrow_mut().push(step)
         })
         .unwrap();
