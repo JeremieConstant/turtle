@@ -109,9 +109,8 @@ async fn main() -> anyhow::Result<()> {
         _ => Ipv4Addr::LOCALHOST.into(),
     };
 
-    // The largest file that can be attached, and the largest ZIP that can be imported.
+    // The largest file that can be attached.
     let attachment_limit = megabytes("TURTLE_MAX_ATTACHMENT_MB", ops::attachments::DEFAULT_ATTACHMENT_LIMIT)?;
-    let import_limit = megabytes("TURTLE_MAX_IMPORT_MB", ops::import::DEFAULT_IMPORT_LIMIT)?;
 
     // Where people and AI clients reach this Turtle from outside, if it is
     // known; only then is OAuth offered (ADR-0010).
@@ -132,6 +131,12 @@ async fn main() -> anyhow::Result<()> {
     let demo_password = std::env::var("TURTLE_DEMO_PASSWORD").ok();
     let demo_reset_hours = std::env::var("TURTLE_DEMO_RESET_HOURS").ok();
     let demo = demo::from_settings(demo_email.as_deref(), demo_password.as_deref(), demo_reset_hours.as_deref())?;
+
+    // The largest ZIP that can be imported. Anyone can sign in to a Demo and
+    // upload one that large to its disk, so a Demo takes less unless its
+    // operator says otherwise.
+    let default_import_limit = if demo.is_some() { ops::import::DEMO_IMPORT_LIMIT } else { ops::import::DEFAULT_IMPORT_LIMIT };
+    let import_limit = megabytes("TURTLE_MAX_IMPORT_MB", default_import_limit)?;
 
     // Behind a reverse proxy every request comes from the proxy, so failed
     // attempts are counted by the client address the proxy passes on in

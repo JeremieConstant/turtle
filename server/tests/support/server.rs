@@ -115,6 +115,11 @@ impl TestServer {
         TestServer::start_with(None, Settings { demo, ..Settings::default() }).await
     }
 
+    /// Starts a server with these demo settings and `TURTLE_MAX_IMPORT_MB`.
+    pub async fn start_as_demo_with_import_limit(demo: DemoEnv, import_mb: u32) -> TestServer {
+        TestServer::start_with(None, Settings { demo, import_limit_mb: Some(import_mb), ..Settings::default() }).await
+    }
+
     /// Starts a server with these demo settings, expecting it to refuse to
     /// start, and returns what it wrote to its standard error.
     pub async fn refuses_to_start_as_demo(demo: DemoEnv) -> String {

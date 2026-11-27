@@ -23,7 +23,7 @@ The upload is a route of the HTTP adapter, not an operation: it carries bytes an
 
 An import still holds every page's content in memory from reading the space until it is written, about 25 MB for every 1,000 pages. A made-up space of 20,000 pages and 4,000 attachments, a ZIP of 1.9 GB, came in within 20 seconds holding 450 MB at most.
 
-Whoever can sign in can put that much on the disk the database lies on, for an hour. A Turtle open to people who are not trusted with that, such as a Demo, sets `TURTLE_MAX_IMPORT_MB` lower.
+Whoever can sign in can put that much on the disk the database lies on, for an hour. So a Demo, which anyone can sign in to, takes 200 MB unless `TURTLE_MAX_IMPORT_MB` says otherwise; any other Turtle open to people who are not trusted with that much disk sets it lower.
 
 An Agent that reaches Turtle only through MCP cannot upload, and so imports ZIPs up to what an MCP request may carry, which is the largest file that can be attached, 25 MB unless set otherwise. One that can make HTTP requests uploads with its Token as a person's browser does with its session.
 

@@ -62,6 +62,9 @@ pub(super) fn register(catalogue: &mut Catalogue) {
 /// ZIP this large is uploaded ahead of the import and read from its file.
 pub const DEFAULT_IMPORT_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 
+/// The same for a Demo, which anyone can sign in to and upload to.
+pub const DEMO_IMPORT_LIMIT: u64 = 200 * 1024 * 1024;
+
 /// The largest ZIP that can be sent in base64 with the operation, whatever
 /// the import limit: sent this way it is held in memory several times over.
 const SENT_LIMIT: u64 = 200 * 1024 * 1024;

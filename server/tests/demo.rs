@@ -110,3 +110,24 @@ async fn turtle_refuses_to_start_with_demo_settings_that_do_not_fit() {
         assert!(said.contains(&format!("{named} must")), "{described}: {said}");
     }
 }
+
+/// The largest ZIP the signed-in Member may import, in MB.
+async fn import_limit_mb(server: &TestServer) -> u64 {
+    let ada = server.sign_up().await;
+    ada.call("get_session", json!({})).await["limits"]["import_bytes"].as_u64().unwrap() / (1024 * 1024)
+}
+
+#[tokio::test]
+async fn a_demo_imports_200_mb_at_most_unless_its_operator_says_otherwise() {
+    // Anyone can sign in to a Demo, and an upload takes as much disk.
+    let mut demo_server = TestServer::start_as_demo(demo("grace@example.org", Some("6"))).await;
+    let mut set = TestServer::start_as_demo_with_import_limit(demo("grace@example.org", Some("6")), 500).await;
+    let mut other = TestServer::start().await;
+
+    assert_eq!(import_limit_mb(&demo_server).await, 200);
+    assert_eq!(import_limit_mb(&set).await, 500);
+    assert_eq!(import_limit_mb(&other).await, 2048);
+    demo_server.stop().await;
+    set.stop().await;
+    other.stop().await;
+}
