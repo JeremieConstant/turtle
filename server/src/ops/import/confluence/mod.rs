@@ -552,6 +552,35 @@ mod tests {
         }
     }
 
+    /// Imports a real export, named by `CONFLUENCE_EXPORT`, into a fresh
+    /// Turtle and prints how long each stage took: a way to try a large
+    /// space. Run it as `report_on_a_real_export`, with `--release`.
+    #[test]
+    #[ignore]
+    fn import_a_real_export() {
+        let path = std::env::var("CONFLUENCE_EXPORT").expect("CONFLUENCE_EXPORT names the ZIP");
+        let started = std::time::Instant::now();
+        let content = base64::engine::general_purpose::STANDARD.encode(std::fs::read(path).unwrap());
+        let core = crate::ops::testing::fresh();
+        let writer = crate::ops::testing::member(&core, "Writer", false);
+        let area_id = create_area(&core, &writer, NewArea { name: "Imported".into() }).unwrap().output.id;
+        println!("encoded after {:?}", started.elapsed());
+        let read = read_export(&core, &writer, content).unwrap();
+        println!("read after {:?}: {} Pages, {} Folders, {} Attachments", started.elapsed(), read.coverage.pages, read.coverage.folders, read.coverage.attachments);
+        let stage = std::cell::Cell::new(0);
+        let step = |step| {
+            let now = match step {
+                super::super::Step::Creating { .. } => 1,
+                super::super::Step::Writing { .. } => 2,
+            };
+            if stage.replace(now) != now {
+                println!("stage {now} begins after {:?}", started.elapsed());
+            }
+        };
+        let imported = write(&core, &writer, &area_id, None, read, "i1", &step).unwrap();
+        println!("imported after {:?}, {} problems", started.elapsed(), imported.problems.len());
+    }
+
     use crate::ops::areas::{create_area, NewArea};
     use crate::ops::attachments::list_attachments;
     use crate::ops::content::{get_page_markdown, OfPage};

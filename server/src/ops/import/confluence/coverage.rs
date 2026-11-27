@@ -3,7 +3,8 @@
 //!
 //! `ELEMENTS` is the one list of what the import does with each element and
 //! macro it knows. The report of an import or a check is drawn from it, and
-//! so can a public list of what comes across from Confluence.
+//! so is the public list of what comes across from Confluence, in
+//! `docs/confluence-import.md`, which a test holds to it.
 
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -233,5 +234,59 @@ pub fn report(space: String, counts: (u32, u32, u32), found: &[(String, Tally)],
         not_imported: not_imported.into_iter().filter(|item| item.count > 0).collect(),
         too_large: Vec::new(),
         attachment_limit_bytes: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where the public list lies in `docs/confluence-import.md`.
+    const BEGIN: &str = "<!-- what comes across: generated from the import's own list, see the end of this page -->\n";
+    const END: &str = "<!-- end of what comes across -->\n";
+
+    /// What comes across from Confluence, as the public page lists it.
+    fn public_list() -> String {
+        let of = |outcome: Outcome| ELEMENTS.iter().filter(move |known| known.outcome == outcome);
+        let mut out = format!(
+            "Of the {} kinds of Confluence content the import knows, {} come across exactly, {} approximately and {} are left out. A macro it does not know becomes a placeholder naming the macro, followed by what the macro held. Any other element it does not know keeps its text.\n",
+            ELEMENTS.len(),
+            of(Exact).count(),
+            of(Approximate).count(),
+            of(LeftOut).count()
+        );
+        for (outcome, heading) in [(Exact, "Comes across exactly"), (Approximate, "Comes across approximately"), (LeftOut, "Is left out")] {
+            out += &format!("\n### {heading}\n\n| Confluence content | What it becomes in Turtle |\n| --- | --- |\n");
+            for known in of(outcome) {
+                let mut name = known.name.to_string();
+                name[..1].make_ascii_uppercase();
+                out += &format!("| {name} | {} |\n", known.becomes);
+            }
+        }
+        out += "\n### Is not imported\n\nA space holds more than its pages. The import counts these in its report and leaves them in Confluence:\n\n";
+        for item in super::super::Unimported::default().listed() {
+            out += &format!("- {}\n", item.what);
+        }
+        out
+    }
+
+    /// Holds the public page to what the import does. After changing
+    /// `ELEMENTS`, write the list anew with `TURTLE_WRITE_DOCS=1
+    /// scripts/cargo test --manifest-path server/Cargo.toml --bin turtle
+    /// the_public_list`, and commit the page.
+    #[test]
+    fn the_public_list_of_what_comes_across_says_what_the_import_does() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/confluence-import.md");
+        let page = std::fs::read_to_string(&path).unwrap();
+        let (before, rest) = page.split_once(BEGIN).expect("the page marks where the list begins");
+        let (listed, after) = rest.split_once(END).expect("the page marks where the list ends");
+        if std::env::var_os("TURTLE_WRITE_DOCS").is_some() {
+            std::fs::write(&path, format!("{before}{BEGIN}{}{END}{after}", public_list())).unwrap();
+            return;
+        }
+        assert!(
+            listed == public_list(),
+            "docs/confluence-import.md no longer says what the import does. Write its list anew with `TURTLE_WRITE_DOCS=1 scripts/cargo test --manifest-path server/Cargo.toml --bin turtle the_public_list`, and commit the page."
+        );
     }
 }
