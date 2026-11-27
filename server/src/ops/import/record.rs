@@ -308,7 +308,7 @@ pub(super) fn date_of(seconds: i64) -> String {
 mod tests {
     use super::*;
     use crate::ops::areas::{create_area, NewArea};
-    use crate::ops::import::{import, ToImport};
+    use crate::ops::import::{import, ToImport, ZipGiven};
     use crate::ops::testing::{fresh, give_role, member};
     use crate::ops::tree::{create_page, get_tree, Entry, NewEntry, TreeOfArea};
     use base64::Engine;
@@ -348,7 +348,7 @@ mod tests {
         let notes = NewEntry { area_id: area_id.clone(), parent_id: None, title: "Notes".into() };
         create_page(&core, &grace, notes.into()).unwrap();
         let content = zip_of(&[("Runbook.md", "Restart it."), ("Runbook/Deploy.md", "Ship it.")]);
-        import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, content }).unwrap();
+        import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content) }).unwrap();
         (core, grace, area_id)
     }
 
@@ -426,7 +426,7 @@ mod tests {
         let Principal::Member { id: ken_id, .. } = &ken else { panic!("Ken is a Member") };
         permissions::grant(&core.db(), &folder, &permissions::Holder::Member(ken_id.clone()), Role::Write).unwrap();
         let content = zip_of(&[("Runbook.md", "Restart it.")]);
-        import(&core, &ken, ToImport { area_id: area_id.clone(), parent_id: Some(folder), content }).unwrap();
+        import(&core, &ken, ToImport { area_id: area_id.clone(), parent_id: Some(folder), zip: ZipGiven::sent(content) }).unwrap();
         let listed = &imports(&core, &ken, &area_id)[0];
         assert!(listed.undoable);
 

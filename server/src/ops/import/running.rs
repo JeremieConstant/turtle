@@ -172,9 +172,10 @@ pub(super) fn progress(core: &Core, principal: &Principal, import_id: &str) -> O
     }
 }
 
-/// Who follows an import: the Member or standalone Agent who started it,
-/// whichever session or Token they use.
-fn owner_of(principal: &Principal) -> Result<String, OpError> {
+/// Whose an import or an upload is: the Member or standalone Agent who
+/// started or sent it, whichever session or Token they use. Only they
+/// follow the import, or import the upload.
+pub(super) fn owner_of(principal: &Principal) -> Result<String, OpError> {
     crate::ops::areas::signed_in(principal)?;
     Ok(match principal {
         Principal::Member { id, .. } => format!("member:{id}"),
@@ -197,7 +198,7 @@ impl Imports {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{get_import_progress, start_import, ToImport};
+    use super::super::{get_import_progress, start_import, ToImport, ZipGiven};
     use super::*;
     use crate::ops::areas::{create_area, NewArea};
     use crate::ops::testing::{fresh, member};
@@ -237,7 +238,7 @@ mod tests {
         let area_id = create_area(&core, &grace, NewArea { name: "Engineering".into() }).unwrap().output.id;
 
         let content = zip_of(&[("Runbook.md", "Restart it.\n"), ("Runbook/Deploy.md", "Ship it.\n")]);
-        let started = start_import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, content }).unwrap().output;
+        let started = start_import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content) }).unwrap().output;
 
         assert_eq!(started.stage, Stage::Reading);
         let ended = ended(&core, &grace, &started.import_id);
@@ -256,7 +257,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area_id = create_area(&core, &grace, NewArea { name: "Engineering".into() }).unwrap().output.id;
 
-        let started = start_import(&core, &grace, ToImport { area_id, parent_id: None, content: "bm90IGEgemlw".into() }).unwrap().output;
+        let started = start_import(&core, &grace, ToImport { area_id, parent_id: None, zip: ZipGiven::sent("bm90IGEgemlw".into()) }).unwrap().output;
 
         let ended = ended(&core, &grace, &started.import_id);
         assert_eq!(ended.stage, Stage::Failed);
@@ -270,7 +271,7 @@ mod tests {
         let ken = member(&core, "Ken", false);
         let area_id = create_area(&core, &grace, NewArea { name: "Engineering".into() }).unwrap().output.id;
 
-        let refused = start_import(&core, &ken, ToImport { area_id, parent_id: None, content: zip_of(&[("A.md", "")]) });
+        let refused = start_import(&core, &ken, ToImport { area_id, parent_id: None, zip: ZipGiven::sent(zip_of(&[("A.md", "")])) });
 
         assert_eq!(refused.unwrap_err().kind(), "not_found");
     }
@@ -281,7 +282,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let ken = member(&core, "Ken", false);
         let area_id = create_area(&core, &grace, NewArea { name: "Engineering".into() }).unwrap().output.id;
-        let started = start_import(&core, &grace, ToImport { area_id, parent_id: None, content: zip_of(&[("A.md", "")]) }).unwrap().output;
+        let started = start_import(&core, &grace, ToImport { area_id, parent_id: None, zip: ZipGiven::sent(zip_of(&[("A.md", "")])) }).unwrap().output;
 
         let someone_else = progress_of(&core, &ken, &started.import_id).unwrap_err();
         let made_up = progress_of(&core, &ken, "made-up").unwrap_err();
@@ -296,7 +297,7 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", false);
         let area_id = create_area(&core, &grace, NewArea { name: "Engineering".into() }).unwrap().output.id;
-        let started = start_import(&core, &grace, ToImport { area_id, parent_id: None, content: zip_of(&[("A.md", "")]) }).unwrap().output;
+        let started = start_import(&core, &grace, ToImport { area_id, parent_id: None, zip: ZipGiven::sent(zip_of(&[("A.md", "")])) }).unwrap().output;
 
         core.advance(KEPT_FOR - 1);
         assert_eq!(progress_of(&core, &grace, &started.import_id).unwrap().stage, Stage::Done);

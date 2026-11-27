@@ -179,6 +179,40 @@ impl Pages {
         }
     }
 
+    /// Saves an open Page and lets go of it, unless someone has it open or
+    /// changes to it wait to be recorded: so writing many Pages, as an import
+    /// does, leaves none of them in memory. Says whether it was saved, for
+    /// the caller to pass on as `save_changed` does.
+    pub fn let_go(&self, id: &str) -> anyhow::Result<bool> {
+        // Held throughout, so the Page cannot be opened in between: whoever
+        // opens it next reads what is saved here.
+        let mut open = self.open.lock().unwrap();
+        let Some(page) = open.get(id) else { return Ok(false) };
+        // Someone else holds it: an editing connection, or an operation
+        // changing it. Nobody new can, while the open Pages are held.
+        if Arc::strong_count(page) > 1 {
+            return Ok(false);
+        }
+        let saved = {
+            let mut state = page.state.lock().unwrap();
+            if state.connections > 0 || state.unrecorded.is_some() {
+                return Ok(false);
+            }
+            if state.unsaved {
+                self.store(page)?;
+            }
+            std::mem::take(&mut state.unsaved)
+        };
+        open.remove(id);
+        Ok(saved)
+    }
+
+    /// How many Pages are open in memory.
+    #[cfg(test)]
+    pub fn open_count(&self) -> usize {
+        self.open.lock().unwrap().len()
+    }
+
     /// Drops a Page removed for good from memory with any changes not yet
     /// saved or recorded, so it is never written back.
     pub fn forget(&self, id: &str) {
@@ -430,22 +464,27 @@ impl Pages {
             if !std::mem::take(&mut page.state.lock().unwrap().unsaved) {
                 return Ok(());
             }
-            let state = page.doc.transact().encode_state_as_update_v1(&StateVector::default());
-            let written = self.db.lock().unwrap().execute(
-                "INSERT INTO pages (id, state) VALUES (?1, ?2)
-                 ON CONFLICT (id) DO UPDATE SET state = excluded.state",
-                rusqlite::params![id, state],
-            );
-            if let Err(error) = written {
+            if let Err(error) = self.store(page) {
                 // Keep the page marked so the next round tries again.
                 page.state.lock().unwrap().unsaved = true;
-                return Err(error.into());
+                return Err(error);
             }
             saved(id);
             count += 1;
             Ok(())
         })?;
         Ok(count)
+    }
+
+    /// Writes an open Page's content, as it is now, to the database.
+    fn store(&self, page: &OpenPage) -> anyhow::Result<()> {
+        let content = page.doc.transact().encode_state_as_update_v1(&StateVector::default());
+        self.db.lock().unwrap().execute(
+            "INSERT INTO pages (id, state) VALUES (?1, ?2)
+             ON CONFLICT (id) DO UPDATE SET state = excluded.state",
+            rusqlite::params![page.id, content],
+        )?;
+        Ok(())
     }
 
     fn all_open(&self) -> Vec<(String, Arc<OpenPage>)> {

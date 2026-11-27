@@ -1,9 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { callTellingUpload, OperationError } from './ops'
+import { OperationError, upload } from './ops'
 
 /** A stand-in for XMLHttpRequest that answers with `status` and `body` once sent, having told `progress` of the upload. */
 function fakeRequest(status: number, body: string, progress: [number, number][]) {
-  const sent: { url?: string; body?: string; headers: Record<string, string> } = { headers: {} }
+  const sent: { url?: string; body?: Blob; headers: Record<string, string> } = { headers: {} }
   class FakeRequest extends EventTarget {
     status = 0
     responseText = ''
@@ -14,7 +14,7 @@ function fakeRequest(status: number, body: string, progress: [number, number][])
     setRequestHeader(name: string, value: string) {
       sent.headers[name] = value
     }
-    send(input: string) {
+    send(input: Blob) {
       sent.body = input
       for (const [loaded, total] of progress) {
         this.upload.dispatchEvent(Object.assign(new Event('progress'), { lengthComputable: true, loaded, total }))
@@ -30,24 +30,35 @@ function fakeRequest(status: number, body: string, progress: [number, number][])
 
 afterEach(() => vi.unstubAllGlobals())
 
-test('an operation called telling its upload says what share is sent and answers with its output', async () => {
-  const sent = fakeRequest(200, '{"import_id":"i1","stage":"reading","done":0,"total":0}', [
+const zip = new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04])])
+
+test('a ZIP is uploaded as it is, telling what share is sent, and answers with the ID to import it by', async () => {
+  const sent = fakeRequest(200, '{"upload_id":"u1","bytes":4}', [
     [25, 100],
     [100, 100],
   ])
   const shares: number[] = []
 
-  const output = await callTellingUpload('start_import', { area_id: 'a1', content: 'UEsDBA==' }, share => shares.push(share))
+  const uploaded = await upload(zip, share => shares.push(share))
 
-  expect(output).toEqual({ import_id: 'i1', stage: 'reading', done: 0, total: 0 })
+  expect(uploaded).toEqual({ upload_id: 'u1', bytes: 4 })
   expect(shares).toEqual([0.25, 1])
-  expect(sent).toEqual({ url: '/api/start_import', body: '{"area_id":"a1","content":"UEsDBA=="}', headers: { 'content-type': 'application/json' } })
+  expect(sent).toEqual({ url: '/api/uploads', body: zip, headers: { 'content-type': 'application/zip' } })
 })
 
-test('an operation called telling its upload fails with the error the server tells', async () => {
-  fakeRequest(413, '{"error":{"kind":"invalid_input","message":"This ZIP is larger than 200 MB."}}', [])
+test('an upload refused by what stands in front of Turtle says so', async () => {
+  fakeRequest(413, '<html>Request Entity Too Large</html>', [])
 
-  const failed = callTellingUpload('start_import', { area_id: 'a1', content: '' }, () => {})
+  await expect(upload(zip, () => {})).rejects.toEqual(
+    new OperationError(
+      'invalid_input',
+      'What stands in front of this Turtle, such as a reverse proxy, takes no file this large. Ask whoever runs Turtle to raise its limit.',
+    ),
+  )
+})
 
-  await expect(failed).rejects.toEqual(new OperationError('invalid_input', 'This ZIP is larger than 200 MB.'))
+test('an upload fails with the error the server tells', async () => {
+  fakeRequest(400, '{"error":{"kind":"invalid_input","message":"This ZIP is larger than 2 GB."}}', [])
+
+  await expect(upload(zip, () => {})).rejects.toEqual(new OperationError('invalid_input', 'This ZIP is larger than 2 GB.'))
 })

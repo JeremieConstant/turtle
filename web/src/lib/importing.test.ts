@@ -4,13 +4,13 @@ import type { Coverage, ImportProgress } from './operations.gen'
 import { OperationError } from './ops'
 
 const call = vi.hoisted(() => vi.fn())
-const callTellingUpload = vi.hoisted(() => vi.fn())
-vi.mock('./ops', async original => ({ ...(await original<typeof import('./ops')>()), call, callTellingUpload }))
+const upload = vi.hoisted(() => vi.fn())
+vi.mock('./ops', async original => ({ ...(await original<typeof import('./ops')>()), call, upload }))
 const toast = vi.hoisted(() =>
   Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), warning: vi.fn(), loading: vi.fn((_title: string, _options?: { id?: string; description: string }) => 'import-toast') }),
 )
 vi.mock('svelte-sonner', () => ({ toast }))
-const session = vi.hoisted(() => ({ limits: { attachment_bytes: 25 * 1024 * 1024, import_bytes: 200 * 1024 * 1024 } }))
+const session = vi.hoisted(() => ({ limits: { attachment_bytes: 25 * 1024 * 1024, import_bytes: 2048 * 1024 * 1024 } }))
 vi.mock('./session.svelte', () => ({ session }))
 const router = vi.hoisted(() => ({ navigate: vi.fn() }))
 vi.mock('./router.svelte', () => ({ router }))
@@ -18,7 +18,8 @@ vi.mock('./router.svelte', () => ({ router }))
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
-  session.limits.import_bytes = 200 * 1024 * 1024
+  session.limits.import_bytes = 2048 * 1024 * 1024
+  upload.mockResolvedValue({ upload_id: 'u1', bytes: 4 })
 })
 afterEach(() => vi.useRealTimers())
 
@@ -60,17 +61,18 @@ async function ended<T>(importing: Promise<T>): Promise<T> {
   return importing
 }
 
-test('a Confluence export is started where asked, followed until it is done, and the toast leads to the report Page', async () => {
-  callTellingUpload.mockResolvedValue(progress({}))
+test('a Confluence export is uploaded, its import started where asked and followed until it is done, and the toast leads to the report Page', async () => {
   const imported = { import_id: 'i1', entries: [], problems: [], report_page_id: 'r1' }
   call
+    .mockResolvedValueOnce(progress({}))
     .mockResolvedValueOnce(progress({ stage: 'creating', done: 40, total: 108, coverage: coverage() }))
     .mockResolvedValueOnce(progress({ stage: 'done', done: 86, total: 86, coverage: coverage(), imported }))
 
   const done = await ended(importConfluenceFromFile({ area_id: 'a1', parent_id: 'f1' }, zip, 'Archive'))
 
   expect(done).toBe(true)
-  expect(callTellingUpload).toHaveBeenCalledWith('start_import_confluence', { area_id: 'a1', parent_id: 'f1', content: 'UEsDBA==' }, expect.any(Function))
+  expect(upload).toHaveBeenCalledWith(zip, expect.any(Function))
+  expect(call).toHaveBeenCalledWith('start_import_confluence', { area_id: 'a1', parent_id: 'f1', upload_id: 'u1' })
   expect(call).toHaveBeenCalledWith('get_import_progress', { import_id: 'i1' })
   const [title, options] = toast.success.mock.calls[0] as [string, { id: string; description: string; duration: number; action: { label: string; onClick: () => void } }]
   expect(title).toBe('Imported Knowledge Base into Archive')
@@ -83,11 +85,12 @@ test('a Confluence export is started where asked, followed until it is done, and
 })
 
 test('the toast tells how much of the ZIP is uploaded and then how far the import has got', async () => {
-  callTellingUpload.mockImplementation(async (_name, _input, uploaded: (share: number) => void) => {
+  upload.mockImplementation(async (_file, uploaded: (share: number) => void) => {
     uploaded(0.456)
-    return progress({})
+    return { upload_id: 'u1', bytes: 4 }
   })
   call
+    .mockResolvedValueOnce(progress({}))
     .mockResolvedValueOnce(progress({ stage: 'creating', done: 40, total: 108 }))
     .mockResolvedValueOnce(progress({ stage: 'writing', done: 12, total: 86 }))
     .mockResolvedValueOnce(progress({ stage: 'done', imported: { import_id: 'i1', entries: [], problems: [] } }))
@@ -96,8 +99,9 @@ test('the toast tells how much of the ZIP is uploaded and then how far the impor
 
   const told = toast.loading.mock.calls.map(([, options]) => options?.description)
   expect(told).toEqual([
-    'Preparing the upload…',
+    'Uploading: 0 % of 4 bytes',
     'Uploading: 45 % of 4 bytes',
+    'Reading the ZIP…',
     'Reading the ZIP…',
     'Creating Pages and Folders: 40 of 108',
     "Writing the Pages' content: 12 of 86",
@@ -111,8 +115,7 @@ test('attachments too large for this Turtle are told as soon as the space is rea
     { file: 'Deploy/video.mp4', message: 'It is 31.5 MB, larger than 25 MB, …' },
     { file: 'Deploy/gone.pdf', message: 'Its file is not in the export, so it was left out.' },
   ]
-  callTellingUpload.mockResolvedValue(progress({}))
-  call.mockResolvedValueOnce(progress({ stage: 'done', coverage: tooLarge, imported: { import_id: 'i1', entries: [], problems } }))
+  call.mockResolvedValueOnce(progress({})).mockResolvedValueOnce(progress({ stage: 'done', coverage: tooLarge, imported: { import_id: 'i1', entries: [], problems } }))
   const toldLine =
     'Left out as larger than 25 MB, the most this Turtle accepts for one file: Deploy/video.mp4 (31.5 MB). Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB.'
 
@@ -129,34 +132,61 @@ test('a ZIP larger than this Turtle imports is refused before it is sent', async
   const imported = await ended(importConfluenceFromFile({ area_id: 'a1' }, zip, 'Wiki'))
 
   expect(imported).toBe(false)
-  expect(callTellingUpload).not.toHaveBeenCalled()
+  expect(upload).not.toHaveBeenCalled()
   expect(toast.error).toHaveBeenCalledWith(
     'KB.zip is 4 bytes, larger than 3 bytes, the most this Turtle imports at once. Import it in parts, or ask whoever runs Turtle to raise the limit with TURTLE_MAX_IMPORT_MB.',
   )
 })
 
-test('when the import cannot start, nothing is reported as imported and the toast says why', async () => {
-  callTellingUpload.mockRejectedValue(new OperationError('invalid_input', 'This ZIP is larger than 200 MB, the most this Turtle imports at once.'))
+test('a second ZIP is not sent while one is still uploading, and may be once that is done', async () => {
+  let arrived: (uploaded: { upload_id: string; bytes: number }) => void = () => {}
+  upload.mockImplementationOnce(() => new Promise(resolve => (arrived = resolve)))
+  call.mockResolvedValue(progress({ stage: 'done', imported: { import_id: 'i1', entries: [], problems: [] } }))
+  const first = importFromFile({ area_id: 'a1' }, zip, 'Wiki')
+  await vi.advanceTimersByTimeAsync(0)
+
+  const second = await ended(importFromFile({ area_id: 'a1' }, new File([], 'Other.zip'), 'Wiki'))
+
+  expect(second).toBe(false)
+  expect(upload).toHaveBeenCalledTimes(1)
+  expect(toast.error).toHaveBeenCalledWith('KB.zip is still uploading. Wait until it is done, then import Other.zip.')
+  arrived({ upload_id: 'u1', bytes: 4 })
+  expect(await ended(first)).toBe(true)
+  expect(await ended(importFromFile({ area_id: 'a1' }, zip, 'Wiki'))).toBe(true)
+  call.mockReset()
+})
+
+test('when the ZIP cannot be uploaded, no import is started and the toast says why', async () => {
+  upload.mockRejectedValueOnce(new OperationError('invalid_input', 'This ZIP is larger than 2 GB, the most this Turtle imports at once.'))
 
   const imported = await ended(importConfluenceFromFile({ area_id: 'a1' }, zip, 'Wiki'))
 
   expect(imported).toBe(false)
-  expect(toast.error).toHaveBeenCalledWith('This ZIP is larger than 200 MB, the most this Turtle imports at once.', { id: 'import-toast' })
+  expect(call).not.toHaveBeenCalled()
+  expect(toast.error).toHaveBeenCalledWith('This ZIP is larger than 2 GB, the most this Turtle imports at once.', { id: 'import-toast' })
+})
+
+test('when the import cannot start, nothing is reported as imported and the toast says why', async () => {
+  call.mockRejectedValueOnce(new OperationError('not_permitted', 'You need the Write Role to import here.'))
+
+  const imported = await ended(importConfluenceFromFile({ area_id: 'a1' }, zip, 'Wiki'))
+
+  expect(imported).toBe(false)
+  expect(toast.error).toHaveBeenCalledWith('You need the Write Role to import here.', { id: 'import-toast' })
 })
 
 test('when the import fails while running, nothing is reported as imported and the toast says why', async () => {
-  callTellingUpload.mockResolvedValue(progress({}))
-  call.mockResolvedValueOnce(progress({ stage: 'failed', error: 'This is Confluence’s CSV export, which Turtle cannot read yet.' }))
+  call.mockResolvedValueOnce(progress({})).mockResolvedValueOnce(progress({ stage: 'failed', error: "The export's entities.xml could not be read." }))
 
   const imported = await ended(importConfluenceFromFile({ area_id: 'a1' }, zip, 'Wiki'))
 
   expect(imported).toBe(false)
-  expect(toast.error).toHaveBeenCalledWith('This is Confluence’s CSV export, which Turtle cannot read yet.', { id: 'import-toast' })
+  expect(toast.error).toHaveBeenCalledWith("The export's entities.xml could not be read.", { id: 'import-toast' })
 })
 
 test('an import that fails once it has created Pages says that they are kept and how to undo them', async () => {
-  callTellingUpload.mockResolvedValue(progress({}))
   call
+    .mockResolvedValueOnce(progress({}))
     .mockResolvedValueOnce(progress({ stage: 'creating', done: 3, total: 9 }))
     .mockResolvedValueOnce(progress({ stage: 'failed', error: 'Something went wrong.' }))
 
@@ -170,8 +200,7 @@ test('an import that fails once it has created Pages says that they are kept and
 
 test('what did not come across from Markdown is named file by file', async () => {
   const problems = [{ file: 'Runbook/_attachments/big.bin', message: 'It is 30 MB, larger than 25 MB, …' }]
-  callTellingUpload.mockResolvedValue(progress({}))
-  call.mockResolvedValueOnce(progress({ stage: 'done', imported: { import_id: 'i1', entries: [], problems } }))
+  call.mockResolvedValueOnce(progress({})).mockResolvedValueOnce(progress({ stage: 'done', imported: { import_id: 'i1', entries: [], problems } }))
 
   await ended(importFromFile({ area_id: 'a1' }, zip, 'Wiki'))
 

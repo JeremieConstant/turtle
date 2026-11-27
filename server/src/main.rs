@@ -54,6 +54,10 @@ const SEARCH_INTERVAL: Duration = Duration::from_secs(1);
 /// How often what has been in the Trash for too long is removed.
 const TRASH_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// How often uploads no import has read are looked for, to remove those
+/// kept long enough.
+const UPLOADS_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
 /// Where the data directory is when `TURTLE_DATA` does not say: beside
 /// wherever Turtle was started.
 const DEFAULT_DATA_DIR: &str = "turtle-data";
@@ -212,6 +216,19 @@ async fn main() -> anyhow::Result<()> {
                 Ok(Ok(_)) => {}
                 Ok(Err(error)) => eprintln!("emptying the Trash failed: {error:#}"),
                 Err(error) => eprintln!("emptying the Trash panicked: {error}"),
+            }
+        }
+    });
+
+    // An upload no import has read goes after an hour.
+    let uploads = core.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(UPLOADS_INTERVAL);
+        loop {
+            tick.tick().await;
+            let core = uploads.clone();
+            if let Err(error) = tokio::task::spawn_blocking(move || ops::import::forget_old_uploads(&core)).await {
+                eprintln!("removing old uploads panicked: {error}");
             }
         }
     });

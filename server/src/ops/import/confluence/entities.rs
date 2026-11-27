@@ -41,10 +41,13 @@ impl Object {
 }
 
 /// Every object `keep` keeps, in the order written, and how many objects
-/// of each class there are; nothing when it is not well-formed.
-pub(super) fn read(xml: &str, keep: impl Fn(&Object) -> bool) -> Option<(Vec<Object>, HashMap<String, u32>)> {
-    let mut reader = Reader::from_str(xml);
+/// of each class there are; nothing when it is not well-formed. The file is
+/// read as it comes, one object at a time: it can be far larger than what
+/// is kept of it.
+pub(super) fn read(xml: impl std::io::BufRead, keep: impl Fn(&Object) -> bool) -> Option<(Vec<Object>, HashMap<String, u32>)> {
+    let mut reader = Reader::from_reader(xml);
     reader.config_mut().check_end_names = true;
+    let mut event = Vec::new();
     let mut objects = Vec::new();
     let mut counts: HashMap<String, u32> = HashMap::new();
     // The names of the elements open inside the current object, and the
@@ -54,7 +57,8 @@ pub(super) fn read(xml: &str, keep: impl Fn(&Object) -> bool) -> Option<(Vec<Obj
     let mut field = String::new();
     let mut text = String::new();
     loop {
-        match reader.read_event().ok()? {
+        event.clear();
+        match reader.read_event_into(&mut event).ok()? {
             Event::Start(start) => {
                 let name = start.name().as_ref().to_string();
                 if name == "object" && current.is_none() {
@@ -155,7 +159,7 @@ mod tests {
 </object>
 </hibernate-generic>"#;
 
-        let (objects, counts) = read(xml, |object| object.class == "Page").unwrap();
+        let (objects, counts) = read(xml.as_bytes(), |object| object.class == "Page").unwrap();
 
         assert_eq!(objects.len(), 1);
         let page = &objects[0];

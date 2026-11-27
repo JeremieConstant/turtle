@@ -364,7 +364,10 @@ fn content_type_of(name: &str) -> &'static str {
 /// "25 MB" for 25 MiB, as people read file sizes.
 pub(super) fn size_in_words(bytes: u64) -> String {
     const MB: u64 = 1024 * 1024;
-    if bytes >= MB && bytes.is_multiple_of(MB) {
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB && bytes.is_multiple_of(GB) {
+        format!("{} GB", bytes / GB)
+    } else if bytes >= MB && bytes.is_multiple_of(MB) {
         format!("{} MB", bytes / MB)
     } else {
         format!("{bytes} bytes")

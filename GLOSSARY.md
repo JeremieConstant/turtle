@@ -68,15 +68,19 @@ _Avoid_: Grid, spreadsheet, matrix
 
 **Attachment**:
 An image or file that belongs to a Page.
-_Avoid_: Upload, asset, media
+_Avoid_: Upload (that is a ZIP sent ahead of an import), asset, media
 
 **Export**:
 An Area or Subtree as a ZIP of Markdown files that is readable without Turtle: directories mirror the tree, every Page and Folder is a file named after its title with what an import needs as frontmatter, a Page's Attachments sit in its directory apart from its Pages, and Page links between its files are relative paths.
 _Avoid_: Backup, download, dump
 
 **Import**:
-Pages, Folders and Attachments brought into an Area, or beneath a Page or Folder, from a ZIP: an Export, any folder of Markdown files, whose relative links become Page links, or a Confluence space exported as CSV or XML. What cannot come across is reported file by file, and the rest comes in. An import from Confluence also reports how much of the space came across: each kind of Confluence content found, whether it comes across exactly, approximately, as a placeholder naming it or not at all, and what the space holds that is not imported, such as comments and page history; this report can be had before importing, without importing. A file larger than the Turtle accepts is reported, before anything is created when the import is from Confluence. An import can also be started and then followed while it runs, as it reads the ZIP, creates the Pages and Folders and writes their content, by whoever started it. Turtle keeps each import with the Pages and Folders it created, so it can be looked at later and undone: undoing an import moves what it created to the Trash, from where each can be restored. An import from Confluence writes its report as a Page beside what it imported, the Import report, listing the Pages to check; it stays when the import is undone, marked as undone.
-_Avoid_: Upload, ingest
+Pages, Folders and Attachments brought into an Area, or beneath a Page or Folder, from a ZIP: an Export, any folder of Markdown files, whose relative links become Page links, or a Confluence space exported as CSV or XML. What cannot come across is reported file by file, and the rest comes in. An import from Confluence also reports how much of the space came across: each kind of Confluence content found, whether it comes across exactly, approximately, as a placeholder naming it or not at all, and what the space holds that is not imported, such as comments and page history; this report can be had before importing, without importing. A file larger than the Turtle accepts is reported, before anything is created when the import is from Confluence. The ZIP is sent with the import, in base64, or as an Upload ahead of it, which the web app always does. An import can also be started and then followed while it runs, as it reads the ZIP, creates the Pages and Folders and writes their content, by whoever started it. Turtle keeps each import with the Pages and Folders it created, so it can be looked at later and undone: undoing an import moves what it created to the Trash, from where each can be restored. An import from Confluence writes its report as a Page beside what it imported, the Import report, listing the Pages to check; it stays when the import is undone, marked as undone.
+_Avoid_: Upload (that is a ZIP sent ahead of an import), ingest
+
+**Upload**:
+A ZIP sent to Turtle as a file ahead of the import that reads it, so that a large one is read from disk and never held in memory. It belongs to whoever sent it: only they can import it. Each person has one at a time, and a newer one takes the place of the last. An import uses it up, a report had before importing leaves it, and one nobody imports is removed after an hour.
+_Avoid_: Staged file, pending import
 
 **PDF Export**:
 An Area, Subtree or Page typeset as one PDF for reading and handing on: a cover, a table of contents with page numbers, the Pages as chapters in tree order and the Folders as groups, laid out by a PDF Style. Unlike an Export it is not read back by an import.

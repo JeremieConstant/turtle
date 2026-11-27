@@ -120,9 +120,24 @@ A space holds more than its pages. The import counts these in its report and lea
 ## Limits
 
 - **One space per export.** An export holding several spaces is refused. A link to a page in another space keeps its text and loses its address.
-- **Size.** A ZIP may be up to 200 MB and each attachment up to 25 MB, unless whoever runs Turtle sets other limits with `TURTLE_MAX_IMPORT_MB` and `TURTLE_MAX_ATTACHMENT_MB`. A larger attachment is left out and named in the report, before anything is created.
+- **Size.** A ZIP may be up to 2 GB and each attachment up to 25 MB, unless whoever runs Turtle sets other limits with `TURTLE_MAX_IMPORT_MB` and `TURTLE_MAX_ATTACHMENT_MB`. A larger attachment is left out and named in the report, before anything is created. [Large spaces](#large-spaces) says what a large import needs.
 - **Access.** Space permissions and page restrictions are not imported. Who may read and change the imported Pages is decided by the Grants of the Area they are imported into.
 - **Who wrote what.** Every imported Page is created by whoever imports it, at the time of the import. Authors, dates and earlier versions stay in Confluence.
+
+## Large spaces
+
+The web app uploads the ZIP as a file, and Turtle reads it from there: it never holds the ZIP in memory, and takes each attachment out of it only to attach it. What a large space needs is room in the data directory for the ZIP, until it is imported, and for the attachments. Memory grows with the number of pages, about 25 MB for every 1,000 pages, whatever the attachments weigh.
+
+Two made-up spaces, each page with four earlier versions, imported on a laptop (Apple M5 Pro, internal SSD, release build) on 2026-11-27:
+
+| Space | ZIP | Time | Most memory held |
+| --- | --- | --- | --- |
+| 5,000 pages and folders, 600 attachments | 155 MB | 4 s | 127 MB from XML, 119 MB from CSV |
+| 20,000 pages and folders, 4,000 attachments | 1.9 GB | 19 s | 450 MB from XML, 421 MB from CSV |
+
+The times are for reading the ZIP and creating everything, without the upload. To try a space of your own this way, see `import_a_real_export` in [`server/src/ops/import/confluence/mod.rs`](../server/src/ops/import/confluence/mod.rs).
+
+A ZIP sent in base64 with the operation, instead of uploaded, is held in memory. It may be 200 MB at most over the HTTP API, and through MCP as large as a file that can be attached, which is how an Agent without HTTP access imports ([ADR-0014](adr/0014-a-zip-to-import-is-uploaded-ahead-of-the-operation.md)).
 
 ## How this page is kept true
 

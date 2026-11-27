@@ -1378,14 +1378,23 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: Export
   }
-  /** Imports a ZIP of Markdown files, sent in base64, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role. */
+  /** Imports a ZIP of Markdown files, sent in base64 or uploaded before, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role. */
   import: {
     input: {
       area_id: string
-      /** The ZIP, in base64. */
-      content: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
       /** The Page or Folder to import beneath; the top of the Area if absent. */
       parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
     }
     output: Imported
   }
@@ -1393,10 +1402,19 @@ of the Page. Needed only when several Sections have this heading. */
   start_import: {
     input: {
       area_id: string
-      /** The ZIP, in base64. */
-      content: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
       /** The Page or Folder to import beneath; the top of the Area if absent. */
       parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
     }
     output: ImportProgress
   }
@@ -1408,22 +1426,40 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: ImportProgress
   }
-  /** Reads a Confluence space exported as CSV or XML, a ZIP sent in base64, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB. Mentions are matched with the Members and Guests the caller may see. */
+  /** Reads a Confluence space exported as CSV or XML, a ZIP sent in base64 or uploaded before, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB. Mentions are matched with the Members and Guests the caller may see. */
   check_confluence_import: {
     input: {
-      /** The ZIP Confluence exports a space as, in base64. */
-      content: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
     }
     output: Coverage
   }
-  /** Imports a Confluence space exported as CSV or XML, a ZIP sent in base64, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, mentions of people as Mentions of the Members and Guests with the same e-mail address, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role. */
+  /** Imports a Confluence space exported as CSV or XML, a ZIP sent in base64 or uploaded before, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, mentions of people as Mentions of the Members and Guests with the same e-mail address, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role. */
   import_confluence: {
     input: {
       area_id: string
-      /** The ZIP Confluence exports a space as, in base64. */
-      content: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
       /** The Page or Folder to import beneath; the top of the Area if absent. */
       parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
     }
     output: ImportedFromConfluence
   }
@@ -1431,10 +1467,19 @@ of the Page. Needed only when several Sections have this heading. */
   start_import_confluence: {
     input: {
       area_id: string
-      /** The ZIP Confluence exports a space as, in base64. */
-      content: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
       /** The Page or Folder to import beneath; the top of the Area if absent. */
       parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
     }
     output: ImportProgress
   }

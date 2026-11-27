@@ -452,6 +452,14 @@ impl Member {
         (response.status, response.body)
     }
 
+    /// Uploads a file ahead of an import, saying it is of `kind`, and
+    /// returns the HTTP status and the body.
+    pub async fn upload(&self, kind: &str, file: &[u8]) -> (u16, String) {
+        let headers = [("Content-Type", kind), ("Cookie", self.cookie.as_str())];
+        let response = http::request_with_bytes(self.addr, "POST", "/api/uploads", &headers, file).await;
+        (response.status, response.body)
+    }
+
     /// Creates an Area with a Page at its top, and returns the Page's ID.
     pub async fn create_page(&self, title: &str) -> String {
         let area = self.call("create_area", serde_json::json!({ "name": "Engineering" })).await;

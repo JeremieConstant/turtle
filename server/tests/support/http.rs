@@ -32,6 +32,17 @@ pub async fn request(
     headers: &[(&str, &str)],
     body: &str,
 ) -> Response {
+    request_with_bytes(addr, method, path, headers, body.as_bytes()).await
+}
+
+/// Sends one request whose body is a file's bytes, and returns the response.
+pub async fn request_with_bytes(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> Response {
     tokio::time::timeout(TIMEOUT, async {
         let mut stream = TcpStream::connect(addr).await.expect("connecting to the server");
         let mut head = format!(
@@ -46,7 +57,7 @@ pub async fn request(
         // A server refusing a body that is too large answers before it has
         // all of it and closes, so writing the rest may fail; its answer is
         // read all the same.
-        if let Err(error) = stream.write_all(body.as_bytes()).await {
+        if let Err(error) = stream.write_all(body).await {
             assert!(cut_short(&error), "sending the request: {error}");
         }
         let mut raw = Vec::new();

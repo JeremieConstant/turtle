@@ -7,29 +7,33 @@ use super::entities::{self, Object};
 use super::{Archive, Attachment, Labelling, Page, Space, Unimported, STORAGE_FORMAT};
 use crate::ops::tree::Kind;
 use crate::ops::OpError;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::io::BufReader;
 
 /// The objects of `entities.xml` the import reads; every other class is
 /// only counted.
 const READ_CLASSES: [&str; 7] = ["Space", "Page", "Attachment", "Label", "Labelling", "ConfluenceUserImpl", "Comment"];
 
-/// Reads the space whose `entities.xml` lies at `prefix` in the ZIP.
+/// Reads the space whose `entities.xml` lies at `prefix` in the ZIP. The
+/// file is read from the ZIP as it is unpacked, twice, and never held whole.
 pub(super) fn read(archive: &mut Archive, prefix: &str) -> Result<Space, OpError> {
-    let xml = {
-        let mut file = archive.by_name(&format!("{prefix}entities.xml")).map_err(|_| unreadable())?;
-        let mut xml = String::new();
-        file.read_to_string(&mut xml).map_err(|_| unreadable())?;
-        xml
+    let name = format!("{prefix}entities.xml");
+    // Earlier versions are only counted, not kept: a space with a long
+    // history holds many times more of them than pages.
+    let earlier = Earlier::default();
+    let (objects, counts) = {
+        let file = archive.by_name(&name).map_err(|_| unreadable())?;
+        let keep = |object: &Object| READ_CLASSES.contains(&object.class.as_str()) && !earlier.counted(object);
+        entities::read(BufReader::new(file), keep).ok_or_else(unreadable)?
     };
-    let (objects, counts) = entities::read(&xml, |object| READ_CLASSES.contains(&object.class.as_str())).ok_or_else(unreadable)?;
-    let (mut space, body_ids) = space_of(objects, &counts)?;
+    let (mut space, body_ids) = space_of(objects, &counts, &earlier)?;
     // The content of each page's latest version, read in a second pass so
     // that the content of every earlier version is never held.
     let wanted: HashSet<&str> = body_ids.values().map(String::as_str).collect();
+    let file = archive.by_name(&name).map_err(|_| unreadable())?;
     let (bodies, _) =
-        entities::read(&xml, |object| object.class == "BodyContent" && wanted.contains(object.id.as_str())).ok_or_else(unreadable)?;
-    drop(xml);
+        entities::read(BufReader::new(file), |object| object.class == "BodyContent" && wanted.contains(object.id.as_str())).ok_or_else(unreadable)?;
     let bodies: HashMap<&str, &Object> = bodies.iter().map(|body| (body.id.as_str(), body)).collect();
     for page in &mut space.pages {
         let body = body_ids.get(&page.id).and_then(|id| bodies.get(id.as_str()));
@@ -55,10 +59,34 @@ fn is_earlier_version(object: &Object) -> bool {
     object.points_to("originalVersion").is_some() || object.text("originalVersionId").is_some_and(|id| !id.is_empty())
 }
 
+/// How many earlier versions of pages and of attachments the export holds.
+#[derive(Default)]
+struct Earlier {
+    pages: Cell<u32>,
+    attachments: Cell<u32>,
+}
+
+impl Earlier {
+    /// Counts the object if it is an earlier version of a page or of an
+    /// attachment, and says whether it is.
+    fn counted(&self, object: &Object) -> bool {
+        let count = match object.class.as_str() {
+            "Page" => &self.pages,
+            "Attachment" => &self.attachments,
+            _ => return false,
+        };
+        let earlier = is_earlier_version(object);
+        if earlier {
+            count.set(count.get() + 1);
+        }
+        earlier
+    }
+}
+
 /// The space the objects hold, with the ID of each page's content by the
 /// page's ID. The export has no folders of its own: a page without content
 /// is taken for one.
-fn space_of(objects: Vec<Object>, counts: &HashMap<String, u32>) -> Result<(Space, HashMap<String, String>), OpError> {
+fn space_of(objects: Vec<Object>, counts: &HashMap<String, u32>, earlier: &Earlier) -> Result<(Space, HashMap<String, String>), OpError> {
     let mut by_class: HashMap<&str, Vec<&Object>> = HashMap::new();
     for object in &objects {
         by_class.entry(object.class.as_str()).or_default().push(object);
@@ -122,16 +150,16 @@ fn space_of(objects: Vec<Object>, counts: &HashMap<String, u32>) -> Result<(Spac
         .filter_map(|person| Some((person.id.clone(), person.text("email").filter(|email| !email.is_empty())?.to_string())))
         .collect();
     let status_count = |objects: &[&Object], status: &str| {
-        objects.iter().filter(|object| in_space(object) && object.text("contentStatus") == Some(status) && !is_earlier_version(object)).count() as u32
+        objects.iter().filter(|object| in_space(object) && object.text("contentStatus") == Some(status)).count() as u32
     };
     let counted = |class: &str| counts.get(class).copied().unwrap_or(0);
     let not_imported = Unimported {
         comments: of("Comment").iter().filter(|comment| is_current(comment)).count() as u32,
-        earlier_versions_of_pages: all_pages.iter().filter(|page| is_earlier_version(page)).count() as u32,
+        earlier_versions_of_pages: earlier.pages.get(),
         drafts: status_count(&all_pages, "draft"),
         archived_pages: status_count(&all_pages, "archived"),
         pages_in_trash: status_count(&all_pages, "deleted"),
-        earlier_versions_of_attachments: all_attachments.iter().filter(|attachment| is_earlier_version(attachment)).count() as u32,
+        earlier_versions_of_attachments: earlier.attachments.get(),
         personal_labels: labels.personal,
         other_labels: labels.other,
         space_permissions: counted("SpacePermission"),

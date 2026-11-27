@@ -2,15 +2,16 @@
  * Importing a ZIP of Markdown files, such as an Export, or a Confluence
  * space exported as CSV or XML, into an Area or beneath an Entry. A ZIP larger
  * than this Turtle imports is refused before it is sent. Otherwise it is
- * sent in base64 to start the import, which then runs on the server while a
- * toast tells how far the upload and then the import have got; at the end,
+ * uploaded as the file it is, and the import of it started, which then runs
+ * on the server while a toast tells how far the upload and then the import
+ * have got; at the end,
  * the toast tells what did not come across, and for Confluence leads to the
  * report Page.
  */
 import { toast } from 'svelte-sonner'
-import { base64Of, fileSize } from './attachments'
+import { fileSize } from './attachments'
 import type { Coverage, ImportProgress, Imported } from './operations.gen'
-import { call, callTellingUpload, OperationError, type Input } from './ops'
+import { call, OperationError, upload, type Input } from './ops'
 import { router } from './router.svelte'
 import { REPORT_LABEL } from './imports'
 import { pageAddress } from './routes'
@@ -18,6 +19,9 @@ import { session } from './session.svelte'
 
 /** How long to wait between asking how far an import has got, in milliseconds. */
 export const ASKED_EVERY = 1000
+
+/** Where an import goes: the Area, and the Page or Folder to import beneath, if any. */
+type Where = Pick<Input<'start_import'>, 'area_id' | 'parent_id'>
 
 /** Lets the person choose a ZIP; null if they close the picker without one. */
 export function chooseZip(): Promise<File | null> {
@@ -35,8 +39,8 @@ export function chooseZip(): Promise<File | null> {
  * Imports a ZIP where `input` says, `into` naming that place for the toast.
  * Returns whether anything was imported, so the tree is loaded again.
  */
-export async function importFromFile(input: Omit<Input<'import'>, 'content'>, file: File, into: string): Promise<boolean> {
-  const ended = await run(file, (content, uploaded) => callTellingUpload('start_import', { ...input, content }, uploaded))
+export async function importFromFile(input: Where, file: File, into: string): Promise<boolean> {
+  const ended = await run(file, upload_id => call('start_import', { ...input, upload_id }))
   if (!ended) return false
   const { problems } = ended.imported
   if (problems.length === 0) {
@@ -59,12 +63,8 @@ export async function importFromFile(input: Omit<Input<'import'>, 'content'>, fi
  * toast tells how much came across and leads there.
  * Returns whether anything was imported, so the tree is loaded again.
  */
-export async function importConfluenceFromFile(
-  input: Omit<Input<'import_confluence'>, 'content'>,
-  file: File,
-  into: string,
-): Promise<boolean> {
-  const ended = await run(file, (content, uploaded) => callTellingUpload('start_import_confluence', { ...input, content }, uploaded))
+export async function importConfluenceFromFile(input: Where, file: File, into: string): Promise<boolean> {
+  const ended = await run(file, upload_id => call('start_import_confluence', { ...input, upload_id }))
   if (!ended?.coverage) return false
   const { coverage, imported } = ended
   const toCheck = coverage.pages - coverage.exact_pages
@@ -96,19 +96,25 @@ function tooLargeLine(coverage: Coverage): string {
   return `Left out as larger than ${fileSize(coverage.attachment_limit_bytes)}, the most this Turtle accepts for one file: ${files}. Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB.`
 }
 
+/** The name of the ZIP being uploaded right now, if one is. */
+let uploading: string | null = null
+
 /** An import that is done, with the toast that followed it, to tell the outcome in. */
 type Ended = { toast: string | number; imported: Imported; coverage: Coverage | null }
 
 /**
- * Starts an import of `file` with `start`, which sends the ZIP in base64 and
- * tells what share of it is sent, and follows it until it ends, telling how
- * far it has got in a toast. A ZIP larger than this Turtle imports is not
- * sent. A failure is told in the toast, and then there is nothing.
+ * Uploads `file`, telling what share of it is sent, starts the import of
+ * the upload with `start`, and follows it until it ends, telling how far it
+ * has got in a toast. A ZIP larger than this Turtle imports is not sent. A
+ * failure is told in the toast, and then there is nothing.
  */
-async function run(
-  file: File,
-  start: (content: string, uploaded: (share: number) => void) => Promise<ImportProgress>,
-): Promise<Ended | null> {
+async function run(file: File, start: (upload_id: string) => Promise<ImportProgress>): Promise<Ended | null> {
+  // Turtle takes one ZIP of a person at a time, and refusing a second one
+  // while it is being sent would show as a broken connection.
+  if (uploading) {
+    toast.error(`${uploading} is still uploading. Wait until it is done, then import ${file.name}.`)
+    return null
+  }
   const limit = session.limits?.import_bytes
   if (limit !== undefined && file.size > limit) {
     toast.error(
@@ -117,13 +123,15 @@ async function run(
     return null
   }
   const title = `Importing ${file.name}`
-  const id = toast.loading(title, { description: 'Preparing the upload…' })
+  const id = toast.loading(title, { description: `Uploading: 0 % of ${fileSize(file.size)}` })
   let progress: ImportProgress
   try {
-    const content = base64Of(new Uint8Array(await file.arrayBuffer()))
-    progress = await start(content, share => {
+    uploading = file.name
+    const uploaded = await upload(file, share => {
       toast.loading(title, { id, description: `Uploading: ${Math.floor(share * 100)} % of ${fileSize(file.size)}` })
-    })
+    }).finally(() => (uploading = null))
+    toast.loading(title, { id, description: 'Reading the ZIP…' })
+    progress = await start(uploaded.upload_id)
   } catch (caught) {
     toast.error(caught instanceof OperationError ? caught.message : `${file.name} could not be imported. Try again.`, { id })
     return null

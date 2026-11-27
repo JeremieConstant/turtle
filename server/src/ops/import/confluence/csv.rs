@@ -7,7 +7,7 @@ use super::{Archive, Attachment, Labelling, Labels, Page, Space, Unimported, STO
 use crate::ops::tree::Kind;
 use crate::ops::OpError;
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 
 /// Reads the space whose tables lie at `prefix` in the ZIP.
 pub(super) fn read(archive: &mut Archive, prefix: &str) -> Result<Space, OpError> {
@@ -198,16 +198,15 @@ impl Table {
                 Need::Optional => Ok(Table { columns: HashMap::new(), rows: Vec::new() }),
             };
         };
-        let mut bytes = Vec::new();
-        archive.by_name(&file).map_err(|_| unreadable())?.read_to_end(&mut bytes).map_err(|_| unreadable())?;
+        // Read as it is unpacked, row by row: a table such as the pages'
+        // content, with every earlier version, is far larger than what is
+        // kept of it.
+        let mut file = BufReader::new(archive.by_name(&file).map_err(|_| unreadable())?);
         // Gzipped, as the name says, or already unpacked, as the export
         // often holds it despite the name.
-        if bytes.starts_with(&[0x1f, 0x8b]) {
-            let mut unpacked = Vec::new();
-            flate2::read::MultiGzDecoder::new(&bytes[..]).read_to_end(&mut unpacked).map_err(|_| unreadable())?;
-            bytes = unpacked;
-        }
-        let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(&bytes[..]);
+        let gzipped = file.fill_buf().map_err(|_| unreadable())?.starts_with(&[0x1f, 0x8b]);
+        let unpacked: Box<dyn Read + '_> = if gzipped { Box::new(flate2::bufread::MultiGzDecoder::new(file)) } else { Box::new(file) };
+        let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(unpacked);
         let columns: HashMap<String, usize> =
             reader.headers().map_err(|_| unreadable())?.iter().enumerate().map(|(index, column)| (column.to_string(), index)).collect();
         let mut rows = Vec::new();

@@ -22,24 +22,24 @@ mod xml;
 pub use coverage::Coverage;
 
 use super::running::{self, ImportProgress};
-use super::{check_target, too_large_to_attach, write_bundle, Bundle, Incoming, IncomingAttachment, Problem};
+use super::uploads::For;
+use super::{check_target, open_taken, take_zip, too_large_to_attach, write_bundle, Archive, Bundle, Incoming, IncomingAttachment, Problem, ZipGiven, ZipTaken};
 use crate::ops::tree::{Entry, Kind};
 use crate::ops::{Catalogue, Core, OpError, OpResult, Principal};
 use coverage::{NotImported, Tally, TooLarge};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 
 pub(in crate::ops) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "check_confluence_import",
-        "Reads a Confluence space exported as CSV or XML, a ZIP sent in base64, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB. Mentions are matched with the Members and Guests the caller may see.",
+        "Reads a Confluence space exported as CSV or XML, a ZIP sent in base64 or uploaded before, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB. Mentions are matched with the Members and Guests the caller may see.",
         check_confluence_import,
     );
     catalogue.add(
         "import_confluence",
-        "Imports a Confluence space exported as CSV or XML, a ZIP sent in base64, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, mentions of people as Mentions of the Members and Guests with the same e-mail address, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role.",
+        "Imports a Confluence space exported as CSV or XML, a ZIP sent in base64 or uploaded before, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, mentions of people as Mentions of the Members and Guests with the same e-mail address, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role.",
         import_confluence,
     );
     catalogue.add(
@@ -52,8 +52,8 @@ pub(in crate::ops) fn register(catalogue: &mut Catalogue) {
 /// A Confluence space exported as CSV or XML.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ConfluenceExport {
-    /// The ZIP Confluence exports a space as, in base64.
-    pub content: String,
+    #[serde(flatten)]
+    pub zip: ZipGiven,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -62,8 +62,8 @@ pub struct ToImportFromConfluence {
     /// The Page or Folder to import beneath; the top of the Area if absent.
     #[serde(default)]
     pub parent_id: Option<String>,
-    /// The ZIP Confluence exports a space as, in base64.
-    pub content: String,
+    #[serde(flatten)]
+    pub zip: ZipGiven,
 }
 
 /// What an import from Confluence created, and how much came across.
@@ -86,13 +86,14 @@ pub struct ImportedFromConfluence {
 
 pub fn check_confluence_import(core: &Core, principal: &Principal, input: ConfluenceExport) -> OpResult<Coverage> {
     crate::ops::areas::signed_in(principal)?;
-    Ok(read_export(core, principal, input.content)?.coverage.into())
+    // The upload stays after a check, to be imported.
+    Ok(read_export(core, principal, input.zip, For::Checking)?.coverage.into())
 }
 
 pub fn import_confluence(core: &Core, principal: &Principal, input: ToImportFromConfluence) -> OpResult<ImportedFromConfluence> {
     // Access is checked before the ZIP is read, so a refused import reads nothing.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
-    let read = read_export(core, principal, input.content)?;
+    let read = read_export(core, principal, input.zip, For::Importing)?;
     let coverage = read.coverage.clone();
     let import_id = super::record::new_id()?;
     let imported = write(core, principal, &input.area_id, input.parent_id.as_deref(), read, &import_id, &|_| {})?;
@@ -102,8 +103,9 @@ pub fn import_confluence(core: &Core, principal: &Principal, input: ToImportFrom
 pub fn start_import_confluence(core: &Core, principal: &Principal, input: ToImportFromConfluence) -> OpResult<ImportProgress> {
     // A refused import is refused at once, not once it is running.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
+    let zip = take_zip(core, principal, input.zip, For::Importing)?;
     running::start(core, principal, move |core, principal, following| {
-        let read = read_export(core, principal, input.content)?;
+        let read = read_taken(core, principal, zip)?;
         following.read(&read.coverage);
         let step = |step| following.step(step);
         write(core, principal, &input.area_id, input.parent_id.as_deref(), read, following.import_id(), &step)
@@ -162,10 +164,12 @@ struct ReadExport {
     found: Vec<FoundOnPage>,
 }
 
-/// A Confluence export, held in memory as it was sent.
-type Archive = zip::ZipArchive<std::io::Cursor<Vec<u8>>>;
+fn read_export(core: &Core, principal: &Principal, zip: ZipGiven, purpose: For) -> Result<ReadExport, OpError> {
+    read_taken(core, principal, take_zip(core, principal, zip, purpose)?)
+}
 
-fn read_export(core: &Core, principal: &Principal, content: String) -> Result<ReadExport, OpError> {
+/// Reads the space from an export that was taken.
+fn read_taken(core: &Core, principal: &Principal, zip: ZipTaken) -> Result<ReadExport, OpError> {
     // Whom a mention can name: the Members and Guests the importer may see,
     // by e-mail address in lower case.
     let people_in_turtle: HashMap<String, String> = crate::ops::profiles::list_profiles(core, principal, crate::ops::accounts::Nothing {})?
@@ -174,14 +178,12 @@ fn read_export(core: &Core, principal: &Principal, content: String) -> Result<Re
         .into_iter()
         .map(|profile| (profile.email.to_lowercase(), profile.id))
         .collect();
-    let bytes = crate::ops::attachments::decode_content(&content)?;
-    drop(content);
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| OpError::InvalidInput("Choose a ZIP file.".into()))?;
+    let mut archive = open_taken(core, zip)?;
     let (space, prefix) = match export_in(&archive)? {
         Export::Xml(prefix) => (xml::read(&mut archive, &prefix)?, prefix),
         Export::Csv(prefix) => (csv::read(&mut archive, &prefix)?, prefix),
     };
-    Ok(space.into_bundle(core, people_in_turtle, &mut archive, &prefix))
+    Ok(space.into_bundle(core, people_in_turtle, archive, &prefix))
 }
 
 /// Which form an export is in, and where in the ZIP it lies: at the top,
@@ -342,7 +344,7 @@ impl Labels {
 }
 
 impl Space {
-    fn into_bundle(self, core: &Core, people_in_turtle: HashMap<String, String>, archive: &mut Archive, prefix: &str) -> ReadExport {
+    fn into_bundle(self, core: &Core, people_in_turtle: HashMap<String, String>, mut archive: Archive, prefix: &str) -> ReadExport {
         let mut lookup = storage::Lookup {
             key: self.key.clone(),
             people: self.people.clone(),
@@ -354,9 +356,11 @@ impl Space {
         // problems name it as people know it; the ID tells apart any two
         // the export holds with one title all the same.
         let mut keys: HashMap<&str, String> = HashMap::new();
+        let mut keys_taken: HashSet<String> = HashSet::new();
         for page in &self.pages {
-            let taken = keys.values().any(|key| key == &page.title);
-            keys.insert(&page.id, if taken { format!("{} ({})", page.title, page.id) } else { page.title.clone() });
+            let key = if keys_taken.contains(&page.title) { format!("{} ({})", page.title, page.id) } else { page.title.clone() };
+            keys_taken.insert(key.clone());
+            keys.insert(&page.id, key);
             // A page and a folder may share a title; a link by title is to the page.
             if page.kind == Kind::Page || !lookup.titles.contains_key(&page.title) {
                 lookup.titles.insert(page.title.clone(), page.id.clone());
@@ -368,13 +372,15 @@ impl Space {
         let mut problems = Vec::new();
         let mut attachments: HashMap<String, Vec<IncomingAttachment>> = HashMap::new();
         let mut too_large = Vec::new();
+        let versions = Versions::in_zip(&archive, prefix);
         for attachment in &self.attachments {
             let key = format!("{}/{}", keys[attachment.page_id.as_str()], attachment.name);
-            match read_attachment(core, archive, prefix, attachment) {
-                AttachmentFile::Found(content) => {
+            match attachment_file(core, &mut archive, &versions, prefix, attachment) {
+                // The file stays in the ZIP until it is attached.
+                AttachmentFile::Found(path) => {
                     lookup.attachments.insert((attachment.page_id.clone(), attachment.name.clone()), attachment.id.clone());
                     lookup.attachment_keys.insert(attachment.id.clone(), key.clone());
-                    attachments.entry(attachment.page_id.clone()).or_default().push(IncomingAttachment { key, name: attachment.name.clone(), content });
+                    attachments.entry(attachment.page_id.clone()).or_default().push(IncomingAttachment { key, name: attachment.name.clone(), path });
                 }
                 // Told before anything is created, rather than found once
                 // the import comes to it.
@@ -433,14 +439,15 @@ impl Space {
             .into_iter()
             .map(|(id, key, _, tally)| FoundOnPage { key, path: path_to(&parents, &id), tally })
             .collect();
-        ReadExport { bundle: Bundle { source, entries, problems }, coverage, found }
+        ReadExport { bundle: Bundle { source, entries, problems, archive }, coverage, found }
     }
 }
 
-/// What became of reading an attachment's file.
+/// What became of looking for an attachment's file in the ZIP.
 enum AttachmentFile {
-    Found(Vec<u8>),
-    /// Larger than this Turtle accepts, so it is not read at all.
+    /// It is there, under this name.
+    Found(String),
+    /// Larger than this Turtle accepts, so it is never read.
     TooLarge { bytes: u64, message: String },
     Missing,
 }
@@ -460,40 +467,48 @@ fn path_to(parents: &HashMap<&str, (&str, Option<&str>)>, id: &str) -> Vec<Strin
     path
 }
 
-/// The file of an attachment's current version: as its version names it,
-/// or else the highest version there is.
-fn read_attachment(core: &Core, archive: &mut Archive, prefix: &str, attachment: &Attachment) -> AttachmentFile {
-    let Some(name) = attachment_file(archive, prefix, attachment) else {
-        return AttachmentFile::Missing;
-    };
-    let Ok(mut file) = archive.by_name(&name) else {
-        return AttachmentFile::Missing;
-    };
-    if let Some(message) = too_large_to_attach(core, file.size()) {
-        return AttachmentFile::TooLarge { bytes: file.size(), message };
-    }
-    let mut content = Vec::new();
-    match file.read_to_end(&mut content) {
-        Ok(_) => AttachmentFile::Found(content),
-        Err(_) => AttachmentFile::Missing,
+/// The highest version of each attachment the ZIP holds a file for, by the
+/// attachment's directory: gathered once, for the attachments whose own
+/// version has no file.
+struct Versions(HashMap<String, u32>);
+
+impl Versions {
+    fn in_zip(archive: &Archive, prefix: &str) -> Versions {
+        let mut highest: HashMap<String, u32> = HashMap::new();
+        let within = format!("{prefix}attachments/");
+        for name in archive.file_names().filter_map(Result::ok) {
+            let Some((directory, version)) = name.strip_prefix(&within).and_then(|rest| rest.rsplit_once('/')) else { continue };
+            let Ok(version) = version.parse::<u32>() else { continue };
+            let known = highest.entry(directory.to_string()).or_default();
+            *known = (*known).max(version);
+        }
+        Versions(highest)
     }
 }
 
-/// The name in the ZIP of an attachment's current version's file.
-fn attachment_file(archive: &Archive, prefix: &str, attachment: &Attachment) -> Option<String> {
-    let directory = format!("{prefix}attachments/{}/{}/", attachment.page_id, attachment.id);
-    let exact = format!("{directory}{}", attachment.version);
+/// The file of an attachment's current version: as its version names it,
+/// or else the highest version there is.
+fn attachment_file(core: &Core, archive: &mut Archive, versions: &Versions, prefix: &str, attachment: &Attachment) -> AttachmentFile {
+    let directory = format!("{}/{}", attachment.page_id, attachment.id);
+    let exact = format!("{prefix}attachments/{directory}/{}", attachment.version);
     let name = if archive.index_for_name(&exact).is_some() {
         exact
     } else {
-        archive
-            .file_names()
-            .filter_map(Result::ok)
-            .filter_map(|name| Some((name.strip_prefix(&directory)?.parse::<u32>().ok()?, name.to_string())))
-            .max()
-            .map(|(_, name)| name)?
+        match versions.0.get(&directory) {
+            Some(version) => format!("{prefix}attachments/{directory}/{version}"),
+            None => return AttachmentFile::Missing,
+        }
     };
-    Some(name)
+    let Ok(file) = archive.by_name(&name) else {
+        return AttachmentFile::Missing;
+    };
+    // Told before anything is created, from the size the ZIP states.
+    let bytes = file.size();
+    drop(file);
+    match too_large_to_attach(core, bytes) {
+        Some(message) => AttachmentFile::TooLarge { bytes, message },
+        None => AttachmentFile::Found(name),
+    }
 }
 
 /// The pages as a tree, each beneath its parent in the order Confluence
@@ -536,49 +551,77 @@ mod tests {
     /// Prints the report on a real export, named by the environment
     /// variable `CONFLUENCE_EXPORT`, without importing it. Exports hold
     /// people's data and stay out of the repository, so this runs only when
-    /// asked: `CONFLUENCE_EXPORT=space.zip scripts/cargo test --manifest-path
-    /// server/Cargo.toml --bin turtle report_on_a_real_export -- --ignored --nocapture`
+    /// asked: `CONFLUENCE_EXPORT=/path/to/space.zip scripts/cargo test
+    /// --manifest-path server/Cargo.toml --bin turtle report_on_a_real_export
+    /// -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn report_on_a_real_export() {
         let path = std::env::var("CONFLUENCE_EXPORT").expect("CONFLUENCE_EXPORT names the ZIP");
-        let content = base64::engine::general_purpose::STANDARD.encode(std::fs::read(path).unwrap());
         let core = crate::ops::testing::fresh();
         let reader = crate::ops::testing::member(&core, "Reader", false);
-        let read = read_export(&core, &reader, content).unwrap();
+        let read = read_export(&core, &reader, uploaded_from(&core, &reader, &path), For::Checking).unwrap();
         println!("{}", serde_json::to_string_pretty(&read.coverage).unwrap());
         for problem in &read.bundle.problems {
             println!("problem: {}: {}", problem.file, problem.message);
         }
     }
 
+    /// The file at `path`, uploaded piece by piece as the HTTP API takes it.
+    fn uploaded_from(core: &Core, by: &Principal, path: &str) -> ZipGiven {
+        let mut file = std::fs::File::open(path).unwrap();
+        let mut receiving = crate::ops::import::receive_upload(core, by, None).unwrap();
+        let mut piece = vec![0; 1024 * 1024];
+        loop {
+            let read = std::io::Read::read(&mut file, &mut piece).unwrap();
+            if read == 0 {
+                break;
+            }
+            receiving.write(core, &piece[..read]).unwrap();
+        }
+        ZipGiven::uploaded(&receiving.finish(core).unwrap().upload_id)
+    }
+
     /// Imports a real export, named by `CONFLUENCE_EXPORT`, into a fresh
-    /// Turtle and prints how long each stage took: a way to try a large
-    /// space. Run it as `report_on_a_real_export`, with `--release`.
+    /// Turtle and prints how long each stage took and how much memory Turtle
+    /// held by then: a way to try a large space. Run it as
+    /// `report_on_a_real_export`, with `--release`.
     #[test]
     #[ignore]
     fn import_a_real_export() {
         let path = std::env::var("CONFLUENCE_EXPORT").expect("CONFLUENCE_EXPORT names the ZIP");
         let started = std::time::Instant::now();
-        let content = base64::engine::general_purpose::STANDARD.encode(std::fs::read(path).unwrap());
-        let core = crate::ops::testing::fresh();
+        let told = |what: &str| println!("{what} after {:.1?}, holding {}", started.elapsed(), memory_held());
+        let mut core = crate::ops::testing::fresh();
+        core.core.set_import_limit(u64::MAX);
         let writer = crate::ops::testing::member(&core, "Writer", false);
         let area_id = create_area(&core, &writer, NewArea { name: "Imported".into() }).unwrap().output.id;
-        println!("encoded after {:?}", started.elapsed());
-        let read = read_export(&core, &writer, content).unwrap();
-        println!("read after {:?}: {} Pages, {} Folders, {} Attachments", started.elapsed(), read.coverage.pages, read.coverage.folders, read.coverage.attachments);
-        let stage = std::cell::Cell::new(0);
+        let zip = uploaded_from(&core, &writer, &path);
+        told("uploaded");
+        let read = read_export(&core, &writer, zip, For::Importing).unwrap();
+        told(&format!("read {} Pages, {} Folders and {} Attachments", read.coverage.pages, read.coverage.folders, read.coverage.attachments));
+        let stage = std::cell::Cell::new("");
         let step = |step| {
             let now = match step {
-                super::super::Step::Creating { .. } => 1,
-                super::super::Step::Writing { .. } => 2,
+                super::super::Step::Creating { .. } => "began creating Pages and Folders",
+                super::super::Step::Writing { .. } => "began writing the Pages' content",
             };
             if stage.replace(now) != now {
-                println!("stage {now} begins after {:?}", started.elapsed());
+                told(now);
             }
         };
         let imported = write(&core, &writer, &area_id, None, read, "i1", &step).unwrap();
-        println!("imported after {:?}, {} problems", started.elapsed(), imported.problems.len());
+        told(&format!("imported, with {} problems,", imported.problems.len()));
+    }
+
+    /// The memory this process holds, as `ps` tells it; unknown where there
+    /// is no `ps`.
+    fn memory_held() -> String {
+        let told = std::process::Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output().ok();
+        match told.and_then(|told| String::from_utf8_lossy(&told.stdout).trim().parse::<u64>().ok()) {
+            Some(kilobytes) => format!("{} MB", kilobytes / 1024),
+            None => "an unknown amount of memory".into(),
+        }
     }
 
     use crate::ops::areas::{create_area, NewArea};
@@ -818,6 +861,50 @@ mod tests {
     }
 
     #[test]
+    fn a_check_leaves_an_uploaded_export_to_be_imported_and_the_import_uses_it_up() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let zip = base64::engine::general_purpose::STANDARD.decode(knowledge_base()).unwrap();
+        let upload_id = crate::ops::import::uploads::uploaded(&core, &grace, &zip);
+        let uploaded = || ZipGiven::uploaded(&upload_id);
+
+        let checked = check_confluence_import(&core, &grace, ConfluenceExport { zip: uploaded() }).unwrap().output;
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, zip: uploaded() }).unwrap().output;
+        let again = check_confluence_import(&core, &grace, ConfluenceExport { zip: uploaded() }).unwrap_err();
+
+        assert_eq!((checked.pages, checked.attachments), (4, 1));
+        assert_eq!(outline(&core, &grace, &area_id)[..2], ["Home", "  Guides (folder)"]);
+        // The attachment's file was read from the upload when it was attached.
+        let deploy = &imported.entries[0].children[0].children.iter().find(|entry| entry.title == "Deploy").unwrap().id;
+        assert_eq!(list_attachments(&core, &grace, PageId { id: deploy.clone() }).unwrap().output.attachments[0].name, "flow.png");
+        assert_eq!(again.kind(), "not_found");
+    }
+
+    #[test]
+    fn an_attachment_whose_version_has_no_file_takes_the_latest_file_there_is() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        // The page says version 3 of the file; the export holds 1 and 2.
+        let content = export(
+            &[
+                space("1", "KB", "Knowledge Base"),
+                page("2", "Home", None, None, Some("200")).xml(),
+                body("200", "2", "<p>Welcome</p>"),
+                attachment("50", "2", "flow.png", "3", None),
+            ],
+            &[("attachments/2/50/1", b"old flow"), ("attachments/2/50/2", b"the flow"), ("attachments/2/5/9", b"another")],
+        );
+
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id, parent_id: None, zip: ZipGiven::sent(content) }).unwrap().output;
+
+        let attached = list_attachments(&core, &grace, PageId { id: imported.entries[0].id.clone() }).unwrap().output.attachments;
+        assert_eq!((attached[0].name.as_str(), attached[0].size), ("flow.png", 8));
+        assert!(imported.problems.is_empty(), "{:?}", imported.problems);
+    }
+
+    #[test]
     fn a_space_exported_as_csv_comes_across_as_the_same_space_exported_as_xml() {
         // Confluence Cloud's CSV export holds no names of people, only their account IDs.
         the_knowledge_base_comes_across(knowledge_base_csv(), "Ask @someone in Confluence or @someone in Confluence.\n");
@@ -830,7 +917,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Wiki");
 
-        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content })
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content) })
             .unwrap()
             .output;
 
@@ -859,7 +946,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Wiki");
 
-        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content: knowledge_base() })
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(knowledge_base()) })
             .unwrap()
             .output;
 
@@ -892,7 +979,7 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", false);
 
-        let coverage = check_confluence_import(&core, &grace, ConfluenceExport { content: knowledge_base() }).unwrap().output;
+        let coverage = check_confluence_import(&core, &grace, ConfluenceExport { zip: ZipGiven::sent(knowledge_base()) }).unwrap().output;
 
         assert_eq!(coverage.space, "Knowledge Base");
         assert_eq!((coverage.pages, coverage.folders, coverage.attachments), (4, 1, 1));
@@ -928,7 +1015,7 @@ mod tests {
         let core = fresh();
         let grace = member(&core, "Grace", false);
 
-        let coverage = check_confluence_import(&core, &grace, ConfluenceExport { content: knowledge_base_csv() }).unwrap().output;
+        let coverage = check_confluence_import(&core, &grace, ConfluenceExport { zip: ZipGiven::sent(knowledge_base_csv()) }).unwrap().output;
 
         assert_eq!((coverage.space.as_str(), coverage.pages, coverage.folders, coverage.attachments), ("Knowledge Base", 4, 1, 1));
         let not_imported: Vec<_> = coverage.not_imported.iter().map(|item| (item.what.as_str(), item.count)).collect();
@@ -957,7 +1044,7 @@ mod tests {
             ("bodycontent.csv.gz", &table(&["body", "contentid", "bodytypeid"], &[])),
         ]);
 
-        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content }).unwrap().output;
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content) }).unwrap().output;
 
         assert_eq!(outline(&core, &grace, &area_id), ["Empty", "Import report: KB (2023-11-14)"]);
         assert!(imported.problems.is_empty(), "{:?}", imported.problems);
@@ -979,7 +1066,7 @@ mod tests {
             ("bodycontent.csv.gz", &table(&["body", "contentid", "bodytypeid"], &[vec!["h1. Wiki markup", "2", "0"], vec![link, "2", "2"], vec!["", "3", "2"]])),
         ]);
 
-        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content }).unwrap().output;
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content) }).unwrap().output;
 
         let (home, notes) = (&imported.entries[0].id, &imported.entries[1].id);
         assert_eq!(markdown_of(&core, &grace, home), format!("See [Notes](turtle:{notes}).\n"));
@@ -992,7 +1079,7 @@ mod tests {
         let ken = member(&core, "Ken", false);
         let area_id = area(&core, &grace, "Wiki");
 
-        check_confluence_import(&core, &ken, ConfluenceExport { content: knowledge_base() }).unwrap();
+        check_confluence_import(&core, &ken, ConfluenceExport { zip: ZipGiven::sent(knowledge_base()) }).unwrap();
 
         assert!(outline(&core, &grace, &area_id).is_empty());
     }
@@ -1005,8 +1092,8 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Wiki");
 
-        let coverage = check_confluence_import(&core, &grace, ConfluenceExport { content: knowledge_base() }).unwrap().output;
-        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id, parent_id: None, content: knowledge_base() })
+        let coverage = check_confluence_import(&core, &grace, ConfluenceExport { zip: ZipGiven::sent(knowledge_base()) }).unwrap().output;
+        let imported = import_confluence(&core, &grace, ToImportFromConfluence { area_id, parent_id: None, zip: ZipGiven::sent(knowledge_base()) })
             .unwrap()
             .output;
 
@@ -1028,7 +1115,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Wiki");
 
-        let started = start_import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content: knowledge_base() })
+        let started = start_import_confluence(&core, &grace, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(knowledge_base()) })
             .unwrap()
             .output;
         let progress =
@@ -1050,7 +1137,7 @@ mod tests {
         let area_id = area(&core, &grace, "Wiki");
         crate::ops::testing::give_role(&core, &area_id, &ken, crate::ops::permissions::Role::Read);
 
-        let refused = import_confluence(&core, &ken, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, content: knowledge_base() }).unwrap_err();
+        let refused = import_confluence(&core, &ken, ToImportFromConfluence { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(knowledge_base()) }).unwrap_err();
 
         assert_eq!(refused.kind(), "not_permitted");
         assert!(outline(&core, &grace, &area_id).is_empty());
@@ -1062,7 +1149,7 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let message = |files: &[(&str, &[u8])]| {
             let content = zip_of(files);
-            match check_confluence_import(&core, &grace, ConfluenceExport { content }).unwrap_err() {
+            match check_confluence_import(&core, &grace, ConfluenceExport { zip: ZipGiven::sent(content) }).unwrap_err() {
                 OpError::InvalidInput(message) => message,
                 other => panic!("{other:?}"),
             }

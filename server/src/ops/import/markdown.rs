@@ -1,21 +1,16 @@
 //! Reading a ZIP of Markdown files, as Turtle exports them or from anywhere else.
 
-use super::{Bundle, Incoming, IncomingAttachment, Problem, Target};
+use super::{Archive, Bundle, Incoming, IncomingAttachment, Problem, Target};
 use crate::model::{Block, Inline, Marks};
 use crate::ops::tree::Kind;
 use crate::ops::OpError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Read;
 
-/// Reads a ZIP sent in base64. It is taken whole and let go of as soon as
-/// it is read, since an import holds it in memory, and each file's bytes are
-/// handed on rather than copied.
-pub(super) fn read(content: String) -> Result<Bundle, OpError> {
-    let bytes = crate::ops::attachments::decode_content(&content)?;
-    drop(content);
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|_| OpError::InvalidInput("Choose a ZIP file.".into()))?;
-    let mut files = BTreeMap::new();
+/// Reads a ZIP of Markdown files. Only the Markdown is read here: every
+/// other file stays in the ZIP, listed by its path, until it is attached.
+pub(super) fn read(mut archive: Archive) -> Result<Bundle, OpError> {
+    let mut files = Files::new();
     let mut problems = Vec::new();
     for index in 0..archive.len() {
         let name = archive.name_for_index(index).and_then(Result::ok).map(|name| name.to_string()).unwrap_or_else(|| format!("file {}", index + 1));
@@ -24,8 +19,11 @@ pub(super) fn read(content: String) -> Result<Bundle, OpError> {
             if file.is_dir() {
                 return Ok(None);
             }
-            file.read_to_end(&mut content)?;
-            Ok(Some(file.name().unwrap_or_default().to_string()))
+            let path = file.name().unwrap_or_default().to_string();
+            if path.ends_with(".md") && !added_by_a_mac(&path) {
+                file.read_to_end(&mut content)?;
+            }
+            Ok(Some(path))
         });
         let path = match read {
             Ok(Some(path)) if added_by_a_mac(&path) => continue,
@@ -42,24 +40,16 @@ pub(super) fn read(content: String) -> Result<Bundle, OpError> {
         }
         files.insert(path, content);
     }
-    drop(archive);
     let mut entries = entries_in("", &files);
     let mut attached = HashSet::new();
     collect_attached(&entries, &mut attached);
     attach_linked(&mut entries, &mut attached);
-    hand_over_content(&mut entries, &mut files);
-    Ok(Bundle { source: "a ZIP of Markdown files".into(), entries, problems })
+    Ok(Bundle { source: "a ZIP of Markdown files".into(), entries, problems, archive })
 }
 
-/// Moves each Attachment's bytes out of the files, where each is found once.
-fn hand_over_content(entries: &mut [Incoming], files: &mut BTreeMap<String, Vec<u8>>) {
-    for entry in entries {
-        for attachment in &mut entry.attachments {
-            attachment.content = files.remove(&attachment.key).unwrap_or_default();
-        }
-        hand_over_content(&mut entry.children, files);
-    }
-}
+/// The files of a ZIP by path: a Markdown file with its content, any other
+/// file with none, since it is read only once it is attached.
+type Files = BTreeMap<String, Vec<u8>>;
 
 /// Whether a file is one the Finder adds when it makes a ZIP, which holds
 /// nothing of what was zipped.
@@ -93,7 +83,7 @@ fn attach_linked(entries: &mut [Incoming], attached: &mut HashSet<String>) {
             .filter(|key| attached.insert((*key).clone()))
             .map(|key| {
                 let name = key.rsplit('/').next().unwrap_or(key).to_string();
-                IncomingAttachment { key: key.clone(), name, content: Vec::new() }
+                IncomingAttachment { key: key.clone(), name, path: key.clone() }
             })
             .collect();
         entry.attachments.extend(new);
@@ -105,7 +95,7 @@ fn attach_linked(entries: &mut [Incoming], attached: &mut HashSet<String>) {
 /// in `/`, or empty for the top. A Markdown file is a Page and a directory
 /// of the same name holds what is beneath it; a directory without one is a
 /// Folder.
-fn entries_in(within: &str, files: &BTreeMap<String, Vec<u8>>) -> Vec<Incoming> {
+fn entries_in(within: &str, files: &Files) -> Vec<Incoming> {
     let mut names = BTreeSet::new();
     for path in files.keys() {
         let Some(rest) = path.strip_prefix(within) else { continue };
@@ -256,7 +246,7 @@ fn unquoted(value: &str) -> String {
 
 /// Whether there is a Markdown file somewhere in the directory `within`,
 /// other than among a Page's Attachments.
-fn holds_markdown(within: &str, files: &BTreeMap<String, Vec<u8>>) -> bool {
+fn holds_markdown(within: &str, files: &Files) -> bool {
     files.keys().any(|path| {
         path.strip_prefix(within)
             .is_some_and(|rest| rest.ends_with(".md") && !rest.split('/').any(|part| part == ATTACHMENTS))
@@ -266,21 +256,20 @@ fn holds_markdown(within: &str, files: &BTreeMap<String, Vec<u8>>) -> bool {
 /// The directory in a Page's directory that holds its Attachments.
 const ATTACHMENTS: &str = "_attachments";
 
-/// The files directly in the directory `within`, as Attachments whose
-/// content is handed over once all are known.
-fn attachments_in(within: &str, files: &BTreeMap<String, Vec<u8>>) -> Vec<IncomingAttachment> {
+/// The files directly in the directory `within`, as Attachments.
+fn attachments_in(within: &str, files: &Files) -> Vec<IncomingAttachment> {
     files
         .keys()
         .filter_map(|path| {
             let name = path.strip_prefix(within).filter(|name| !name.contains('/'))?;
-            Some(IncomingAttachment { key: path.clone(), name: name.to_string(), content: Vec::new() })
+            Some(IncomingAttachment { key: path.clone(), name: name.to_string(), path: path.clone() })
         })
         .collect()
 }
 
 /// What the relative links in a file in the directory `within` point to
 /// among the ZIP's files, by the address they are written with.
-fn links_in(content: &mut [Block], within: &str, files: &BTreeMap<String, Vec<u8>>) -> HashMap<String, Target> {
+fn links_in(content: &mut [Block], within: &str, files: &Files) -> HashMap<String, Target> {
     let mut links = HashMap::new();
     crate::ops::export::for_each_inline(content, &mut |inline| {
         let (Inline::Image { src: address, .. } | Inline::Text { marks: Marks { link: Some(address), .. }, .. }) = inline else {
