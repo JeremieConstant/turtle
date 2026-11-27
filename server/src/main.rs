@@ -62,6 +62,9 @@ const UPLOADS_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// wherever Turtle was started.
 const DEFAULT_DATA_DIR: &str = "turtle-data";
 
+/// The port Turtle listens on when `TURTLE_PORT` does not say.
+const DEFAULT_PORT: u16 = 4100;
+
 struct App {
     /// Decides who may open which Page, and holds the open Pages.
     core: Arc<ops::Core>,
@@ -96,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|_| std::env::var("PORT"))
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(4100);
+        .unwrap_or(DEFAULT_PORT);
     // Loopback unless the operator says otherwise: a container has to listen
     // on every address to be reached from outside it.
     let host: IpAddr = match std::env::var("TURTLE_HOST") {
@@ -748,6 +751,39 @@ fn megabytes(name: &str, default: u64) -> anyhow::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Default column of the README's table of settings, by setting.
+    fn defaults_in_the_readme() -> std::collections::HashMap<String, String> {
+        let readme = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../README.md")).unwrap();
+        readme
+            .lines()
+            .filter_map(|line| {
+                let mut cells = line.strip_prefix("| `")?.splitn(3, " | ");
+                let setting = cells.next()?.strip_suffix('`')?;
+                Some((setting.to_string(), cells.next()?.to_string()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_readme_tells_the_defaults_turtle_starts_with() {
+        let mb = |bytes: u64| bytes / (1024 * 1024);
+        let expected = [
+            ("TURTLE_DATA", format!("`{DEFAULT_DATA_DIR}` in the directory Turtle is started from")),
+            ("TURTLE_HOST", format!("`{}`", Ipv4Addr::LOCALHOST)),
+            ("TURTLE_PORT", format!("`{DEFAULT_PORT}`")),
+            ("TURTLE_MAX_ATTACHMENT_MB", format!("`{}`", mb(ops::attachments::DEFAULT_ATTACHMENT_LIMIT))),
+            (
+                "TURTLE_MAX_IMPORT_MB",
+                format!("`{}`, `{}` for a demo", mb(ops::import::DEFAULT_IMPORT_LIMIT), mb(ops::import::DEMO_IMPORT_LIMIT)),
+            ),
+        ];
+        let told = defaults_in_the_readme();
+
+        for (setting, default) in expected {
+            assert_eq!(told.get(setting), Some(&default), "the README's default for {setting}");
+        }
+    }
 
     #[test]
     fn an_editor_that_drops_the_connection_has_gone_away_but_a_bad_update_has_not() {

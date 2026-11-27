@@ -135,7 +135,7 @@ Two made-up spaces, each page with four earlier versions, imported on a laptop (
 | 5,000 pages and folders, 600 attachments | 155 MB | 4 s | 127 MB from XML, 119 MB from CSV |
 | 20,000 pages and folders, 4,000 attachments | 1.9 GB | 19 s | 450 MB from XML, 421 MB from CSV |
 
-The times are for reading the ZIP and creating everything, without the upload. To try a space of your own this way, see `import_a_real_export` in [`server/src/ops/import/confluence/mod.rs`](../server/src/ops/import/confluence/mod.rs).
+The times are for reading the ZIP and creating everything, without the upload. The spaces were made with `scripts/make-confluence-space.py`, the first with `--pages 5000 --versions 4 --attachments 600 --attachment-kb 250`, the second with `--pages 20000 --versions 4 --attachments 4000 --attachment-kb 480`, and imported with `scripts/measure-import.sh`, which measures a real export of yours the same way.
 
 A ZIP sent in base64 with the operation, instead of uploaded, is held in memory. It may be 200 MB at most over the HTTP API, and through MCP as large as a file that can be attached, which is how an Agent without HTTP access imports ([ADR-0014](adr/0014-a-zip-to-import-is-uploaded-ahead-of-the-operation.md)).
 

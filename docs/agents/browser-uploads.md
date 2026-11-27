@@ -1,4 +1,4 @@
-# Trying a file upload in the browser pane
+# Choosing a file in the browser pane
 
 The browser pane cannot drive the operating system's file picker, so a button that opens it (Import Markdown, Import from Confluence, attaching a file) needs the file handed to the page instead. People choose the file in the picker as usual; this is only for trying it by hand.
 

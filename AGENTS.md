@@ -6,7 +6,7 @@ Run cargo as `scripts/cargo`, which finds it off PATH. The server is a binary cr
 
 ## Trying it by hand
 
-`scripts/try.sh` builds, runs and seeds a Turtle of its own on a free port with a fresh data directory, beside any other session's, and prints its address; it runs until stopped. Underneath, `scripts/preview.sh` builds and runs Turtle at `http://127.0.0.1:4100` and `scripts/seed.sh` gives a fresh one an account, Areas and Pages; both take `TURTLE_PORT` and `TURTLE_DATA`. To sign in from a script or the browser console, send `seed-account.json` from the data directory as it is to the `sign_in` operation (`POST /api/sign_in`). To try a file upload (an import, an Attachment) in the browser pane, follow `docs/agents/browser-uploads.md`.
+`scripts/try.sh` builds, runs and seeds a Turtle of its own on a free port with a fresh data directory, beside any other session's, and prints its address; it runs until stopped. Underneath, `scripts/preview.sh` builds and runs Turtle at `http://127.0.0.1:4100` and `scripts/seed.sh` gives a fresh one an account, Areas and Pages; both take `TURTLE_PORT` and `TURTLE_DATA`. To sign in from a script or the browser console, send `seed-account.json` from the data directory as it is to the `sign_in` operation (`POST /api/sign_in`). To choose a file in the browser pane, for an import or an Attachment, follow `docs/agents/browser-uploads.md`. To measure an import of a large Confluence space, use `scripts/make-confluence-space.py` and `scripts/measure-import.sh`.
 
 ## Commits
 

@@ -10,6 +10,8 @@ Names in code, API, UI text and tests use the terms in `GLOSSARY.md`, in the sen
 
 Every capability is an operation in `server/src/ops` (ADR-0005), and every permission decision is made there. HTTP handlers, the editing WebSocket and later MCP find the caller, call into `ops`, and turn the outcome into their own protocol, without choosing who may do what themselves. A rule that holds for more than one operation lives in one function in `ops` that each of them calls.
 
+A route that is not an operation, such as `GET /api/attachments/{id}` or `POST /api/uploads`, skips what `Catalogue::call_from` decides for every operation: that a Token is browser-only, or read-only (`may_change`). Such a route calls the same functions in `ops` itself, and its tests include a caller the catalogue would refuse, such as a read-only Token.
+
 ## Hidden is not found
 
 Something the caller may not read answers exactly like something that does not exist: same error kind, same message, and nothing in the message that came from it.

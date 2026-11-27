@@ -584,8 +584,8 @@ mod tests {
 
     /// Imports a real export, named by `CONFLUENCE_EXPORT`, into a fresh
     /// Turtle and prints how long each stage took and how much memory Turtle
-    /// held by then: a way to try a large space. Run it as
-    /// `report_on_a_real_export`, with `--release`.
+    /// held by then: a way to try a large space. `scripts/measure-import.sh`
+    /// runs it.
     #[test]
     #[ignore]
     fn import_a_real_export() {
