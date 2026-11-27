@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to Self-Host a Team Wiki With Docker (2026)</title>
+  <meta name="description" content="Run a self-hosted wiki with Docker: what to decide first, how Turtle, Docmost, Outline, BookStack and Wiki.js compare to operate, and how to back up and update.">
+  <link rel="canonical" href="https://turtle-wiki.app/guides/self-hosted-wiki-docker">
+  <meta name="theme-color" content="#fafaf8">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://turtle-wiki.app/guides/self-hosted-wiki-docker">
+  <meta property="og:title" content="How to Self-Host a Team Wiki With Docker (2026)">
+  <meta property="og:description" content="Run a self-hosted wiki with Docker: what to decide first, how Turtle, Docmost, Outline, BookStack and Wiki.js compare to operate, and how to back up and update.">
+  <meta property="og:image" content="https://turtle-wiki.app/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Article",
+        "headline": "How do I self-host a team wiki with Docker?",
+        "description": "Run a self-hosted wiki with Docker: what to decide first, how Turtle, Docmost, Outline, BookStack and Wiki.js compare to operate, and how to back up and update.",
+        "url": "https://turtle-wiki.app/guides/self-hosted-wiki-docker",
+        "datePublished": "2026-11-27",
+        "dateModified": "2026-11-27",
+        "image": "https://turtle-wiki.app/og.jpg",
+        "author": {
+          "@type": "Person",
+          "name": "Jérémie Constant",
+          "image": "https://turtle-wiki.app/assets/jeremie-constant.webp",
+          "worksFor": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+        },
+        "publisher": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Turtle Wiki", "item": "https://turtle-wiki.app/" },
+          { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://turtle-wiki.app/guides" },
+          { "@type": "ListItem", "position": 3, "name": "Self-hosted wiki with Docker", "item": "https://turtle-wiki.app/guides/self-hosted-wiki-docker" }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script defer src="/assets/site.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to the content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Turtle Wiki home">
+        <img src="/favicon.svg" alt="" width="26" height="26">
+        Turtle Wiki
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="/alternatives">Alternatives</a>
+        <a href="/guides" aria-current="page">Guides</a>
+        <a href="https://github.com/turtle-wiki/turtle">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://demo.turtle-wiki.app">Try the demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="article">
+    <article>
+      <div class="col" data-enter>
+        <ol class="crumbs" aria-label="Breadcrumb">
+          <li><a href="/">Home</a></li>
+          <li><a href="/guides">Guides</a></li>
+        </ol>
+        <h1>How do I self-host a team wiki with Docker?</h1>
+        <p class="lede">Run a self-hosted wiki with Docker: what to decide first, how Turtle, Docmost, Outline, BookStack and Wiki.js compare to operate, and how to back up and update.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+            Try the demo
+            <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Ask Jérémie by email</a>
+        </div>
+        <div class="byline">
+          <img src="/assets/jeremie-constant-128.webp" alt="Jérémie Constant" width="44" height="44">
+          <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions. Updated 27 November 2026.</span>
+        </div>
+      </div>
+
+      <div class="col prose">
+        <h2 id="short-answer">Short answer</h2>
+        <p>We build Turtle, so this guide is not neutral. We compare the operational footprint of five open wikis using their official install docs and link every source at the end.</p>
+        <p>To self-host a wiki with Docker, decide first who runs it, how you back it up, how people sign in and how it is reached over HTTPS. Then pick a wiki whose footprint fits that plan. Turtle runs as one container with SQLite and no other services. Docmost, Outline and Wiki.js need a separate database, and Docmost and Outline also need Redis.</p>
+
+        <h2 id="at-a-glance">At a glance</h2>
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col"></th><th scope="col">Turtle</th><th scope="col">Docmost</th><th scope="col">Outline</th><th scope="col">BookStack</th><th scope="col">Wiki.js</th></tr></thead>
+            <tbody>
+              <tr><td>Containers in the reference setup</td><td>1 (Turtle)</td><td>3 (app, PostgreSQL, Redis)</td><td>3 (app, PostgreSQL, Redis), plus a TLS proxy in the example</td><td>2 (app, MySQL or MariaDB), community images only</td><td>2 (app, PostgreSQL)</td></tr>
+              <tr><td>Database</td><td>SQLite, built in</td><td>PostgreSQL</td><td>PostgreSQL</td><td>MySQL 8.0+ or MariaDB 10.6+</td><td>PostgreSQL recommended, also MySQL, MariaDB, MS SQL, SQLite</td></tr>
+              <tr><td>Files and attachments</td><td>Data directory</td><td>Not documented</td><td>Local storage volume</td><td>Not documented</td><td>Not documented</td></tr>
+              <tr><td>Sign-in options</td><td>Email and password. Invitations and password-reset links by email via SMTP. No OIDC or SSO yet</td><td>Email and password. SSO (SAML, OIDC, LDAP) and MFA listed in the paid Business plan</td><td>No built-in email and password. SSO providers such as Slack, Google Workspace or OIDC, or email magic link via SMTP</td><td>Email and password, LDAP, SAML 2.0, OIDC, social logins</td><td>Local accounts plus LDAP, SAML 2.0, generic OIDC/OAuth2 and many social providers</td></tr>
+              <tr><td>Licence</td><td>AGPL-3.0, no paid edition</td><td>AGPL-3.0 core, enterprise features under a commercial licence</td><td>Business Source License 1.1 (converts to Apache 2.0 later)</td><td>MIT</td><td>AGPL-3.0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="table-note">Checked 27 November 2026 against each project's install, authentication and licence pages. Links in the source list below.</p>
+
+        <h2 id="what-to-decide">What to decide before you run anything</h2>
+        <p>The container is the easy part. The decisions around it decide whether your wiki is still healthy in a year.</p>
+        <h3>Who runs it</h3>
+        <p>Name one person who owns the wiki server. That person applies updates, watches disk space and restores backups. If nobody on your team wants this job, read the section on when not to self-host before you continue.</p>
+        <h3>Backups</h3>
+        <p>Decide where backups go and how often they run. A backup on the same disk as the wiki does not count. Plan one test restore before you invite the team, not after the first incident.</p>
+        <h3>Sign-in</h3>
+        <p>Check how your team signs in today. If your company requires SSO through Entra ID, Okta or Keycloak, filter the table above on that column first. Some wikis offer it in the free edition, some in a paid plan, and some not yet.</p>
+        <h3>Reverse proxy and TLS</h3>
+        <p>Most wiki containers speak plain HTTP on a local port. Put a reverse proxy such as Caddy, nginx or Traefik in front of it to terminate TLS. Point a subdomain like <code>wiki.example.com</code> at the proxy and let it fetch certificates.</p>
+        <h3>Updates</h3>
+        <p>Decide how you hear about new releases and when you apply them. Watching the GitHub releases page and updating on a fixed day each month works for most small teams. Pin image tags so an update only happens when you choose.</p>
+
+        <h2 id="walkthrough-turtle">Walkthrough: self-host Turtle with Docker</h2>
+        <p>Turtle is a self-hosted wiki where people and AI agents write documentation together. It ships as one binary with the web app built in. Data lives in SQLite plus an attachments folder in a data directory. There is no database server and no external service to run.</p>
+        <p>Turtle is in an early stage. Until version 1.0, the data format and API can change between releases. Read the release notes before every update.</p>
+        <h3>1. Get the compose file</h3>
+        <p>Images are published at <code>ghcr.io/turtle-wiki/turtle</code>. The repository at <a href="https://github.com/turtle-wiki/turtle">github.com/turtle-wiki/turtle</a> provides a <code>compose.yml</code>. Copy it to the server into an empty folder.</p>
+        <h3>2. Set the configuration</h3>
+        <p>Turtle is configured with environment variables. The ones you will set first are the data directory, the public URL and your SMTP settings for invitation emails. Set them under <code>environment:</code> in <code>compose.yml</code>: <code>TURTLE_PUBLIC_URL</code> for the public address (it also enables OAuth for AI clients), <code>TURTLE_SMTP_URL</code> and <code>TURTLE_MAIL_FROM</code> for invitation and password-reset email, and <code>TURTLE_DATA</code> if you want a different data directory. The README lists every variable with its default.</p>
+        <p>Set the public URL to the HTTPS address your reverse proxy serves. AI clients connect to the built-in MCP server at that address plus <code>/mcp</code>, so it has to be reachable from where your team works.</p>
+        <h3>3. Start it</h3>
+        <pre><code>docker compose up -d</code></pre>
+        <p>Turtle listens on port 4100. Point your reverse proxy at that port and open your public URL in a browser. The first visit asks you to create the first account, which becomes the Workspace Admin.</p>
+        <figure class="shot">
+          <img src="/assets/screenshots/01-home-quick-note-recently-edited.webp" alt="Turtle home page with Quick Note and recently edited pages after sign-in" width="1450" height="840" decoding="async">
+        </figure>
+        <h3>4. Invite your team</h3>
+        <p>Create an Area for each team or topic and invite members by email. Workspace Admins manage the workspace. Each Area has its own roles, for example Read, Write and Admin.</p>
+        <figure class="shot">
+          <img src="/assets/screenshots/05-area-overview-start-here.webp" alt="Area overview in Turtle showing the start page and the member's role" width="1450" height="840" loading="lazy" decoding="async">
+        </figure>
+        <p>Not available yet: page-level or folder-level permissions, guests and public share links (planned for 0.4), and groups and OIDC/SSO (planned for 0.5). If you need any of these today, Turtle is not ready for you.</p>
+        <h3>Other ways to run Turtle</h3>
+        <p>If you prefer not to use Docker, prebuilt binaries exist for Linux (x86-64 and ARM64) and macOS on Apple Silicon. You can also build from source.</p>
+
+        <h2 id="backups">Backups</h2>
+        <p>For Turtle, a backup means stopping Turtle and copying the data directory. Because everything sits in that one folder, a copy taken while Turtle is stopped is a complete backup.</p>
+        <pre><code>docker compose stop
+# copy the data directory to your backup target
+docker compose start</code></pre>
+        <p>With the provided <code>compose.yml</code>, the data directory is the <code>turtle-data</code> volume.</p>
+        <p>Schedule this with cron or your backup tool and keep several generations off the server. To restore, stop Turtle, put the copied data directory back and start it again.</p>
+        <p>As a second, human-readable safety net, you can export an Area or a subtree as a ZIP of Markdown plus attachments, or as PDF. This is useful before a large reorganisation. Treat it as a complement to the data directory backup, not a replacement.</p>
+        <figure class="shot narrow">
+          <img src="/assets/screenshots/06-area-menu-export-pdf-markdown-import.webp" alt="Area menu in Turtle with export as PDF or Markdown and Markdown import" width="870" height="504" loading="lazy" decoding="async">
+        </figure>
+        <p>For the other wikis, the backup covers more moving parts. Docmost, Outline and Wiki.js keep content in PostgreSQL, so you need a database dump plus any file storage. BookStack needs a MySQL or MariaDB dump plus its uploaded files.</p>
+
+        <h2 id="updates">Updates</h2>
+        <p>To update Turtle, pull the new image and recreate the container:</p>
+        <pre><code>docker compose pull
+docker compose up -d</code></pre>
+        <p>Turtle migrates its database automatically on start. Take a backup of the data directory first. Before 1.0 the data format can change between releases, so a backup is the only clean way back if an update goes wrong.</p>
+        <p>If you pin a version tag in <code>compose.yml</code>, change the tag first, then pull. The image tags are <code>latest</code> for the newest release, <code>X.Y</code> or <code>X.Y.Z</code> for a release line or a single release, and <code>edge</code> for the <code>main</code> branch.</p>
+        <p>The same pattern applies to the other wikis, with one extra step. When the app depends on PostgreSQL or Redis, those images also need updates, and a major PostgreSQL upgrade needs a dump and restore of its own.</p>
+
+        <h2 id="when-not-to-self-host">When not to self-host</h2>
+        <p>Self-hosting is a good fit when you have someone who owns the server and a reason to keep data on your own infrastructure. It is a poor fit in these cases:</p>
+        <ul>
+          <li>Nobody on the team wants to own updates, backups and certificates.</li>
+          <li>Your company requires SSO and an audit trail from day one. Turtle has no OIDC yet. Check the paid plans of Docmost and Outline, or the free SSO options in BookStack and Wiki.js.</li>
+          <li>You need a wiki that is stable for years without data format changes. Turtle has not reached 1.0.</li>
+          <li>You need Confluence-style macros, whiteboards or databases. Turtle will not add content that cannot be expressed as Markdown.</li>
+        </ul>
+        <p>A hosted version of Turtle has been announced, with a waitlist on <a href="/#waitlist">turtle-wiki.app</a>. There is no price or date yet.</p>
+
+        <h2 id="what-you-give-up">What you give up</h2>
+        <p>When you self-host, you give up someone else's on-call rotation. Security patches, disk monitoring and restore tests become your job. In return you control where the data lives, who can reach it and when it changes.</p>
+        <p>With Turtle in particular, you give up maturity. It has fewer features than Docmost, Outline, BookStack or Wiki.js today: no comments, backlinks or templates until 0.6, and no external security review until 1.0. What you get is the smallest footprint in this list and every feature in one AGPL-3.0 repository with no paid edition.</p>
+
+        <h2 id="frequently-asked">Frequently asked</h2>
+        <h3>What is the easiest self-hosted wiki to run with Docker?</h3>
+        <p>Measured by moving parts, a wiki with an embedded database is the simplest. Turtle runs as one container with SQLite. Wiki.js also supports SQLite, though its docs recommend PostgreSQL for high availability.</p>
+        <h3>Do I need PostgreSQL for a self-hosted knowledge base?</h3>
+        <p>Not always. Docmost and Outline require PostgreSQL and Redis. BookStack needs MySQL or MariaDB. Turtle stores everything in SQLite inside its data directory.</p>
+        <h3>Can I use single sign-on with a self-hosted wiki?</h3>
+        <p>Yes, with most of them. BookStack and Wiki.js support SAML 2.0 and OIDC in their open source editions. Outline relies on SSO providers or email magic links. Docmost lists SSO in its paid Business plan. Turtle has no OIDC or SSO yet. It is planned for version 0.5.</p>
+        <h3>How do I back up a Turtle wiki?</h3>
+        <p>Stop Turtle, copy the data directory, and start it again. The data directory holds the SQLite database and all attachments.</p>
+        <h3>Can AI assistants use a self-hosted Turtle wiki?</h3>
+        <p>Yes. Turtle has a built-in MCP server at your address plus <code>/mcp</code>. Claude and other MCP clients connect by OAuth and never get more access than the member who connected them. Admins can switch AI connections off for the whole workspace.</p>
+        <h3>Can I move from Confluence to a self-hosted wiki?</h3>
+        <p>Yes. Turtle imports spaces from Confluence Data Center and Confluence Cloud, and you can try it in the demo. It reads the CSV or XML export with attachments: the page tree, attachments, page links, labels and mentions come across, some macros only approximately, and every import leaves an Import report and can be undone. See our <a href="/guides/migrate-from-confluence">Confluence migration guide</a>.</p>
+
+        <h2 id="keep-reading">Keep reading</h2>
+        <ul class="cards">
+          <li><a class="card" href="/guides"><strong>All guides</strong><span>Lists every guide on moving to and running an open source wiki.</span></a></li>
+          <li><a class="card" href="/guides/open-source-confluence-alternatives"><strong>Open source Confluence alternatives</strong><span>Compares open source wikis that can replace Confluence.</span></a></li>
+          <li><a class="card" href="/guides/confluence-data-center-end-of-life"><strong>Confluence Data Center end of life</strong><span>Explains what the Data Center end of life means for your team.</span></a></li>
+          <li><a class="card" href="/guides/migrate-from-confluence"><strong>Migrate from Confluence</strong><span>Shows how to move a Confluence space into Turtle.</span></a></li>
+          <li><a class="card" href="/guides/wiki-for-ai-agents-mcp"><strong>A wiki for AI agents with MCP</strong><span>Explains how AI agents read and write a wiki over MCP.</span></a></li>
+          <li><a class="card" href="/docmost-alternative"><strong>Turtle vs Docmost</strong><span>Compares Turtle and Docmost feature by feature.</span></a></li>
+          <li><a class="card" href="/outline-alternative"><strong>Turtle vs Outline</strong><span>Compares Turtle and Outline feature by feature.</span></a></li>
+          <li><a class="card" href="/bookstack-alternative"><strong>Turtle vs BookStack</strong><span>Compares Turtle and BookStack feature by feature.</span></a></li>
+          <li><a class="card" href="/alternatives"><strong>All alternatives</strong><span>Lists every comparison of Turtle with another wiki.</span></a></li>
+        </ul>
+      </div>
+
+      <section class="col sources" aria-labelledby="sources-title">
+        <h2 id="sources-title">Sources</h2>
+        <ol>
+          <li><a href="https://github.com/turtle-wiki/turtle">Turtle: README and ROADMAP, GitHub</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docmost.com/docs/installation">Docmost installation</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docmost.com/docs/user-guide/authentication">Docmost authentication</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docmost.com/docs/editions">Docmost editions</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docmost.com/pricing">Docmost pricing (SSO and MFA in Business plan)</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/docmost/docmost">Docmost repository and licence, GitHub</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/docker-7pfeLP5a8t">Outline Docker hosting</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/authentication-7ViKRmRY5o">Outline authentication</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/email-magic-link-N2CPh5tmTS">Outline email magic link</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/google-hOuvtCmTqQ">Outline Google (Workspace only)</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/slack-sgMujR8J9J">Outline Slack</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/oidc-8CPBm6uC0I">Outline OIDC</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/outline/outline/blob/main/LICENSE">Outline licence (BSL 1.1), GitHub</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.bookstackapp.com/docs/admin/installation/">BookStack installation</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.bookstackapp.com/docs/admin/third-party-auth/">BookStack third-party authentication</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/BookStackApp/BookStack">BookStack repository and licence, GitHub</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.requarks.io/install/docker">Wiki.js Docker install</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.requarks.io/auth">Wiki.js authentication modules</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/requarks/wiki">Wiki.js repository and licence, GitHub</a>. Checked 27 Nov 2026.</li>
+        </ol>
+      </section>
+    </article>
+
+    <section class="author-cta" aria-labelledby="author-title">
+      <div class="inner">
+        <img src="/assets/jeremie-constant.webp" alt="Jérémie Constant" width="200" height="200" loading="lazy" decoding="async">
+        <div>
+          <h2 id="author-title">See Turtle for yourself</h2>
+          <p>I'm Jérémie Constant. I build Turtle at novalutions in Cologne. Open the demo and write a Page, no sign-up needed. If you have a question about Turtle, or about moving your team's docs, email me and I'll answer.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+              Try the demo
+              <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a class="brand" href="/" aria-label="Turtle Wiki home">
+            <img src="/assets/logo-light.svg" alt="" width="26" height="26">
+            Turtle Wiki
+          </a>
+          <p>An open source wiki your team and its AI agents write together. Self-hosted, AGPL-3.0.</p>
+          <div class="foot-maker">
+            <img src="/assets/jeremie-constant-128.webp" alt="" width="44" height="44" loading="lazy">
+            <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions, Cologne</span>
+          </div>
+        </div>
+        <nav class="foot-col" aria-labelledby="foot-product">
+          <h2 id="foot-product">Product</h2>
+          <ul>
+            <li><a href="https://demo.turtle-wiki.app">Try the demo</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle">GitHub</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle/releases">Releases</a></li>
+            <li><a href="/#waitlist">Hosted waitlist</a></li>
+            <li><a href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-alternatives">
+          <h2 id="foot-alternatives">Alternatives</h2>
+          <ul>
+            <li><a href="/confluence-alternative">Confluence alternative</a></li>
+            <li><a href="/notion-alternative">Notion alternative</a></li>
+            <li><a href="/docmost-alternative">Docmost alternative</a></li>
+            <li><a href="/outline-alternative">Outline alternative</a></li>
+            <li><a href="/bookstack-alternative">BookStack alternative</a></li>
+            <li><a href="/alternatives">All comparisons</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-guides">
+          <h2 id="foot-guides">Guides</h2>
+          <ul>
+            <li><a href="/guides/open-source-confluence-alternatives">Open source Confluence alternatives</a></li>
+            <li><a href="/guides/confluence-data-center-end-of-life">Confluence Data Center end of life</a></li>
+            <li><a href="/guides/migrate-from-confluence">Migrate from Confluence</a></li>
+            <li><a href="/guides/self-hosted-wiki-docker">Self-hosted wiki with Docker</a></li>
+            <li><a href="/guides/wiki-for-ai-agents-mcp">A wiki for AI agents over MCP</a></li>
+            <li><a href="/guides">All guides</a></li>
+          </ul>
+        </nav>
+      </div>
+      <div class="foot-base">
+        <span>© 2026 novalutions · Turtle Wiki is AGPL-3.0</span>
+        <nav aria-label="Legal">
+          <a href="https://www.novalutions.de/impressum/">Imprint</a>
+          <a href="https://www.novalutions.de/datenschutzerklaerung/">Privacy</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+  <!-- Cloudflare Web Analytics: cookieless visitor counts, no consent banner needed. -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "2c584fa51fa047a0a690b9d0e703e6e6"}'></script>
+</body>
+</html>

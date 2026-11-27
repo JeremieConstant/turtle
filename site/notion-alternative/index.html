@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Source Notion Alternative for Team Wikis | Turtle</title>
+  <meta name="description" content="Turtle is an open source, self-hosted wiki for teams and AI agents. See how it compares to Notion on hosting, licence, AI access and price.">
+  <link rel="canonical" href="https://turtle-wiki.app/notion-alternative">
+  <meta name="theme-color" content="#fafaf8">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://turtle-wiki.app/notion-alternative">
+  <meta property="og:title" content="Open Source Notion Alternative for Team Wikis | Turtle">
+  <meta property="og:description" content="Turtle is an open source, self-hosted wiki for teams and AI agents. See how it compares to Notion on hosting, licence, AI access and price.">
+  <meta property="og:image" content="https://turtle-wiki.app/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Article",
+        "headline": "An open source Notion alternative for your team wiki",
+        "description": "Turtle is an open source, self-hosted wiki for teams and AI agents. See how it compares to Notion on hosting, licence, AI access and price.",
+        "url": "https://turtle-wiki.app/notion-alternative",
+        "datePublished": "2026-11-27",
+        "dateModified": "2026-11-27",
+        "image": "https://turtle-wiki.app/og.jpg",
+        "author": {
+          "@type": "Person",
+          "name": "Jérémie Constant",
+          "image": "https://turtle-wiki.app/assets/jeremie-constant.webp",
+          "worksFor": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+        },
+        "publisher": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Turtle Wiki", "item": "https://turtle-wiki.app/" },
+          { "@type": "ListItem", "position": 2, "name": "Alternatives", "item": "https://turtle-wiki.app/alternatives" },
+          { "@type": "ListItem", "position": 3, "name": "Turtle vs Notion", "item": "https://turtle-wiki.app/notion-alternative" }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script defer src="/assets/site.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to the content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Turtle Wiki home">
+        <img src="/favicon.svg" alt="" width="26" height="26">
+        Turtle Wiki
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="/alternatives" aria-current="page">Alternatives</a>
+        <a href="/guides">Guides</a>
+        <a href="https://github.com/turtle-wiki/turtle">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://demo.turtle-wiki.app">Try the demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="article">
+    <article>
+      <div class="col" data-enter>
+        <ol class="crumbs" aria-label="Breadcrumb">
+          <li><a href="/">Home</a></li>
+          <li><a href="/alternatives">Alternatives</a></li>
+        </ol>
+        <h1>An open source Notion alternative for your team wiki</h1>
+        <p class="lede">Notion is a polished all-in-one workspace with databases, templates and many integrations. Turtle does less on purpose. It is a self-hosted Markdown wiki where people and AI agents write docs together.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+            Try the demo
+            <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Ask Jérémie by email</a>
+        </div>
+        <div class="byline">
+          <img src="/assets/jeremie-constant-128.webp" alt="Jérémie Constant" width="44" height="44">
+          <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions. Updated 27 November 2026.</span>
+        </div>
+      </div>
+
+      <div class="col prose">
+        <h2 id="short-answer">Short answer: is Turtle a good Notion alternative?</h2>
+        <p>Yes, if you use Notion mainly as a team wiki and want to host it yourself under an open source licence.</p>
+        <p>No, if your team relies on databases, boards, templates, comments or guests. Turtle has none of these today and will never have databases. It is a focused wiki, not a workspace suite.</p>
+
+        <h2 id="at-a-glance">At a glance</h2>
+        <dl class="facts">
+          <div><dt>Licence</dt><dd>Turtle is AGPL-3.0 with no paid edition. Notion is proprietary.</dd></div>
+          <div><dt>Hosting</dt><dd>Turtle runs on your server with Docker or a single binary. Notion runs in Notion's cloud.</dd></div>
+          <div><dt>AI access</dt><dd>Both offer MCP with OAuth. Turtle's server runs in your instance.</dd></div>
+          <div><dt>Pricing</dt><dd>Turtle is free to self-host. Notion lists Plus at $10 and Business at $20 per seat per month.</dd></div>
+        </dl>
+
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col">Feature</th><th scope="col">Turtle</th><th scope="col">Notion</th></tr></thead>
+            <tbody>
+              <tr><td>Licence</td><td>AGPL-3.0</td><td>Proprietary</td></tr>
+              <tr><td>Hosting</td><td>Self-hosted (Docker or binary)</td><td>Notion cloud; no self-hosted edition listed</td></tr>
+              <tr><td>Data location</td><td>Your server: SQLite plus a data directory</td><td>US by default; EU, Japan, Korea regions on Enterprise</td></tr>
+              <tr><td>Price</td><td>Free to self-host; hosted version announced, no price yet</td><td>Free, Plus $10, Business $20 per seat/month, Enterprise custom</td></tr>
+              <tr><td>Content model</td><td>Markdown pages in a tree</td><td>Blocks, pages and databases</td></tr>
+              <tr><td>Databases and templates</td><td>No (databases never, templates planned for 0.6)</td><td>Yes</td></tr>
+              <tr><td>Comments and guests</td><td>Not yet (planned for 0.6 and 0.4)</td><td>Yes</td></tr>
+              <tr><td>SSO</td><td>Not yet (OIDC planned for 0.5)</td><td>SAML SSO and SCIM on Enterprise</td></tr>
+              <tr><td>AI agents</td><td>Built-in MCP server, OAuth, scoped to the member's rights</td><td>Hosted Notion MCP, OAuth, Notion AI from Business</td></tr>
+              <tr><td>Export</td><td>Area or subtree as Markdown ZIP or PDF</td><td>Workspace as HTML or Markdown and CSV; PDF per page</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="table-note">Notion details checked 27 November 2026 on <a href="https://www.notion.com/pricing">notion.com/pricing</a>, <a href="https://www.notion.com/help/data-residency">data residency</a>, <a href="https://www.notion.com/help/export-your-content">export</a> and <a href="https://developers.notion.com/docs/mcp">Notion MCP</a>. Prices in USD as shown for the US.</p>
+
+        <h2 id="why-teams-choose-turtle">Why teams choose Turtle</h2>
+        <figure class="shot">
+          <img src="/assets/screenshots/02-page-editor-deploying-to-production.webp" alt="Turtle page editor with page tree, toolbar and tags" width="1450" height="840" decoding="async">
+        </figure>
+
+        <h3 id="your-wiki-runs-where-your-data-should-live">Your wiki runs where your data should live</h3>
+        <p>Turtle is one binary that stores data in SQLite plus a data directory. There is no database server and no external service.</p>
+        <p>You start it with <code>docker compose up -d</code>. For a backup, you stop Turtle and copy the data directory.</p>
+
+        <h3 id="open-source-without-a-paid-tier">Open source without a paid tier</h3>
+        <p>Turtle is AGPL-3.0 with no paid edition and no CLA. Every feature is in the repository, so you can audit and change the code.</p>
+
+        <h3 id="ai-agents-that-follow-your-permissions">AI agents that follow your permissions</h3>
+        <figure class="shot">
+          <img src="/assets/screenshots/03-connect-ai-mcp-address.webp" alt="Turtle Connect AI dialog with the MCP address and setup steps for Claude" width="1450" height="840" loading="lazy" decoding="async">
+        </figure>
+        <p>Turtle has an MCP server at <code>&lt;your-address&gt;/mcp</code>. Claude and other MCP clients connect with OAuth. An agent never gets more access than the member who connected it, and its edits show up under that member's name, for example "Demo Member via Claude".</p>
+        <p>You can limit access to read-only or single areas, and admins can switch AI off workspace-wide.</p>
+
+        <h2 id="moving-from-notion-to-turtle">Moving from Notion to Turtle</h2>
+        <p>Notion exports pages as Markdown, and Turtle imports Markdown. That covers wiki pages. Databases export as CSV, and Turtle has no place for them. Test a few pages in the demo before you move everything.</p>
+        <figure class="shot narrow">
+          <img src="/assets/screenshots/06-area-menu-export-pdf-markdown-import.webp" alt="Turtle area menu with PDF and Markdown export and Markdown import" width="870" height="504" loading="lazy" decoding="async">
+        </figure>
+
+        <h3 id="when-notion-is-the-better-choice">When Notion is the better choice</h3>
+        <p>Stay with Notion if you need databases, boards, timelines or the template gallery. Turtle will not add databases, because it only stores content that can be expressed as Markdown.</p>
+        <p>Notion also has comments, guests and public sharing, which Turtle plans for later releases. It has a polished interface, many integrations, and SAML SSO and audit logs on Enterprise.</p>
+        <p>Turtle is early. Until 1.0, data format and API can change between releases. If you want a mature managed service, Notion is the safer pick today.</p>
+
+        <h2 id="turtle-vs-notion-answered">Turtle vs Notion, answered</h2>
+
+        <h3 id="is-turtle-a-free-notion-alternative">Is Turtle a free Notion alternative?</h3>
+        <p>Self-hosting Turtle is free, with no feature limits. You pay for your server. A hosted version is announced, with no price or date yet.</p>
+
+        <h3 id="can-i-self-host-notion">Can I self-host Notion?</h3>
+        <p>Notion does not list a self-hosted edition. Its Enterprise plan lets you pick a data region, such as Frankfurt for the EU.</p>
+
+        <h3 id="does-turtle-have-notion-style-databases">Does Turtle have Notion-style databases?</h3>
+        <p>No. Turtle supports headings, lists, checklists, tables, code, images and attachments. Databases are out of scope by design.</p>
+
+        <h3 id="can-ai-agents-write-in-turtle-like-in-notion">Can AI agents write in Turtle like in Notion?</h3>
+        <p>Yes. Both offer MCP with OAuth and respect the connecting user's permissions. In Turtle, the server runs inside your own instance.</p>
+
+        <h2 id="other-comparisons">Other comparisons</h2>
+        <ul class="cards">
+          <li><a class="card" href="/alternatives"><strong>All alternatives</strong><span>Every Turtle comparison in one place.</span></a></li>
+          <li><a class="card" href="/confluence-alternative"><strong>Turtle vs Confluence</strong><span>How Turtle compares to Confluence on hosting, licence and price.</span></a></li>
+          <li><a class="card" href="/docmost-alternative"><strong>Turtle vs Docmost</strong><span>How Turtle compares to the open source wiki Docmost.</span></a></li>
+          <li><a class="card" href="/outline-alternative"><strong>Turtle vs Outline</strong><span>How Turtle compares to the team wiki Outline.</span></a></li>
+          <li><a class="card" href="/bookstack-alternative"><strong>Turtle vs BookStack</strong><span>How Turtle compares to the self-hosted wiki BookStack.</span></a></li>
+          <li><a class="card" href="/guides/wiki-for-ai-agents-mcp"><strong>Wiki for AI agents with MCP</strong><span>How AI agents read and write a wiki over MCP.</span></a></li>
+        </ul>
+      </div>
+
+      <section class="col sources" aria-labelledby="sources-title">
+        <h2 id="sources-title">Sources</h2>
+        <ol>
+          <li><a href="https://www.notion.com/pricing">Notion pricing: plans, per-seat prices, AI credits, SAML SSO, SCIM, audit log, guests, export</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.notion.com/help/data-residency">Notion data residency: regions, AWS, Enterprise only</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.notion.com/help/export-your-content">Notion export formats: PDF, HTML, Markdown and CSV, workspace export</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://developers.notion.com/docs/mcp">Notion MCP: hosted server, OAuth, permissions</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/turtle-wiki/turtle">Turtle on GitHub: README and roadmap</a>. Checked 27 Nov 2026.</li>
+        </ol>
+      </section>
+    </article>
+
+    <section class="author-cta" aria-labelledby="author-title">
+      <div class="inner">
+        <img src="/assets/jeremie-constant.webp" alt="Jérémie Constant" width="200" height="200" loading="lazy" decoding="async">
+        <div>
+          <h2 id="author-title">See Turtle for yourself</h2>
+          <p>I'm Jérémie Constant. I build Turtle at novalutions in Cologne. Open the demo and write a Page, no sign-up needed. If you have a question about Turtle, or about moving your team's docs, email me and I'll answer.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+              Try the demo
+              <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a class="brand" href="/" aria-label="Turtle Wiki home">
+            <img src="/assets/logo-light.svg" alt="" width="26" height="26">
+            Turtle Wiki
+          </a>
+          <p>An open source wiki your team and its AI agents write together. Self-hosted, AGPL-3.0.</p>
+          <div class="foot-maker">
+            <img src="/assets/jeremie-constant-128.webp" alt="" width="44" height="44" loading="lazy">
+            <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions, Cologne</span>
+          </div>
+        </div>
+        <nav class="foot-col" aria-labelledby="foot-product">
+          <h2 id="foot-product">Product</h2>
+          <ul>
+            <li><a href="https://demo.turtle-wiki.app">Try the demo</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle">GitHub</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle/releases">Releases</a></li>
+            <li><a href="/#waitlist">Hosted waitlist</a></li>
+            <li><a href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-alternatives">
+          <h2 id="foot-alternatives">Alternatives</h2>
+          <ul>
+            <li><a href="/confluence-alternative">Confluence alternative</a></li>
+            <li><a href="/notion-alternative">Notion alternative</a></li>
+            <li><a href="/docmost-alternative">Docmost alternative</a></li>
+            <li><a href="/outline-alternative">Outline alternative</a></li>
+            <li><a href="/bookstack-alternative">BookStack alternative</a></li>
+            <li><a href="/alternatives">All comparisons</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-guides">
+          <h2 id="foot-guides">Guides</h2>
+          <ul>
+            <li><a href="/guides/open-source-confluence-alternatives">Open source Confluence alternatives</a></li>
+            <li><a href="/guides/confluence-data-center-end-of-life">Confluence Data Center end of life</a></li>
+            <li><a href="/guides/migrate-from-confluence">Migrate from Confluence</a></li>
+            <li><a href="/guides/self-hosted-wiki-docker">Self-hosted wiki with Docker</a></li>
+            <li><a href="/guides/wiki-for-ai-agents-mcp">A wiki for AI agents over MCP</a></li>
+            <li><a href="/guides">All guides</a></li>
+          </ul>
+        </nav>
+      </div>
+      <div class="foot-base">
+        <span>© 2026 novalutions · Turtle Wiki is AGPL-3.0</span>
+        <nav aria-label="Legal">
+          <a href="https://www.novalutions.de/impressum/">Imprint</a>
+          <a href="https://www.novalutions.de/datenschutzerklaerung/">Privacy</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+  <!-- Cloudflare Web Analytics: cookieless visitor counts, no consent banner needed. -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "2c584fa51fa047a0a690b9d0e703e6e6"}'></script>
+</body>
+</html>
