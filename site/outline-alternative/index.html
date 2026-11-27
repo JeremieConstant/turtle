@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Outline Alternative: Turtle, the AGPL Open-Source Wiki</title>
+  <meta name="description" content="Looking for an Outline alternative? Turtle is an AGPL wiki with email and password sign-in, one binary and SQLite. See where Outline is still ahead.">
+  <link rel="canonical" href="https://turtle-wiki.app/outline-alternative">
+  <meta name="theme-color" content="#fafaf8">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://turtle-wiki.app/outline-alternative">
+  <meta property="og:title" content="Outline Alternative: Turtle, the AGPL Open-Source Wiki">
+  <meta property="og:description" content="Looking for an Outline alternative? Turtle is an AGPL wiki with email and password sign-in, one binary and SQLite. See where Outline is still ahead.">
+  <meta property="og:image" content="https://turtle-wiki.app/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Article",
+        "headline": "An open-source Outline alternative you can run as one binary",
+        "description": "Looking for an Outline alternative? Turtle is an AGPL wiki with email and password sign-in, one binary and SQLite. See where Outline is still ahead.",
+        "url": "https://turtle-wiki.app/outline-alternative",
+        "datePublished": "2026-11-27",
+        "dateModified": "2026-11-27",
+        "image": "https://turtle-wiki.app/og.jpg",
+        "author": {
+          "@type": "Person",
+          "name": "Jérémie Constant",
+          "image": "https://turtle-wiki.app/assets/jeremie-constant.webp",
+          "worksFor": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+        },
+        "publisher": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Turtle Wiki", "item": "https://turtle-wiki.app/" },
+          { "@type": "ListItem", "position": 2, "name": "Alternatives", "item": "https://turtle-wiki.app/alternatives" },
+          { "@type": "ListItem", "position": 3, "name": "Turtle vs Outline", "item": "https://turtle-wiki.app/outline-alternative" }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script defer src="/assets/site.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to the content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Turtle Wiki home">
+        <img src="/favicon.svg" alt="" width="26" height="26">
+        Turtle Wiki
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="/alternatives" aria-current="page">Alternatives</a>
+        <a href="/guides">Guides</a>
+        <a href="https://github.com/turtle-wiki/turtle">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://demo.turtle-wiki.app">Try the demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="article">
+    <article>
+      <div class="col" data-enter>
+        <ol class="crumbs" aria-label="Breadcrumb">
+          <li><a href="/">Home</a></li>
+          <li><a href="/alternatives">Alternatives</a></li>
+        </ol>
+        <h1>An open-source Outline alternative you can run as one binary</h1>
+        <p class="lede">Outline is a fast, polished team wiki. Turtle is younger and does less. It is AGPL licensed, uses email and password sign-in and runs as one binary with SQLite.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+            Try the demo
+            <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Ask Jérémie by email</a>
+        </div>
+        <div class="byline">
+          <img src="/assets/jeremie-constant-128.webp" alt="Jérémie Constant" width="44" height="44">
+          <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions. Updated 27 November 2026.</span>
+        </div>
+      </div>
+
+      <div class="col prose">
+        <h2 id="short-answer">Short answer: is Turtle a good Outline alternative?</h2>
+        <p>Yes, if you want an open-source licence and a wiki you can host without PostgreSQL, Redis or an identity provider.</p>
+        <p>No, if you need comments, groups, guests or SSO today. Outline has them. Turtle is early, and its data format and API can change before 1.0.</p>
+
+        <h2 id="at-a-glance">At a glance</h2>
+        <dl class="facts">
+          <div><dt>Licence</dt><dd>Turtle is AGPL-3.0 with no paid edition. Outline is BSL 1.1, which is source-available, not open source.</dd></div>
+          <div><dt>Hosting</dt><dd>Turtle is one binary with SQLite. Outline needs PostgreSQL and Redis.</dd></div>
+          <div><dt>AI access</dt><dd>Both ship an MCP server at <code>/mcp</code> with OAuth.</dd></div>
+          <div><dt>Pricing</dt><dd>Turtle is free to self-host, a hosted version is on a waitlist. Outline Cloud starts at $3 per user per month.</dd></div>
+        </dl>
+
+        <h2 id="compared">Turtle vs Outline compared</h2>
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col">Feature</th><th scope="col">Turtle</th><th scope="col">Outline</th></tr></thead>
+            <tbody>
+              <tr><td>Licence</td><td>AGPL-3.0, no CLA</td><td>BSL 1.1, converts to Apache 2.0 after a change date</td></tr>
+              <tr><td>Editions</td><td>One, all features</td><td>Community, Business, Enterprise</td></tr>
+              <tr><td>Self-hosting stack</td><td>One binary, SQLite, data directory</td><td>Outline app, PostgreSQL, Redis, local disk or S3</td></tr>
+              <tr><td>Sign-in</td><td>Email and password</td><td>Identity provider, passkey or emailed link, no passwords</td></tr>
+              <tr><td>Hosted plans</td><td>Announced, waitlist, no price yet</td><td>$3 or $4 per user per month</td></tr>
+              <tr><td>MCP server</td><td>Built in, OAuth, member-scoped</td><td>Built in, OAuth or API key</td></tr>
+              <tr><td>AI answers</td><td>No</td><td>Business plans</td></tr>
+              <tr><td>Comments</td><td>Planned (0.6)</td><td>Yes</td></tr>
+              <tr><td>Groups, guests, page permissions</td><td>Planned (0.4 and 0.5)</td><td>Groups in all editions, guests on paid editions</td></tr>
+              <tr><td>Confluence import</td><td>Data Center and Cloud spaces</td><td>HTML export, paid editions and Cloud</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="table-note">Checked 27 November 2026 against <a href="https://www.getoutline.com/pricing">Outline pricing</a>, the <a href="https://github.com/outline/outline/blob/main/LICENSE">Outline licence</a> and the <a href="https://docs.getoutline.com">Outline docs</a>. Full list below.</p>
+
+        <h2 id="why-teams-choose-turtle">Why teams choose Turtle</h2>
+        <h3>A licence without conditions on use</h3>
+        <p>Outline's BSL allows production use but excludes offering it as a commercial document service. Turtle's AGPL-3.0 has no such clause, no paid edition and no contributor licence agreement.</p>
+        <h3>Sign in with email and password</h3>
+        <p>Outline does not store passwords. Sign-in goes through an identity provider, a passkey or an emailed link that needs SMTP. In Turtle, members sign in with email and password. No Google, Microsoft or OIDC server required.</p>
+        <h3>One binary instead of a stack</h3>
+        <p>Self-hosted Outline needs PostgreSQL and Redis, with storage on disk or S3. Turtle keeps everything in SQLite plus a data directory. Start it with <code>docker compose up -d</code>. To back up, stop Turtle and copy the data directory.</p>
+        <figure class="shot">
+          <img src="/assets/screenshots/02-page-editor-deploying-to-production.webp" alt="Turtle page editor with page tree, toolbar and tags" width="1450" height="840" decoding="async">
+        </figure>
+        <p>Both tools offer MCP. In Turtle, an agent never has more access than the member who connected it, and edits appear as, for example, "Demo Member via Claude". You can limit a connection to reading or single areas.</p>
+        <figure class="shot">
+          <img src="/assets/screenshots/03-connect-ai-mcp-address.webp" alt="Connect AI dialog in Turtle showing the MCP address and setup steps for Claude" width="1450" height="840" loading="lazy" decoding="async">
+        </figure>
+
+        <h2 id="moving-from-outline">Moving from Outline to Turtle</h2>
+        <p>Outline exports collections as Markdown, and Turtle imports Markdown into an area. Check links, images and nesting afterwards.</p>
+        <figure class="shot narrow">
+          <img src="/assets/screenshots/06-area-menu-export-pdf-markdown-import.webp" alt="Turtle area menu with PDF and Markdown export and Markdown import" width="870" height="504" loading="lazy" decoding="async">
+        </figure>
+        <h3>When Outline is the better choice</h3>
+        <p>Pick Outline if your team relies on comments, groups, guests or SAML. It is mature, available in 17 languages and has more than 20 integrations. Its Business plan adds AI question answering and an audit log. If you want a hosted wiki today, Outline Cloud is ready and Turtle's is not.</p>
+
+        <h2 id="answered">Turtle vs Outline, answered</h2>
+        <h3>Is Outline open source?</h3>
+        <p>No. It uses the Business Source License 1.1, and each release becomes Apache 2.0 after its change date.</p>
+        <h3>Can I self-host Outline without SSO?</h3>
+        <p>Outline offers emailed sign-in links with SMTP, and passkeys, but no passwords.</p>
+        <h3>Does Turtle have comments like Outline?</h3>
+        <p>Not yet. Comments, backlinks and templates are planned for version 0.6.</p>
+        <h3>Can AI agents edit both wikis?</h3>
+        <p>Yes, both include an MCP server with OAuth. Turtle admins can switch AI connections off workspace-wide.</p>
+
+        <h2 id="other-comparisons">Other comparisons</h2>
+        <ul class="cards">
+          <li><a class="card" href="/alternatives"><strong>All Turtle alternatives</strong><span>Every comparison of Turtle with another wiki, in one place.</span></a></li>
+          <li><a class="card" href="/confluence-alternative"><strong>Turtle vs Confluence</strong><span>How Turtle compares with Atlassian Confluence.</span></a></li>
+          <li><a class="card" href="/notion-alternative"><strong>Turtle vs Notion</strong><span>How Turtle compares with Notion.</span></a></li>
+          <li><a class="card" href="/docmost-alternative"><strong>Turtle vs Docmost</strong><span>How Turtle compares with the open source wiki Docmost.</span></a></li>
+          <li><a class="card" href="/bookstack-alternative"><strong>Turtle vs BookStack</strong><span>How Turtle compares with the open source wiki BookStack.</span></a></li>
+          <li><a class="card" href="/guides/self-hosted-wiki-docker"><strong>Self-hosted wiki with Docker</strong><span>How to run a wiki on your own server with Docker.</span></a></li>
+          <li><a class="card" href="/guides/wiki-for-ai-agents-mcp"><strong>A wiki for AI agents over MCP</strong><span>How AI agents read and write a wiki over MCP.</span></a></li>
+        </ul>
+      </div>
+
+      <section class="col sources" aria-labelledby="sources-title">
+        <h2 id="sources-title">Sources</h2>
+        <ol>
+          <li><a href="https://github.com/outline/outline/blob/main/LICENSE">Outline licence (BSL 1.1), Outline on GitHub</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/outline/outline">Outline repository README, Outline on GitHub</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.getoutline.com/pricing">Outline pricing, Outline</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/docker-7pfeLP5a8t">Docker hosting, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/file-storage-N4M0T6Ypu7">File storage, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/authentication-7ViKRmRY5o">Authentication hosting doc, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/guide/doc/authentication-Wr4sfjvmL1">Authentication guide, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/email-magic-link-N2CPh5tmTS">Email magic link, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/hosting/doc/smtp-cqCJyZGMIB">SMTP, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/guide/doc/mcp-6j9jtENNKL">MCP server, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/guide/doc/confluence-import-UGCiYLYgBd">Confluence import, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/guide/doc/import-D2ZvLqz411">Import formats, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docs.getoutline.com/s/guide/doc/export-Da6C7HqL8M">Export formats, Outline docs</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/outline/outline/discussions/6155">Self-hosting without SSO, Outline maintainer discussion</a>. Checked 27 Nov 2026.</li>
+        </ol>
+      </section>
+    </article>
+
+    <section class="author-cta" aria-labelledby="author-title">
+      <div class="inner">
+        <img src="/assets/jeremie-constant.webp" alt="Jérémie Constant" width="200" height="200" loading="lazy" decoding="async">
+        <div>
+          <h2 id="author-title">See Turtle for yourself</h2>
+          <p>I'm Jérémie Constant. I build Turtle at novalutions in Cologne. Open the demo and write a Page, no sign-up needed. If you have a question about Turtle, or about moving your team's docs, email me and I'll answer.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+              Try the demo
+              <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a class="brand" href="/" aria-label="Turtle Wiki home">
+            <img src="/assets/logo-light.svg" alt="" width="26" height="26">
+            Turtle Wiki
+          </a>
+          <p>An open source wiki your team and its AI agents write together. Self-hosted, AGPL-3.0.</p>
+          <div class="foot-maker">
+            <img src="/assets/jeremie-constant-128.webp" alt="" width="44" height="44" loading="lazy">
+            <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions, Cologne</span>
+          </div>
+        </div>
+        <nav class="foot-col" aria-labelledby="foot-product">
+          <h2 id="foot-product">Product</h2>
+          <ul>
+            <li><a href="https://demo.turtle-wiki.app">Try the demo</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle">GitHub</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle/releases">Releases</a></li>
+            <li><a href="/#waitlist">Hosted waitlist</a></li>
+            <li><a href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-alternatives">
+          <h2 id="foot-alternatives">Alternatives</h2>
+          <ul>
+            <li><a href="/confluence-alternative">Confluence alternative</a></li>
+            <li><a href="/notion-alternative">Notion alternative</a></li>
+            <li><a href="/docmost-alternative">Docmost alternative</a></li>
+            <li><a href="/outline-alternative">Outline alternative</a></li>
+            <li><a href="/bookstack-alternative">BookStack alternative</a></li>
+            <li><a href="/alternatives">All comparisons</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-guides">
+          <h2 id="foot-guides">Guides</h2>
+          <ul>
+            <li><a href="/guides/open-source-confluence-alternatives">Open source Confluence alternatives</a></li>
+            <li><a href="/guides/confluence-data-center-end-of-life">Confluence Data Center end of life</a></li>
+            <li><a href="/guides/migrate-from-confluence">Migrate from Confluence</a></li>
+            <li><a href="/guides/self-hosted-wiki-docker">Self-hosted wiki with Docker</a></li>
+            <li><a href="/guides/wiki-for-ai-agents-mcp">A wiki for AI agents over MCP</a></li>
+            <li><a href="/guides">All guides</a></li>
+          </ul>
+        </nav>
+      </div>
+      <div class="foot-base">
+        <span>© 2026 novalutions · Turtle Wiki is AGPL-3.0</span>
+        <nav aria-label="Legal">
+          <a href="https://www.novalutions.de/impressum/">Imprint</a>
+          <a href="https://www.novalutions.de/datenschutzerklaerung/">Privacy</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+  <!-- Cloudflare Web Analytics: cookieless visitor counts, no consent banner needed. -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "2c584fa51fa047a0a690b9d0e703e6e6"}'></script>
+</body>
+</html>

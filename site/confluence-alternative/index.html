@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Confluence Alternative: Turtle, Open Source and Self-Hosted</title>
+  <meta name="description" content="Turtle is an open source Confluence alternative you host yourself. AGPL-3.0, one binary, built-in MCP server for AI agents. See where Confluence still leads.">
+  <link rel="canonical" href="https://turtle-wiki.app/confluence-alternative">
+  <meta name="theme-color" content="#fafaf8">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://turtle-wiki.app/confluence-alternative">
+  <meta property="og:title" content="Confluence Alternative: Turtle, Open Source and Self-Hosted">
+  <meta property="og:description" content="Turtle is an open source Confluence alternative you host yourself. AGPL-3.0, one binary, built-in MCP server for AI agents. See where Confluence still leads.">
+  <meta property="og:image" content="https://turtle-wiki.app/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Article",
+        "headline": "A self-hosted Confluence alternative for teams and their AI agents",
+        "description": "Turtle is an open source Confluence alternative you host yourself. AGPL-3.0, one binary, built-in MCP server for AI agents. See where Confluence still leads.",
+        "url": "https://turtle-wiki.app/confluence-alternative",
+        "datePublished": "2026-11-27",
+        "dateModified": "2026-11-27",
+        "image": "https://turtle-wiki.app/og.jpg",
+        "author": {
+          "@type": "Person",
+          "name": "Jérémie Constant",
+          "image": "https://turtle-wiki.app/assets/jeremie-constant.webp",
+          "worksFor": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+        },
+        "publisher": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Turtle Wiki", "item": "https://turtle-wiki.app/" },
+          { "@type": "ListItem", "position": 2, "name": "Alternatives", "item": "https://turtle-wiki.app/alternatives" },
+          { "@type": "ListItem", "position": 3, "name": "Turtle vs Confluence", "item": "https://turtle-wiki.app/confluence-alternative" }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script defer src="/assets/site.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to the content</a>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Turtle Wiki home">
+        <img src="/favicon.svg" alt="" width="26" height="26">
+        Turtle Wiki
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="/alternatives" aria-current="page">Alternatives</a>
+        <a href="/guides">Guides</a>
+        <a href="https://github.com/turtle-wiki/turtle">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://demo.turtle-wiki.app">Try the demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="article">
+    <article>
+      <div class="col" data-enter>
+        <ol class="crumbs" aria-label="Breadcrumb">
+          <li><a href="/">Home</a></li>
+          <li><a href="/alternatives">Alternatives</a></li>
+        </ol>
+        <h1>A self-hosted Confluence alternative for teams and their AI agents</h1>
+        <p class="lede">Confluence is a mature wiki with deep permissions, inline comments and a large app marketplace. Turtle is younger: an open source wiki on your own server, where people and AI agents write docs together.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+            Try the demo
+            <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Ask Jérémie by email</a>
+        </div>
+        <div class="byline">
+          <img src="/assets/jeremie-constant-128.webp" alt="Jérémie Constant" width="44" height="44">
+          <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions. Updated 27 November 2026.</span>
+        </div>
+      </div>
+
+      <div class="col prose">
+        <h2 id="short-answer">Short answer: is Turtle a good Confluence alternative?</h2>
+        <p>Yes, if you want a wiki you fully control. Turtle is AGPL-3.0, runs as one binary with SQLite, and can import spaces from Confluence Data Center and Cloud.</p>
+        <p>It is not a good fit yet if you rely on page-level restrictions, comments, SSO or Marketplace apps. Turtle is in an early phase, and the data format and API may change before 1.0.</p>
+
+        <dl class="facts">
+          <div><dt>Licence</dt><dd>AGPL-3.0, no enterprise edition, no CLA</dd></div>
+          <div><dt>Hosting</dt><dd>Your server: Docker or a single binary</dd></div>
+          <div><dt>AI access</dt><dd>Built-in MCP server with OAuth</dd></div>
+          <div><dt>Pricing</dt><dd>Free. Hosted version announced, waitlist only</dd></div>
+        </dl>
+
+        <h2 id="at-a-glance">Turtle vs Confluence at a glance</h2>
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col">Feature</th><th scope="col">Turtle</th><th scope="col">Confluence</th></tr></thead>
+            <tbody>
+              <tr><td>Licence</td><td>Open source, AGPL-3.0</td><td>Proprietary</td></tr>
+              <tr><td>Hosting</td><td>Self-hosted. Hosted version announced</td><td>Atlassian Cloud. Data Center until 28 March 2029</td></tr>
+              <tr><td>Pricing</td><td>Free, all features in the repository</td><td>Per user per month in Cloud. Free plan up to 10 users</td></tr>
+              <tr><td>Permissions</td><td>Roles per workspace and area. Page permissions planned (0.4)</td><td>Global, space and content permissions on paid plans</td></tr>
+              <tr><td>SSO</td><td>Planned (OIDC, 0.5)</td><td>Atlassian Guard, included in Enterprise</td></tr>
+              <tr><td>Comments</td><td>Planned (0.6)</td><td>Page and inline comments</td></tr>
+              <tr><td>AI</td><td>Built-in MCP server. Bring your own client, such as Claude</td><td>Rovo included in paid Cloud plans, metered in credits</td></tr>
+              <tr><td>Extensions</td><td>No plugin marketplace. Content stays Markdown</td><td>Atlassian Marketplace apps and macros</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="table-note">Checked 27 November 2026 against Atlassian's pricing, plan and licensing pages. Links in the source list below.</p>
+
+        <figure class="shot">
+          <img src="/assets/screenshots/02-page-editor-deploying-to-production.webp" alt="Turtle page editor with page tree, toolbar and tags" width="1450" height="840" decoding="async">
+        </figure>
+
+        <h2 id="why-teams-choose-turtle">Why teams choose Turtle</h2>
+        <h3>You keep the wiki and the data</h3>
+        <p>Turtle is one binary. Data lives in SQLite plus an attachments folder, with no database server or external services. Backup means copying that folder.</p>
+        <p>You start it with <code>docker compose up -d</code> or a prebuilt binary for Linux or macOS.</p>
+
+        <h3>AI agents work under your rules</h3>
+        <p>Turtle has a built-in MCP server. Claude and other MCP clients connect through OAuth. An agent never gets more access than the member who connected it, and its edits appear as, for example, "Demo Member via Claude".</p>
+        <p>You can limit an agent to reading or to specific areas. Rovo, by contrast, needs a paid Confluence Cloud plan and counts usage in credits.</p>
+        <figure class="shot">
+          <img src="/assets/screenshots/03-connect-ai-mcp-address.webp" alt="Connect AI screen in Turtle with the MCP address and setup steps for Claude" width="1450" height="840" loading="lazy" decoding="async">
+        </figure>
+
+        <h3>Everything is Markdown</h3>
+        <p>Every page reads and writes as Markdown. Export an area as a Markdown ZIP with attachments, or as PDF. Editing is live, and versions can be restored.</p>
+
+        <h2 id="moving-from-confluence">Moving from Confluence</h2>
+        <p>Turtle imports spaces from Confluence Data Center and from Confluence Cloud. The importer is part of release 0.3, "Moving in", which is out, and you can try the import in the <a href="https://demo.turtle-wiki.app">demo</a>.</p>
+        <p>Pages and folders keep their tree, with attachments, links between pages, labels and mentions; some macros come across only approximately, and every import leaves an Import report and can be undone.</p>
+        <p>Timing matters on Data Center. Atlassian stopped selling it to new customers on 30 March 2026. Existing customers can buy or expand until 30 March 2028. On 28 March 2029 it reaches end of life and becomes read-only. Server support already ended on 15 February 2024. See the <a href="/guides/confluence-data-center-end-of-life">Confluence Data Center end-of-life guide</a> and the <a href="/guides/migrate-from-confluence">migration guide</a>.</p>
+
+        <h3>When Confluence is the better choice</h3>
+        <p>Confluence wins today on macros and Marketplace apps, which Turtle will not add because it only stores what Markdown can express. It also has page and inline comments (Turtle: planned for 0.6), page-level permissions (0.4) and SSO through Atlassian Guard (OIDC planned for 0.5).</p>
+        <p>Pick Confluence if you need these now, want a vendor-run cloud with an uptime SLA, or rely on Jira and Rovo.</p>
+
+        <h2 id="answered">Turtle vs Confluence, answered</h2>
+        <h3>Is Turtle really open source?</h3>
+        <p>Yes. Turtle is AGPL-3.0 with no paid edition and no CLA. All features are in the public repository.</p>
+        <h3>Can I still self-host Confluence?</h3>
+        <p>Only on Data Center, and only until 28 March 2029. New customers cannot buy it since 30 March 2026.</p>
+        <h3>Does Turtle have AI features like Rovo?</h3>
+        <p>Turtle ships no AI model of its own. Its built-in MCP server lets you connect the AI client you already use, with the connecting member's permissions.</p>
+        <h3>Is Turtle ready for production?</h3>
+        <p>Not fully. Until 1.0, the data format and API may change. A load test with 500 concurrent writers is documented in the repository. Stability commitments and an external security review are planned for 1.0.</p>
+
+        <h2 id="other-comparisons">Other comparisons</h2>
+        <ul class="cards">
+          <li><a class="card" href="/alternatives"><strong>All alternatives</strong><span>Every Turtle comparison in one list.</span></a></li>
+          <li><a class="card" href="/notion-alternative"><strong>Turtle vs Notion</strong><span>How Turtle compares with Notion for teams.</span></a></li>
+          <li><a class="card" href="/docmost-alternative"><strong>Turtle vs Docmost</strong><span>How Turtle compares with the Docmost wiki.</span></a></li>
+          <li><a class="card" href="/outline-alternative"><strong>Turtle vs Outline</strong><span>How Turtle compares with the Outline wiki.</span></a></li>
+          <li><a class="card" href="/bookstack-alternative"><strong>Turtle vs BookStack</strong><span>How Turtle compares with the BookStack wiki.</span></a></li>
+          <li><a class="card" href="/guides/open-source-confluence-alternatives"><strong>Open source Confluence alternatives</strong><span>Which open source wikis can replace Confluence.</span></a></li>
+        </ul>
+      </div>
+
+      <section class="col sources" aria-labelledby="sources-title">
+        <h2 id="sources-title">Sources</h2>
+        <ol>
+          <li><a href="https://www.atlassian.com/licensing/data-center-end-of-life">Data Center end of life, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.atlassian.com/blog/announcements/atlassian-ascend">Atlassian Ascend announcement, Atlassian blog</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.atlassian.com/licensing/server-end-of-support">Server end of support, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://support.atlassian.com/confluence-cloud/docs/learn-about-confluence-cloud-plans/">Confluence Cloud plans, Atlassian Support</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.atlassian.com/licensing/confluence">Confluence pricing and licensing, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.atlassian.com/software/confluence/pricing">Confluence pricing, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.atlassian.com/licensing/rovo">Rovo licensing, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://support.atlassian.com/rovo/docs/rovo-usage-limits/">How Rovo credits work, Atlassian Support</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://support.atlassian.com/confluence-cloud/docs/comment-on-pages-and-blog-posts/">Comment on pages and blog posts, Atlassian Support</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/turtle-wiki/turtle">Turtle repository, README and ROADMAP, GitHub</a>. Checked 27 Nov 2026.</li>
+        </ol>
+
+      </section>
+    </article>
+    <section class="author-cta" aria-labelledby="author-title">
+      <div class="inner">
+        <img src="/assets/jeremie-constant.webp" alt="Jérémie Constant" width="200" height="200" loading="lazy" decoding="async">
+        <div>
+          <h2 id="author-title">See Turtle for yourself</h2>
+          <p>I'm Jérémie Constant. I build Turtle at novalutions in Cologne. Open the demo and write a Page, no sign-up needed. If you have a question about Turtle, or about moving your team's docs, email me and I'll answer.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+              Try the demo
+              <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a class="brand" href="/" aria-label="Turtle Wiki home">
+            <img src="/assets/logo-light.svg" alt="" width="26" height="26">
+            Turtle Wiki
+          </a>
+          <p>An open source wiki your team and its AI agents write together. Self-hosted, AGPL-3.0.</p>
+          <div class="foot-maker">
+            <img src="/assets/jeremie-constant-128.webp" alt="" width="44" height="44" loading="lazy">
+            <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions, Cologne</span>
+          </div>
+        </div>
+        <nav class="foot-col" aria-labelledby="foot-product">
+          <h2 id="foot-product">Product</h2>
+          <ul>
+            <li><a href="https://demo.turtle-wiki.app">Try the demo</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle">GitHub</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle/releases">Releases</a></li>
+            <li><a href="/#waitlist">Hosted waitlist</a></li>
+            <li><a href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-alternatives">
+          <h2 id="foot-alternatives">Alternatives</h2>
+          <ul>
+            <li><a href="/confluence-alternative">Confluence alternative</a></li>
+            <li><a href="/notion-alternative">Notion alternative</a></li>
+            <li><a href="/docmost-alternative">Docmost alternative</a></li>
+            <li><a href="/outline-alternative">Outline alternative</a></li>
+            <li><a href="/bookstack-alternative">BookStack alternative</a></li>
+            <li><a href="/alternatives">All comparisons</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-guides">
+          <h2 id="foot-guides">Guides</h2>
+          <ul>
+            <li><a href="/guides/open-source-confluence-alternatives">Open source Confluence alternatives</a></li>
+            <li><a href="/guides/confluence-data-center-end-of-life">Confluence Data Center end of life</a></li>
+            <li><a href="/guides/migrate-from-confluence">Migrate from Confluence</a></li>
+            <li><a href="/guides/self-hosted-wiki-docker">Self-hosted wiki with Docker</a></li>
+            <li><a href="/guides/wiki-for-ai-agents-mcp">A wiki for AI agents over MCP</a></li>
+            <li><a href="/guides">All guides</a></li>
+          </ul>
+        </nav>
+      </div>
+      <div class="foot-base">
+        <span>© 2026 novalutions · Turtle Wiki is AGPL-3.0</span>
+        <nav aria-label="Legal">
+          <a href="https://www.novalutions.de/impressum/">Imprint</a>
+          <a href="https://www.novalutions.de/datenschutzerklaerung/">Privacy</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+  <!-- Cloudflare Web Analytics: cookieless visitor counts, no consent banner needed. -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "2c584fa51fa047a0a690b9d0e703e6e6"}'></script>
+</body>
+</html>

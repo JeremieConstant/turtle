@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to Migrate From Confluence to an Open-Source Wiki (2026)</title>
+  <meta name="description" content="Plan your move off Confluence: which export formats exist, what rarely survives the switch to Markdown, and a seven-step plan from pilot to cut-over.">
+  <link rel="canonical" href="https://turtle-wiki.app/guides/migrate-from-confluence">
+  <meta name="theme-color" content="#fafaf8">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://turtle-wiki.app/guides/migrate-from-confluence">
+  <meta property="og:title" content="How to Migrate From Confluence to an Open-Source Wiki (2026)">
+  <meta property="og:description" content="Plan your move off Confluence: which export formats exist, what rarely survives the switch to Markdown, and a seven-step plan from pilot to cut-over.">
+  <meta property="og:image" content="https://turtle-wiki.app/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Article",
+        "headline": "How do you migrate from Confluence to an open-source wiki?",
+        "description": "Plan your move off Confluence: which export formats exist, what rarely survives the switch to Markdown, and a seven-step plan from pilot to cut-over.",
+        "url": "https://turtle-wiki.app/guides/migrate-from-confluence",
+        "datePublished": "2026-11-27",
+        "dateModified": "2026-11-27",
+        "image": "https://turtle-wiki.app/og.jpg",
+        "author": {
+          "@type": "Person",
+          "name": "Jérémie Constant",
+          "image": "https://turtle-wiki.app/assets/jeremie-constant.webp",
+          "worksFor": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+        },
+        "publisher": { "@type": "Organization", "name": "novalutions", "url": "https://www.novalutions.de/" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Turtle Wiki", "item": "https://turtle-wiki.app/" },
+          { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://turtle-wiki.app/guides" },
+          { "@type": "ListItem", "position": 3, "name": "Migrate from Confluence", "item": "https://turtle-wiki.app/guides/migrate-from-confluence" }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script defer src="/assets/site.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to the content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Turtle Wiki home">
+        <img src="/favicon.svg" alt="" width="26" height="26">
+        Turtle Wiki
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="/alternatives">Alternatives</a>
+        <a href="/guides" aria-current="page">Guides</a>
+        <a href="https://github.com/turtle-wiki/turtle">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://demo.turtle-wiki.app">Try the demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="article">
+    <article>
+      <div class="col" data-enter>
+        <ol class="crumbs" aria-label="Breadcrumb">
+          <li><a href="/">Home</a></li>
+          <li><a href="/guides">Guides</a></li>
+        </ol>
+        <h1>How do you migrate from Confluence to an open-source wiki?</h1>
+        <p class="lede">Export each space, import it, and fix what did not convert: a seven-step plan from pilot to cut-over.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+            Try the demo
+            <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Ask Jérémie by email</a>
+        </div>
+        <div class="byline">
+          <img src="/assets/jeremie-constant-128.webp" alt="Jérémie Constant" width="44" height="44">
+          <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions. Updated 27 November 2026.</span>
+        </div>
+      </div>
+
+      <div class="col prose">
+        <h2 id="short-answer">Short answer</h2>
+        <p>We build Turtle Wiki, an open-source wiki that imports Confluence spaces. That makes us an interested party. This guide stays general where it can and says so where it is about Turtle.</p>
+        <p>To migrate from Confluence, you export each space, import it into the new wiki, and fix what did not convert. The export is the easy part. The work sits in cleanup, links, attachments and permissions.</p>
+        <p>Plan for a pilot space first. Keep Confluence read-only for a few weeks after cut-over. Expect macros, page restrictions and comments to need manual work in any Markdown-based wiki.</p>
+
+        <h2 id="at-a-glance">At a glance</h2>
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col">Phase</th><th scope="col">What to check</th></tr></thead>
+            <tbody>
+              <tr><td>1. Inventory</td><td>List of spaces, owners, page counts, attachment volume, last edit date</td></tr>
+              <tr><td>2. Archive dead content</td><td>Spaces and page trees nobody edited or read in a long time</td></tr>
+              <tr><td>3. Pilot one space</td><td>Formatting, tables, code blocks, images, page tree after import</td></tr>
+              <tr><td>4. Links and attachments</td><td>Internal links between pages and spaces, attachment files and sizes</td></tr>
+              <tr><td>5. Permissions</td><td>Which space permissions and page restrictions exist, how they map to Areas and roles</td></tr>
+              <tr><td>6. Cut-over</td><td>Final export date, communication to users, freeze on Confluence edits</td></tr>
+              <tr><td>7. Read-only period</td><td>Redirect or banner in Confluence, list of missing content reported by users</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="what-confluence-lets-you-export">What Confluence lets you export</h2>
+        <p>Both Confluence Cloud and Confluence Data Center can export a whole space. The formats and rules differ slightly.</p>
+        <p><strong>Confluence Cloud.</strong> Space admins can export a space as PDF, CSV, HTML or XML. CSV, HTML and XML come as a ZIP archive, PDF as a single file. HTML exports leave out page comments and blog posts. Single pages can be exported as Word or PDF.</p>
+        <p><strong>Confluence Data Center.</strong> You need the "Export Space" permission. A space can be exported as XML, HTML or PDF. The XML export is a full backup with pages, comments and attachments, but Atlassian only supports importing it into the same or a later Confluence version. HTML includes pages and attachments, with comments optional. PDF holds pages and images only.</p>
+        <p>In both editions, HTML and PDF exports contain only the pages you are allowed to view. Very large spaces can be slow to export or fail. Exporting smaller parts helps you find the page that causes the problem.</p>
+        <p><strong>Which format to use.</strong> For a move to another wiki, the target tool decides. Some importers read the HTML export, others the XML export. PDF is useful as a frozen archive copy, not as a migration source.</p>
+        <p>If you run Data Center, the date matters. Atlassian ends Data Center on 28 March 2029. After that, products become read-only and security fixes stop. New Data Center subscriptions for new customers already stopped on 30 March 2026.</p>
+
+        <h2 id="what-usually-does-not-survive">What usually does not survive a move to Markdown</h2>
+        <p>Confluence stores pages in its own rich format with macros. Markdown is plain text with a small set of elements. Any Confluence to Markdown conversion loses something. These are the general expectations for any Markdown-based wiki, not a test of a specific tool.</p>
+        <ul>
+          <li><strong>Macros.</strong> Jira issue lists, page properties reports, include-page macros, dynamic tables of contents and most Marketplace app macros have no Markdown equivalent. At best they turn into static text or a placeholder.</li>
+          <li><strong>Page restrictions.</strong> Restrictions on single pages often do not map to the target's permission model. Many wikis manage access per space or collection, not per page.</li>
+          <li><strong>Comments.</strong> Inline and page comments are often dropped, or arrive as static text without threads.</li>
+          <li><strong>Layouts and styling.</strong> Multi-column sections, panels, status lozenges, text colours and merged table cells usually flatten.</li>
+          <li><strong>Page history.</strong> Most imports bring the current version of each page. Older versions often stay behind.</li>
+          <li><strong>Users and mentions.</strong> User mentions point to Confluence accounts. They need a match in the new wiki or they become plain names.</li>
+        </ul>
+        <p>Count these items during the inventory. A space full of Jira macros needs a different plan than a space of plain how-to pages.</p>
+
+        <h2 id="seven-step-plan">A seven-step plan to migrate from Confluence</h2>
+        <h3>1. Inventory every space</h3>
+        <p>List each space with its owner, page count, attachment size and last edit. Note which spaces use heavy macros or page restrictions. A spreadsheet is enough.</p>
+        <h3>2. Archive dead content</h3>
+        <p>Many Confluence sites carry years of pages nobody opens. Do not migrate them. Export those spaces to PDF or HTML, store the files, and leave them out of the move.</p>
+        <h3>3. Pilot one space</h3>
+        <p>Pick a mid-sized space with an engaged owner. Import it and compare page by page. Check headings, tables, code blocks, images and the page tree. Write down every fix you make by hand. That list becomes your checklist for the other spaces.</p>
+        <h3>4. Check links and attachments</h3>
+        <p>Click through internal links, especially links across spaces. Those break first. Compare attachment counts between source and target. Large files and unusual file types are worth a spot check.</p>
+        <h3>5. Map permissions to Areas and roles</h3>
+        <p>List who can read and edit each space today. Then decide how that maps to the new wiki. In Turtle, a Confluence space maps naturally to an Area, and access is set with roles per Area, such as Read, Write or Admin. Turtle does not yet support permissions on single pages or folders. That is planned for version 0.4. If a space depends on page restrictions, split the restricted pages into their own Area for now.</p>
+        <figure class="shot">
+          <img src="/assets/screenshots/05-area-overview-start-here.webp" alt="Turtle Area overview showing the Area start page and the member's role" width="1450" height="840" loading="lazy" decoding="async">
+        </figure>
+        <h3>6. Cut over</h3>
+        <p>Set a date. Tell users which spaces move and when. Freeze edits in Confluence, run the final export and import, and do one last link check. Move one group of spaces at a time if your site is large.</p>
+        <h3>7. Keep Confluence read-only for a while</h3>
+        <p>Do not delete anything on day one. Set the old spaces to read-only and add a notice that points to the new wiki. Collect reports of missing pages for a few weeks. Then archive the final export and switch Confluence off.</p>
+
+        <h2 id="confluence-import-in-turtle">How the Confluence import works in Turtle</h2>
+        <p>Turtle imports spaces from Confluence Data Center and from Confluence Cloud, and you can try it in the demo. A space comes in as a tree of Pages and Folders in an Area, in the same order. What else comes across:</p>
+        <ul>
+          <li>Export format: export the space as CSV or XML, with its attachments. Confluence Cloud recommends CSV.</li>
+          <li>Macros: of the 54 kinds of Confluence content the import knows, 25 come across exactly, 25 approximately and 4 are left out. A macro it does not know becomes a placeholder naming the macro.</li>
+          <li>Attachments, page links, labels and mentions come across. Comments and earlier versions of pages stay in Confluence.</li>
+          <li>Page restrictions and space permissions are not imported. The Grants of the Area decide who may read and change the Pages.</li>
+        </ul>
+        <p>Every import leaves an Import report as a Page, listing what to check and what was left out. You can undo an import from the Area's Imports menu.</p>
+        <p>Some things are certain. Every page in Turtle can be read and written as Markdown. Links between pages stay intact when you rename or move a page. You can export an Area or a subtree as a ZIP of Markdown plus attachments, or as PDF, and import Markdown. So your content does not get locked in a second time.</p>
+        <figure class="shot narrow">
+          <img src="/assets/screenshots/06-area-menu-export-pdf-markdown-import.webp" alt="Turtle Area menu with export as PDF or Markdown and Markdown import" width="1450" height="840" loading="lazy" decoding="async">
+        </figure>
+        <p>Turtle is in an early phase. Until version 1.0, the data format and API may change between releases. Plan your pilot with that in mind.</p>
+
+        <h2 id="other-open-source-wikis">Other open-source wikis with a Confluence import</h2>
+        <p>You have more than one option. Here is the status as we found it on each project's own pages.</p>
+        <ul>
+          <li><strong>Docmost</strong> (AGPL-3.0 open-source edition plus an Enterprise edition). Docmost imports the Confluence HTML export as a ZIP. Its release notes for version 0.21.0 list Confluence import as an Enterprise Edition feature. See our <a href="/docmost-alternative">Docmost comparison</a>.</li>
+          <li><strong>XWiki</strong> (LGPL-2.1). XWiki imports Confluence XML exports through its Filter Streams Converter and Confluence XML module. Its documentation notes that macros need extra handling. A paid Confluence Migrator Pro adds migration of users, permissions and page history.</li>
+          <li><strong>BookStack</strong> (MIT). BookStack states that it has no automated Confluence migration yet. Its REST API can automate parts of a custom move. See our <a href="/bookstack-alternative">BookStack comparison</a>.</li>
+        </ul>
+
+        <h2 id="what-you-give-up">What you give up</h2>
+        <p>Moving to an open-source wiki means owning more of the stack. You install, update and back up the software yourself. In Turtle, backup means stopping Turtle and copying the data directory.</p>
+        <p>You also give up features. Turtle will never support content that cannot be expressed as Markdown, so no Confluence-style macros, whiteboards or databases. Today Turtle has no comments (planned for 0.6), no groups or SSO (planned for 0.5) and no guest access or public share links (planned for 0.4). There is no plugin marketplace.</p>
+        <p>If your team depends on Jira macros or Marketplace apps, staying on Confluence Cloud may be the better choice. Weigh that honestly before you start.</p>
+
+        <h2 id="frequently-asked">Frequently asked</h2>
+        <h3>Can I export all of Confluence at once?</h3>
+        <p>Exports in both Cloud and Data Center are built around spaces. For a move to another wiki, going space by space is also easier to control and to test.</p>
+        <h3>What is the best Confluence export format for a migration?</h3>
+        <p>The one your target wiki reads. Docmost uses the HTML export, XWiki the XML export. Turtle reads CSV or XML, with attachments. Keep a PDF export as an archive either way.</p>
+        <h3>Can I convert Confluence to Markdown myself?</h3>
+        <p>Yes. Community scripts convert HTML exports to Markdown files. Expect the same losses as with any importer: macros, layouts and comments. Turtle imports Markdown, so this is a fallback route.</p>
+        <h3>Will my page restrictions carry over?</h3>
+        <p>Usually not one to one. In Turtle, access is set per Area with roles, and the import does not bring page restrictions. Permissions on single pages are planned for version 0.4.</p>
+        <h3>How long does a Confluence migration take?</h3>
+        <p>It depends on the number of spaces, macros and restrictions. The pilot gives you a real estimate. Time the fixes for one space and multiply.</p>
+        <h3>Do I have to move before Data Center ends?</h3>
+        <p>Atlassian ends Data Center on 28 March 2029. Products become read-only then. Starting early leaves time for a pilot and a read-only period.</p>
+
+        <h2 id="keep-reading">Keep reading</h2>
+        <ul class="cards">
+          <li><a class="card" href="/guides/open-source-confluence-alternatives"><strong>Open-source Confluence alternatives</strong><span>Which open source wikis can replace Confluence, and how they differ.</span></a></li>
+          <li><a class="card" href="/guides/confluence-data-center-end-of-life"><strong>Confluence Data Center end of life: what it means</strong><span>What the Data Center end date means for your team.</span></a></li>
+          <li><a class="card" href="/confluence-alternative"><strong>Turtle vs Confluence</strong><span>How Turtle and Confluence compare, point by point.</span></a></li>
+          <li><a class="card" href="/guides/self-hosted-wiki-docker"><strong>Run a self-hosted wiki with Docker</strong><span>How to run Turtle on your own server with Docker.</span></a></li>
+          <li><a class="card" href="/guides/wiki-for-ai-agents-mcp"><strong>A wiki for AI agents via MCP</strong><span>How AI agents read and write Turtle through MCP.</span></a></li>
+          <li><a class="card" href="/alternatives"><strong>All alternatives</strong><span>Every Turtle comparison with another wiki, in one list.</span></a></li>
+          <li><a class="card" href="/guides"><strong>All guides</strong><span>Every guide on moving to and running Turtle.</span></a></li>
+        </ul>
+      </div>
+
+      <section class="col sources" aria-labelledby="sources-title">
+        <h2 id="sources-title">Sources</h2>
+        <ol>
+          <li><a href="https://support.atlassian.com/confluence-cloud/docs/export-content-to-word-pdf-html-and-xml/">Confluence Cloud: Export a space's content as Word, PDF, or data files, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://confluence.atlassian.com/doc/export-content-to-word-pdf-html-and-xml-139475.html">Confluence Data Center: Export Content to Word, PDF, HTML and XML, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.atlassian.com/licensing/data-center-end-of-life">Data Center end of life, Atlassian</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docmost.com/docs/user-guide/import-export">Import and export, Docmost</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/docmost/docmost/releases/tag/v0.21.0">Release v0.21.0, Docmost</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://docmost.com/docs/editions">License and Editions, Docmost</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.xwiki.org/xwiki/bin/view/documentation/extensions/admin/confluence/import/">Import from Confluence, XWiki</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://store.xwiki.com/xwiki/bin/view/Extension/ConfluenceMigratorPro/">Confluence Migrator Pro, XWiki Store</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/BookStackApp/BookStack">GitHub repository (MIT licence), BookStack</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/xwiki/xwiki-platform">xwiki-platform GitHub repository (LGPL-2.1 licence), XWiki</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://www.bookstackapp.com/about/confluence-alternative">An Open Source Alternative to Confluence, BookStack</a>. Checked 27 Nov 2026.</li>
+          <li><a href="https://github.com/turtle-wiki/turtle">Turtle fact sheet (README, ROADMAP, demo, Confluence import), Turtle</a>. Checked 27 Nov 2026.</li>
+        </ol>
+      </section>
+    </article>
+
+    <section class="author-cta" aria-labelledby="author-title">
+      <div class="inner">
+        <img src="/assets/jeremie-constant.webp" alt="Jérémie Constant" width="200" height="200" loading="lazy" decoding="async">
+        <div>
+          <h2 id="author-title">See Turtle for yourself</h2>
+          <p>I'm Jérémie Constant. I build Turtle at novalutions in Cologne. Open the demo and write a Page, no sign-up needed. If you have a question about Turtle, or about moving your team's docs, email me and I'll answer.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://demo.turtle-wiki.app">
+              Try the demo
+              <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <a class="brand" href="/" aria-label="Turtle Wiki home">
+            <img src="/assets/logo-light.svg" alt="" width="26" height="26">
+            Turtle Wiki
+          </a>
+          <p>An open source wiki your team and its AI agents write together. Self-hosted, AGPL-3.0.</p>
+          <div class="foot-maker">
+            <img src="/assets/jeremie-constant-128.webp" alt="" width="44" height="44" loading="lazy">
+            <span><strong>Jérémie Constant</strong>Builds Turtle at novalutions, Cologne</span>
+          </div>
+        </div>
+        <nav class="foot-col" aria-labelledby="foot-product">
+          <h2 id="foot-product">Product</h2>
+          <ul>
+            <li><a href="https://demo.turtle-wiki.app">Try the demo</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle">GitHub</a></li>
+            <li><a href="https://github.com/turtle-wiki/turtle/releases">Releases</a></li>
+            <li><a href="/#waitlist">Hosted waitlist</a></li>
+            <li><a href="mailto:info@novalutions.de?subject=Turtle%20Wiki">Email Jérémie</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-alternatives">
+          <h2 id="foot-alternatives">Alternatives</h2>
+          <ul>
+            <li><a href="/confluence-alternative">Confluence alternative</a></li>
+            <li><a href="/notion-alternative">Notion alternative</a></li>
+            <li><a href="/docmost-alternative">Docmost alternative</a></li>
+            <li><a href="/outline-alternative">Outline alternative</a></li>
+            <li><a href="/bookstack-alternative">BookStack alternative</a></li>
+            <li><a href="/alternatives">All comparisons</a></li>
+          </ul>
+        </nav>
+        <nav class="foot-col" aria-labelledby="foot-guides">
+          <h2 id="foot-guides">Guides</h2>
+          <ul>
+            <li><a href="/guides/open-source-confluence-alternatives">Open source Confluence alternatives</a></li>
+            <li><a href="/guides/confluence-data-center-end-of-life">Confluence Data Center end of life</a></li>
+            <li><a href="/guides/migrate-from-confluence">Migrate from Confluence</a></li>
+            <li><a href="/guides/self-hosted-wiki-docker">Self-hosted wiki with Docker</a></li>
+            <li><a href="/guides/wiki-for-ai-agents-mcp">A wiki for AI agents over MCP</a></li>
+            <li><a href="/guides">All guides</a></li>
+          </ul>
+        </nav>
+      </div>
+      <div class="foot-base">
+        <span>© 2026 novalutions · Turtle Wiki is AGPL-3.0</span>
+        <nav aria-label="Legal">
+          <a href="https://www.novalutions.de/impressum/">Imprint</a>
+          <a href="https://www.novalutions.de/datenschutzerklaerung/">Privacy</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+  <!-- Cloudflare Web Analytics: cookieless visitor counts, no consent banner needed. -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "2c584fa51fa047a0a690b9d0e703e6e6"}'></script>
+</body>
+</html>

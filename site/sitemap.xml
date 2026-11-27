@@ -2,6 +2,54 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://turtle-wiki.app/</loc>
-    <lastmod>2026-11-25</lastmod>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/alternatives</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/confluence-alternative</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/notion-alternative</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/docmost-alternative</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/outline-alternative</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/bookstack-alternative</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/guides</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/guides/open-source-confluence-alternatives</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/guides/confluence-data-center-end-of-life</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/guides/migrate-from-confluence</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/guides/self-hosted-wiki-docker</loc>
+    <lastmod>2026-11-27</lastmod>
+  </url>
+  <url>
+    <loc>https://turtle-wiki.app/guides/wiki-for-ai-agents-mcp</loc>
+    <lastmod>2026-11-27</lastmod>
   </url>
 </urlset>
