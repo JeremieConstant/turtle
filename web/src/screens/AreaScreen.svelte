@@ -11,6 +11,7 @@
   import Grants from '../components/Grants.svelte'
   import Icon from '../components/Icon.svelte'
   import NameDialog from '../components/NameDialog.svelte'
+  import ImportsDialog from '../components/ImportsDialog.svelte'
   import PdfExportDialog from '../components/PdfExportDialog.svelte'
   import { toast } from 'svelte-sonner'
   import { menuKeys, openMenu } from '../lib/menu'
@@ -22,7 +23,7 @@
   import { areaAddress, pageAddress } from '../lib/routes'
   import { ask } from '../lib/confirm.svelte'
   import { exportToFile } from '../lib/exporting'
-  import { chooseZip, importFromFile } from '../lib/importing'
+  import { chooseZip, importConfluenceFromFile, importFromFile } from '../lib/importing'
   import { reportFailure } from '../lib/toasts'
   import { UNDO_DURATION } from '../lib/trash'
   import { createEntry } from '../lib/tree'
@@ -89,6 +90,7 @@
 
   let renameDialog = $state<NameDialog>()
   let pdfDialog = $state<PdfExportDialog>()
+  let importsDialog = $state<ImportsDialog>()
   let moreMenu = $state() as HTMLDivElement
   let newPageDialog = $state<NameDialog>()
   let menu = $state<EntryMenu>()
@@ -154,11 +156,11 @@
     router.navigate(pageAddress(page.id, page.title))
   }
 
-  /** Imports a ZIP the person chooses at the top of the Area. */
-  async function importIntoArea() {
+  /** Imports a ZIP the person chooses at the top of the Area with `importing`. */
+  async function importIntoArea(importing: typeof importFromFile) {
     if (!area) return
     const file = await chooseZip()
-    if (file && (await importFromFile({ area_id: id }, file, area.name))) await reload()
+    if (file && (await importing({ area_id: id }, file, area.name))) await reload()
   }
 
   /** A Folder has no screen of its own: it opens in the sidebar's tree. */
@@ -211,8 +213,12 @@
               Export as Markdown
             </button>
             {#if writable}
-              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(importIntoArea)}>Import Markdown</button>
+              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => importIntoArea(importFromFile))}>Import Markdown</button>
+              <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => importIntoArea(importConfluenceFromFile))}>
+                Import from Confluence
+              </button>
             {/if}
+            <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => area && importsDialog?.open(area))}>Imports</button>
             {#if area.role === 'admin' && !area.personal}
               <hr />
               <button type="button" class="menu-item" role="menuitem" onclick={() => fromMenu(() => renameDialog?.open(area?.name))}>Rename</button>
@@ -269,6 +275,7 @@
 
   <EntryMenu bind:this={menu} onclose={() => (menuFor = null)} />
   <PdfExportDialog bind:this={pdfDialog} />
+  <ImportsDialog bind:this={importsDialog} onundone={reload} />
   <NameDialog bind:this={renameDialog} label="Name of the Area" action="Rename" onsubmit={rename} />
   <NameDialog
     bind:this={newPageDialog}

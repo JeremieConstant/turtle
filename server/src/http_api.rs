@@ -1,19 +1,25 @@
 //! The HTTP API: every operation of the catalogue under its own name, with
 //! JSON input and output (ADR-0005). It adds nothing of its own beyond
-//! turning cookies and Tokens into principals and errors into status codes.
+//! turning cookies and Tokens into principals and errors into status codes,
+//! and taking a ZIP that is uploaded ahead of the import reading it
+//! (ADR-0014).
 
 use crate::ops::{self, Catalogue, Core, OpError, Principal, SessionChange};
 use axum::extract::rejection::StringRejection;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Extension, Json, Router};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 const SESSION_COOKIE: &str = "turtle_session";
+
+/// How long an upload may go without anything arriving before it is given up.
+const UPLOAD_STALLED_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
 
 struct Api {
     core: Arc<Core>,
@@ -30,11 +36,16 @@ pub fn input_limit(core: &Core) -> DefaultBodyLimit {
     DefaultBodyLimit::max(base64_input_of(core.attachment_limit()))
 }
 
-/// The largest request `import` is called with: a ZIP, in base64. It has a
+/// The operations called with a ZIP to import, which may be as large as a
+/// ZIP sent in base64 may be.
+const IMPORTS: [&str; 5] = ["import", "start_import", "import_confluence", "start_import_confluence", "check_confluence_import"];
+
+/// The largest request an import is called with: a ZIP, in base64. It has a
 /// limit of its own, far above the rest, which is checked before anyone is
-/// known; only someone signed in gets as far as the import.
+/// known; only someone signed in gets as far as the import. A larger ZIP is
+/// uploaded ahead of the import (`upload`).
 fn import_input_limit(core: &Core) -> DefaultBodyLimit {
-    DefaultBodyLimit::max(base64_input_of(core.import_limit()))
+    DefaultBodyLimit::max(base64_input_of(ops::import::sent_limit(core)))
 }
 
 /// The size of an input carrying a file of `bytes` bytes in base64.
@@ -51,8 +62,13 @@ pub fn router(core: Arc<Core>, client_address_header: Option<HeaderName>) -> Rou
         client_address_header,
     });
     // The limit given with a route takes the place of the one around them all.
-    Router::new()
-        .route("/api/import", post(call_import).layer(import_limit))
+    let mut router = Router::new();
+    for operation in IMPORTS {
+        router = router.route(&format!("/api/{operation}"), post(call_import).layer(import_limit));
+    }
+    router
+        // The upload counts what arrives itself, against the import limit.
+        .route("/api/uploads", post(upload).layer(DefaultBodyLimit::disable()))
         .route("/api/{operation}", post(call))
         .layer(limit)
         .with_state(api)
@@ -68,13 +84,69 @@ async fn call(
     call_operation(api, operation, connection, headers, body).await
 }
 
+/// An import, named by the last part of its route, which may be larger
+/// than other requests.
 async fn call_import(
     State(api): State<Arc<Api>>,
+    uri: Uri,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     body: Result<String, StringRejection>,
 ) -> Response {
-    call_operation(api, "import".into(), connection, headers, body).await
+    let operation = uri.path().rsplit('/').next().unwrap_or_default().to_string();
+    call_operation(api, operation, connection, headers, body).await
+}
+
+/// Takes a ZIP ahead of the import that reads it (ADR-0014): the body of the
+/// request, written to a file as it arrives and never held whole. Answers
+/// with the `upload_id` to give the import in place of `content`.
+async fn upload(State(api): State<Arc<Api>>, headers: HeaderMap, body: axum::body::Body) -> Response {
+    // Only a ZIP, or bytes of no stated kind. A form on another site can
+    // send neither, which keeps other sites from uploading with someone's
+    // cookie.
+    let kind = headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or_default();
+    let kind = kind.split(';').next().unwrap_or_default().trim();
+    if !kind.eq_ignore_ascii_case("application/zip") && !kind.eq_ignore_ascii_case("application/octet-stream") {
+        return error_response(OpError::InvalidInput("Send the ZIP as the body of the request, as application/zip.".into()));
+    }
+    let announced = headers.get(header::CONTENT_LENGTH).and_then(|value| value.to_str().ok()).and_then(|value| value.parse().ok());
+    // Who is uploading is found out before any of the ZIP is taken.
+    let core = api.core.clone();
+    let begun = tokio::task::spawn_blocking(move || {
+        let principal = principal(&core, &headers)?;
+        ops::import::receive_upload(&core, &principal, announced).map_err(Refusal::Op)
+    })
+    .await;
+    let mut receiving = match begun {
+        Ok(Ok(receiving)) => receiving,
+        Ok(Err(refused)) => return refused.into_response(),
+        Err(error) => return error_response(OpError::Internal(error.into())),
+    };
+    let mut pieces = body.into_data_stream();
+    loop {
+        // An upload that stops arriving is given up, so it does not keep its
+        // sender from uploading again. What arrived so far is removed.
+        let broke_off = || error_response(OpError::InvalidInput("The upload broke off before all of the ZIP arrived. Try again.".into()));
+        let piece = match tokio::time::timeout(UPLOAD_STALLED_AFTER, pieces.next()).await {
+            Ok(Some(Ok(piece))) => piece,
+            Ok(None) => break,
+            Ok(Some(Err(_))) | Err(_) => return broke_off(),
+        };
+        let core = api.core.clone();
+        // Writing a file waits for the disk, so it happens off the async workers.
+        let written = tokio::task::spawn_blocking(move || receiving.write(&core, &piece).map(|()| receiving)).await;
+        receiving = match written {
+            Ok(Ok(receiving)) => receiving,
+            Ok(Err(refused)) => return error_response(refused),
+            Err(error) => return error_response(OpError::Internal(error.into())),
+        };
+    }
+    let core = api.core.clone();
+    match tokio::task::spawn_blocking(move || receiving.finish(&core)).await {
+        Ok(Ok(uploaded)) => Json(uploaded).into_response(),
+        Ok(Err(refused)) => error_response(refused),
+        Err(error) => error_response(OpError::Internal(error.into())),
+    }
 }
 
 async fn call_operation(
@@ -87,8 +159,8 @@ async fn call_operation(
     let body = match body {
         Ok(body) => body,
         Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
-            let message = if operation == "import" {
-                ops::import::too_large(&api.core)
+            let message = if IMPORTS.contains(&operation.as_str()) {
+                ops::import::too_large_to_send(&api.core)
             } else {
                 OpError::InvalidInput("This request is larger than Turtle accepts. Send less at once.".into())
             };

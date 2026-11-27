@@ -32,6 +32,7 @@ type Row = (&'static str, fn(&Fixture) -> Value, [&'static str; 5]);
 const OK: &str = "ok";
 const HIDDEN: &str = "not_found";
 const REFUSED: &str = "not_permitted";
+const INVALID: &str = "invalid_input";
 
 /// The values of a PDF Style called `name`, with `extra` fields added.
 fn pdf_style(name: &str, extra: Value) -> Value {
@@ -158,6 +159,25 @@ fn table() -> Vec<Row> {
         ("export", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         // An empty ZIP: what is checked is who may import, not what.
         ("import", |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}), [OK, OK, REFUSED, HIDDEN, OK]),
+        ("list_imports", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
+        // ops::import::record tests who may undo an import that exists.
+        ("undo_import", |_| json!({"import_id": "made-up"}), [HIDDEN; 5]),
+        // An empty ZIP is no export: who may import is checked before what.
+        ("check_confluence_import", |_| json!({"content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}), [INVALID; 5]),
+        (
+            "import_confluence",
+            |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}),
+            [INVALID, INVALID, REFUSED, HIDDEN, INVALID],
+        ),
+        // An empty ZIP: what is checked is who may start an import, not how it ends.
+        ("start_import", |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}), [OK, OK, REFUSED, HIDDEN, OK]),
+        (
+            "start_import_confluence",
+            |f| json!({"area_id": f.area_id, "content": "UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA=="}),
+            [OK, OK, REFUSED, HIDDEN, OK],
+        ),
+        // Nobody has started an import, so there is none to follow.
+        ("get_import_progress", |_| json!({"import_id": "made-up"}), [HIDDEN; 5]),
         ("export_pdf", |f| json!({"area_id": f.area_id}), [OK, OK, OK, HIDDEN, OK]),
         // Every Workspace has the PDF Style "standard", its default.
         ("list_pdf_styles", |_| json!({}), [OK; 5]),

@@ -118,6 +118,34 @@ An app that asks only to read can never change anything. */
   redirect_domain: string
 }
 
+export type Coverage = {
+  /** The largest attachment this Turtle accepts, in bytes. */
+  attachment_limit_bytes: number
+  /** The attachments that become Attachments. */
+  attachments: number
+  /** Each kind of content found, the least well kept first. */
+  elements: Found[]
+  /** The Pages whose content comes across exactly. */
+  exact_pages: number
+  /** Of all the elements and macros found in the pages, the share that
+comes across exactly, in whole percent, rounded down. */
+  exact_percent: number
+  /** The folders that become Folders. */
+  folders: number
+  /** Of all the elements and macros found in the pages, the share that
+comes across exactly or approximately, in whole percent, rounded down. */
+  kept_percent: number
+  /** What else the space holds that is not imported, such as comments. */
+  not_imported: NotImported[]
+  /** The pages that become Pages. */
+  pages: number
+  /** The space's name, as Confluence has it. */
+  space: string
+  /** The attachments larger than this Turtle accepts, which are left out.
+Whoever runs Turtle can raise the limit with TURTLE_MAX_ATTACHMENT_MB. */
+  too_large: TooLarge[]
+}
+
 export type CreatedToken = {
   token: TokenSummary
   /** The value an Agent sends as `Authorization: Bearer <value>`. Shown
@@ -197,6 +225,18 @@ export type FontStyle = {
   weight: number
 }
 
+export type Found = {
+  /** What it becomes in Turtle, as a sentence. */
+  becomes: string
+  /** How often it was found. */
+  count: number
+  /** What Confluence content it is, such as `table` or `info macro`. */
+  name: string
+  outcome: Outcome
+  /** The titles of the first few pages it was found on. */
+  pages: string[]
+}
+
 export type Fragment = {
   /** Whether this piece is a word that matched. */
   highlighted: boolean
@@ -244,8 +284,70 @@ export type Imported = {
   /** The Pages and Folders created at the top of the import, with what is
 beneath them. */
   entries: Entry[]
+  /** The import as list_imports names it, to undo it with undo_import. */
+  import_id: string
   /** Each file that did not come across, with the reason. Empty when all did. */
   problems: Problem[]
+  /** The Page holding the import's report, for an import from Confluence. */
+  report_page_id?: string | null
+}
+
+export type ImportedFromConfluence = {
+  /** How much of the space came across. */
+  coverage: Coverage
+  /** The Pages and Folders created at the top of the import, with what is
+beneath them; the report Page is apart. */
+  entries: Entry[]
+  /** The import as list_imports names it, to undo it with undo_import. */
+  import_id: string
+  /** Each page or attachment that did not come across, or not whole, with
+the reason. */
+  problems: Problem[]
+  /** The Page holding the report on the import, beside what was imported;
+absent if it could not be created, which `problems` then tells. */
+  report_page_id?: string | null
+}
+
+export type ImportList = {
+  imports: ImportRecord[]
+}
+
+export type ImportProgress = {
+  /** A Confluence import's report on the space, as soon as it is read and
+before anything is created: what comes across and how well, and which
+attachments are too large for this Turtle. Absent for other imports. */
+  coverage?: Coverage | null
+  /** How much of the stage is done: Pages and Folders created while
+creating, Pages whose content is written while writing. */
+  done: number
+  /** Once it failed: why, as a sentence. What it created before is kept. */
+  error?: string | null
+  import_id: string
+  /** Once it is done: what was created and what did not come across. */
+  imported?: Imported | null
+  stage: Stage
+  /** How much there is to do in the stage; 0 while reading. */
+  total: number
+}
+
+export type ImportRecord = {
+  /** How many of the Pages and Folders it created, its report aside, are
+still there, not in the Trash, for the caller to see. */
+  created_count: number
+  id: string
+  /** The Page holding its report, while the caller may read it. */
+  report_page_id?: string | null
+  /** What was imported, such as "the Confluence space Knowledge Base". */
+  source: string
+  /** Seconds since the Unix epoch. */
+  started_at: number
+  /** Who started it; absent once they no longer exist. */
+  started_by?: Author | null
+  /** Whether the caller may undo it: it is not undone yet, and they may
+change all that it created. */
+  undoable: boolean
+  /** When it was undone, in seconds since the Unix epoch; absent if not. */
+  undone_at?: number | null
 }
 
 export type Kind = "page" | "folder"
@@ -257,6 +359,15 @@ export type LastEdited = {
   at: number
   /** Members, Agents acting for a Member, and standalone Agents, told apart. */
   by: Author[]
+}
+
+export type Limits = {
+  /** The largest file, in bytes, that can be attached to a Page, also when
+it comes in with an import. Set with `TURTLE_MAX_ATTACHMENT_MB`. */
+  attachment_bytes: number
+  /** The largest ZIP, in bytes, that can be imported at once. Set with
+`TURTLE_MAX_IMPORT_MB`. */
+  import_bytes: number
 }
 
 export type Member = {
@@ -317,6 +428,14 @@ export type MovedEntry = {
   /** Where it was: moving it there puts it back. */
   was: Place
 }
+
+export type NotImported = {
+  count: number
+  /** What it is, such as "Comments". */
+  what: string
+}
+
+export type Outcome = "exact" | "approximate" | "placeholder" | "left_out"
 
 export type Page = {
   /** The Area the Page is in. */
@@ -555,6 +674,9 @@ export type Session = {
   agent?: CallingAgent | null
   /** Present when this Turtle is a Demo, which is reset from time to time. */
   demo?: Demo | null
+  /** The largest file and the largest ZIP this Turtle accepts, so a client
+can refuse a larger one before sending it. Told only to those signed in. */
+  limits?: Limits | null
   /** The signed-in Member, if anyone is signed in. */
   member?: Member | null
   /** Which Release of Turtle this is, told only to those signed in: a
@@ -582,6 +704,8 @@ the link is then to be passed on. */
 passed on. */
   mailed_to?: string | null
 }
+
+export type Stage = "done" | "failed" | "reading" | "creating" | "writing"
 
 export type TagsInUse = {
   /** The one on the most Pages first; as many alphabetically. */
@@ -618,6 +742,13 @@ owner by hand. Its value was never shown to anyone. */
   last_used_at?: number | null
   name: string
   read_only: boolean
+}
+
+export type TooLarge = {
+  /** Its size in bytes. */
+  bytes: number
+  /** The page's title and the attachment's name, as problems name it. */
+  file: string
 }
 
 export type Trashed = {
@@ -663,6 +794,15 @@ export type Tree = {
   /** How many deleted Pages and Folders are in the Trash of the Area, for
 someone with the Write Role, who can see it; None for anyone else. */
   trash?: number | null
+}
+
+export type Undone = {
+  /** The titles of the Pages and Folders created beneath them since the
+import, which went to the Trash with them; those the caller may not
+read are left out. */
+  taken_along: string[]
+  /** How many of the Pages and Folders the import created went to the Trash. */
+  trashed: number
 }
 
 export type UploadedFont = {
@@ -1238,16 +1378,125 @@ of the Page. Needed only when several Sections have this heading. */
     }
     output: Export
   }
-  /** Imports a ZIP of Markdown files, sent in base64, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role. */
+  /** Imports a ZIP of Markdown files, sent in base64 or uploaded before, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role. */
   import: {
     input: {
       area_id: string
-      /** The ZIP, in base64. */
-      content: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
       /** The Page or Folder to import beneath; the top of the Area if absent. */
       parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
     }
     output: Imported
+  }
+  /** Starts what import does and answers at once, before anything is read, with the import's ID; get_import_progress then tells how far it has got and, once it is done, what import answers with. Meant for large ZIPs, which take a while to bring in. Needs the Write Role. */
+  start_import: {
+    input: {
+      area_id: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
+      /** The Page or Folder to import beneath; the top of the Area if absent. */
+      parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
+    }
+    output: ImportProgress
+  }
+  /** Tells how far an import begun with start_import or start_import_confluence has got: reading the ZIP, creating Pages and Folders, writing their content, done or failed, with how many of how many. A Confluence import tells its report as soon as the space is read, before anything is created. Once done, it holds what the import created and what did not come across; once failed, why. Only whoever started an import can follow it, and it is forgotten an hour after it ends. */
+  get_import_progress: {
+    input: {
+      /** The ID start_import or start_import_confluence answered with. */
+      import_id: string
+    }
+    output: ImportProgress
+  }
+  /** Reads a Confluence space exported as CSV or XML, a ZIP sent in base64 or uploaded before, and tells how much of it would come across into Turtle, without importing anything: how many pages, folders and attachments, each kind of element and macro found in the pages with how often, on which pages and what it becomes (exactly, approximately, as a placeholder naming it, or left out), the share of elements that come across exactly, what the space holds that is not imported, such as comments and page history, and which attachments are larger than this Turtle accepts, which whoever runs it can raise with TURTLE_MAX_ATTACHMENT_MB. Mentions are matched with the Members and Guests the caller may see. */
+  check_confluence_import: {
+    input: {
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
+    }
+    output: Coverage
+  }
+  /** Imports a Confluence space exported as CSV or XML, a ZIP sent in base64 or uploaded before, into an Area or beneath one of its Pages or Folders: the page tree in order, folders as Folders, the content of each page's latest version, its attachments as Attachments, links between its pages as Page links, mentions of people as Mentions of the Members and Guests with the same e-mail address, and global labels as Tags. Info, note, tip and warning macros become Callouts, code macros code blocks and status macros Statuses; a macro Turtle does not know becomes a placeholder naming it, followed by what it held. Comments, page history, drafts, permissions and personal labels are not imported. Answers with what was created, each file that did not come across, and the same report check_confluence_import gives. Needs the Write Role. */
+  import_confluence: {
+    input: {
+      area_id: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
+      /** The Page or Folder to import beneath; the top of the Area if absent. */
+      parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
+    }
+    output: ImportedFromConfluence
+  }
+  /** Starts what import_confluence does and answers at once, before anything is read, with the import's ID; get_import_progress then tells how far it has got, the report on the space as soon as it is read, and, once it is done, what was created and what did not come across. Meant for whole spaces, which take a while to bring in. Needs the Write Role. */
+  start_import_confluence: {
+    input: {
+      area_id: string
+      /** The ZIP, in base64. Sent this way it is held in memory, so it may be
+200 MB at most, and no larger than a request may be: through MCP
+that is the largest file that can be attached. A larger ZIP is
+uploaded first, where the caller can make HTTP requests, and given
+as `upload_id` instead. */
+      content?: string | null
+      /** The Page or Folder to import beneath; the top of the Area if absent. */
+      parent_id?: string | null
+      /** In place of `content`: the ID a ZIP got when it was uploaded. Send
+the ZIP as the body of `POST /api/uploads` with the content type
+`application/zip`; the answer holds its `upload_id`. An upload is
+kept for an hour, and an import uses it up. */
+      upload_id?: string | null
+    }
+    output: ImportProgress
+  }
+  /** Lists the imports into an Area, newest first: where each came from, when and by whom it was started, how many of the Pages and Folders it created are still there for the caller to see, the Page holding its report if it has one, whether the caller may undo it, and whether it was undone. Needs the Read Role on the Area. */
+  list_imports: {
+    input: {
+      area_id: string
+    }
+    output: ImportList
+  }
+  /** Undoes an import: moves every Page and Folder it created that is still there to the Trash, from where each can be restored. What was created beneath them since goes to the Trash with them and is named in the answer. Its report stays, marked as undone. An import is undone once, by someone who may change all that it created. */
+  undo_import: {
+    input: {
+      /** The ID list_imports, or the import itself, gave. */
+      import_id: string
+    }
+    output: Undone
   }
   /** Exports an Area, or the Subtree of one of its Pages or Folders, as one PDF, returned in base64: a cover, a table of contents, then each Page as a chapter in tree order, with Folders as groups. Pages the caller cannot read are left out. It looks as the chosen PDF Style says, or the default one. Needs the Read Role. */
   export_pdf: {

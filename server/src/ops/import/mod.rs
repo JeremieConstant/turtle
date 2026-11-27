@@ -7,36 +7,121 @@
 //! source: the tree in order, IDs kept where they are free, Attachments,
 //! links pointed at what they name, Tags, and a report of what did not come
 //! across instead of a failure. An importer for another source, such as
-//! Confluence, is a new reader beside `markdown` and its own operation.
+//! Confluence, is a new reader beside `markdown` and its own operations.
+//!
+//! Each import is an operation that answers once all is done, and one that
+//! starts it and answers at once (`running`), so a large import can be
+//! followed while it runs instead of only waited for.
+//!
+//! The ZIP comes in base64 with the operation, held in memory, or is
+//! uploaded ahead of it (`uploads`, ADR-0014) and read from its file. Either
+//! way the files in it stay there until each is attached, so beside the ZIP
+//! itself an import never holds more than one Attachment at a time.
 
 use super::tree::{self, Entry, Kind, NewEntry};
 use super::{Catalogue, Core, OpError, OpResult, Principal};
 use crate::model::{Block, Inline, Marks};
 use std::collections::HashMap;
+use std::io::Read;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+mod confluence;
 mod markdown;
+pub(super) mod record;
+mod running;
+pub(super) mod uploads;
+
+pub use running::Imports;
+pub use uploads::{forget_old as forget_old_uploads, receive as receive_upload, remove_left_behind as remove_uploads_left_behind, Uploads};
 
 pub(super) fn register(catalogue: &mut Catalogue) {
     catalogue.add(
         "import",
-        "Imports a ZIP of Markdown files, sent in base64, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role.",
+        "Imports a ZIP of Markdown files, sent in base64 or uploaded before, into an Area or beneath one of its Pages or Folders: an Export of Turtle's, or any folder of Markdown. Directories become the tree: a Markdown file is a Page, a directory of the same name holds what is beneath it, and a directory without one becomes a Folder. Frontmatter, where a file has it, gives the title, whether it is a page or a folder, the position among its siblings, the Tags and an ID, which is kept if nothing has it yet; without frontmatter a Page is titled after its file name. Relative links between the files become Page links, and files they refer to, and those in a Page's `_attachments` directory, become its Attachments. A file that cannot be imported is reported with the reason and the rest comes in. Needs the Write Role.",
         import,
     );
+    catalogue.add(
+        "start_import",
+        "Starts what import does and answers at once, before anything is read, with the import's ID; get_import_progress then tells how far it has got and, once it is done, what import answers with. Meant for large ZIPs, which take a while to bring in. Needs the Write Role.",
+        start_import,
+    );
+    catalogue
+        .add(
+            "get_import_progress",
+            "Tells how far an import begun with start_import or start_import_confluence has got: reading the ZIP, creating Pages and Folders, writing their content, done or failed, with how many of how many. A Confluence import tells its report as soon as the space is read, before anything is created. Once done, it holds what the import created and what did not come across; once failed, why. Only whoever started an import can follow it, and it is forgotten an hour after it ends.",
+            get_import_progress,
+        )
+        .changes = false;
+    confluence::register(catalogue);
+    record::register(catalogue);
 }
 
 /// The largest ZIP that can be imported at once, unless whoever runs Turtle
-/// sets another. An import is held in memory several times over while it is
-/// read, so this is far below what a whole Confluence space may need.
-pub const DEFAULT_IMPORT_LIMIT: u64 = 200 * 1024 * 1024;
+/// sets another: room for a whole Confluence space with its attachments. A
+/// ZIP this large is uploaded ahead of the import and read from its file.
+pub const DEFAULT_IMPORT_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The same for a Demo, which anyone can sign in to and upload to.
+pub const DEMO_IMPORT_LIMIT: u64 = 200 * 1024 * 1024;
+
+/// The largest ZIP that can be sent in base64 with the operation, whatever
+/// the import limit: sent this way it is held in memory several times over.
+const SENT_LIMIT: u64 = 200 * 1024 * 1024;
+
+/// The largest ZIP this Turtle takes in base64 with the operation.
+pub fn sent_limit(core: &Core) -> u64 {
+    core.import_limit().min(SENT_LIMIT)
+}
+
+/// Why a ZIP sent in base64 is refused when it is larger than that takes.
+pub fn too_large_to_send(core: &Core) -> OpError {
+    if core.import_limit() <= SENT_LIMIT {
+        return too_large(core);
+    }
+    OpError::InvalidInput(format!(
+        "This ZIP is larger than {}, the most that can be sent in base64 with the operation. Upload it first, as the body of POST /api/uploads, and give the import the upload_id from the answer in place of content.",
+        super::attachments::size_in_words(SENT_LIMIT)
+    ))
+}
 
 /// Why a ZIP larger than the import limit is refused.
 pub fn too_large(core: &Core) -> OpError {
     OpError::InvalidInput(format!(
-        "This ZIP is larger than {}, the most this Turtle imports at once. Import it in parts, or ask whoever runs Turtle to raise the limit.",
+        "This ZIP is larger than {}, the most this Turtle imports at once. Import it in parts, or ask whoever runs Turtle to raise the limit with TURTLE_MAX_IMPORT_MB.",
         super::attachments::size_in_words(core.import_limit())
     ))
+}
+
+/// Why a file in an import does not come across when it is larger than
+/// the attachment limit, or nothing when it is not.
+pub(super) fn too_large_to_attach(core: &Core, bytes: u64) -> Option<String> {
+    let limit = core.attachment_limit();
+    (bytes > limit).then(|| {
+        format!(
+            "It is {}, larger than {}, the most this Turtle accepts for one file, so it was left out. Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB.",
+            size_rounded_up(bytes),
+            super::attachments::size_in_words(limit)
+        )
+    })
+}
+
+/// "31.5 MB": a size as people read it, rounded up, so a file just over a
+/// limit never reads as the limit itself.
+fn size_rounded_up(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    let tenths = |unit: u64| (bytes * 10).div_ceil(unit);
+    let shown = |tenths: u64, unit: &str| {
+        if tenths.is_multiple_of(10) { format!("{} {unit}", tenths / 10) } else { format!("{}.{} {unit}", tenths / 10, tenths % 10) }
+    };
+    if bytes >= MB {
+        shown(tenths(MB), "MB")
+    } else if bytes >= KB {
+        shown(tenths(KB), "KB")
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -45,22 +130,151 @@ pub struct ToImport {
     /// The Page or Folder to import beneath; the top of the Area if absent.
     #[serde(default)]
     pub parent_id: Option<String>,
-    /// The ZIP, in base64.
-    pub content: String,
+    #[serde(flatten)]
+    pub zip: ZipGiven,
+}
+
+/// The ZIP an import reads, given one of two ways.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ZipGiven {
+    /// The ZIP, in base64. Sent this way it is held in memory, so it may be
+    /// 200 MB at most, and no larger than a request may be: through MCP
+    /// that is the largest file that can be attached. A larger ZIP is
+    /// uploaded first, where the caller can make HTTP requests, and given
+    /// as `upload_id` instead.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// In place of `content`: the ID a ZIP got when it was uploaded. Send
+    /// the ZIP as the body of `POST /api/uploads` with the content type
+    /// `application/zip`; the answer holds its `upload_id`. An upload is
+    /// kept for an hour, and an import uses it up.
+    #[serde(default)]
+    pub upload_id: Option<String>,
+}
+
+#[cfg(test)]
+impl ZipGiven {
+    pub fn sent(content: String) -> ZipGiven {
+        ZipGiven { content: Some(content), upload_id: None }
+    }
+
+    pub fn uploaded(upload_id: &str) -> ZipGiven {
+        ZipGiven { content: None, upload_id: Some(upload_id.into()) }
+    }
+}
+
+/// Where an import's ZIP is read from: memory, as it was sent in base64,
+/// or the file it was uploaded to.
+pub(super) enum ZipSource {
+    Sent(std::io::Cursor<Vec<u8>>),
+    Uploaded(uploads::Opened),
+}
+
+impl Read for ZipSource {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            ZipSource::Sent(sent) => sent.read(buffer),
+            ZipSource::Uploaded(uploaded) => uploaded.read(buffer),
+        }
+    }
+}
+
+impl std::io::Seek for ZipSource {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        match self {
+            ZipSource::Sent(sent) => sent.seek(to),
+            ZipSource::Uploaded(uploaded) => uploaded.seek(to),
+        }
+    }
+}
+
+/// The ZIP an import reads.
+pub(super) type Archive = zip::ZipArchive<ZipSource>;
+
+/// The ZIP an import was given, taken but not read yet: what an import that
+/// is started holds from the moment it answers, so its upload is its own
+/// and a wrong one is refused at once.
+pub(super) enum ZipTaken {
+    Sent(String),
+    Uploaded(uploads::Opened),
+}
+
+/// Takes the ZIP an import was given, without reading it. An upload taken
+/// for importing is used up: it is removed once it is let go of, however
+/// the import ends.
+pub(super) fn take_zip(core: &Core, principal: &Principal, given: ZipGiven, purpose: uploads::For) -> Result<ZipTaken, OpError> {
+    match (given.content, given.upload_id) {
+        (Some(content), None) => Ok(ZipTaken::Sent(content)),
+        (None, Some(upload_id)) => Ok(ZipTaken::Uploaded(uploads::open(core, principal, &upload_id, purpose)?)),
+        _ => Err(OpError::InvalidInput(
+            "Give the ZIP either as content, in base64, or as the upload_id of one uploaded before.".into(),
+        )),
+    }
+}
+
+/// Opens a ZIP that was taken.
+pub(super) fn open_taken(core: &Core, taken: ZipTaken) -> Result<Archive, OpError> {
+    let source = match taken {
+        ZipTaken::Sent(content) => {
+            let bytes = super::attachments::decode_content(&content)?;
+            drop(content);
+            if bytes.len() as u64 > sent_limit(core) {
+                return Err(too_large_to_send(core));
+            }
+            ZipSource::Sent(std::io::Cursor::new(bytes))
+        }
+        ZipTaken::Uploaded(uploaded) => ZipSource::Uploaded(uploaded),
+    };
+    zip::ZipArchive::new(source).map_err(|_| OpError::InvalidInput("Choose a ZIP file.".into()))
+}
+
+/// Takes and opens the ZIP an import was given.
+pub(super) fn open_zip(core: &Core, principal: &Principal, given: ZipGiven, purpose: uploads::For) -> Result<Archive, OpError> {
+    open_taken(core, take_zip(core, principal, given, purpose)?)
+}
+
+/// Reads a file from the ZIP to attach it; if it cannot be attached, why,
+/// as a sentence. No more of it is read than a file may be, whatever size
+/// the ZIP states for it.
+fn read_to_attach(core: &Core, archive: &mut Archive, path: &str) -> Result<Vec<u8>, String> {
+    const UNREADABLE: &str = "It could not be read from the ZIP, so it was left out.";
+    let file = archive.by_name(path).map_err(|_| UNREADABLE.to_string())?;
+    if let Some(message) = too_large_to_attach(core, file.size()) {
+        return Err(message);
+    }
+    let limit = core.attachment_limit();
+    let mut content = Vec::new();
+    file.take(limit + 1).read_to_end(&mut content).map_err(|_| UNREADABLE.to_string())?;
+    match too_large_to_attach(core, content.len() as u64) {
+        Some(message) => Err(message),
+        None => Ok(content),
+    }
 }
 
 /// What an import created, and what did not come across.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Imported {
+    /// The import as list_imports names it, to undo it with undo_import.
+    pub import_id: String,
     /// The Pages and Folders created at the top of the import, with what is
     /// beneath them.
     pub entries: Vec<Entry>,
     /// Each file that did not come across, with the reason. Empty when all did.
     pub problems: Vec<Problem>,
+    /// The Page holding the import's report, for an import from Confluence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_page_id: Option<String>,
+}
+
+/// What writing a Bundle created: what the import answers with, and the ID
+/// each imported Page got, by its key.
+pub(super) struct Written {
+    pub imported: Imported,
+    pub pages: HashMap<String, String>,
 }
 
 /// A file that did not come across, and why.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Problem {
     /// Where it is in what was imported, such as its path in the ZIP.
     pub file: String,
@@ -77,17 +291,37 @@ impl Problem {
 pub fn import(core: &Core, principal: &Principal, input: ToImport) -> OpResult<Imported> {
     // Access is checked before the ZIP is read, so a refused import reads nothing.
     check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
-    let bundle = markdown::read(input.content)?;
-    write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle)
+    let bundle = markdown::read(open_zip(core, principal, input.zip, uploads::For::Importing)?)?;
+    let import_id = record::new_id()?;
+    Ok(write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, &import_id, &|_| {})?.imported.into())
+}
+
+pub fn start_import(core: &Core, principal: &Principal, input: ToImport) -> OpResult<running::ImportProgress> {
+    // A refused import is refused at once, not once it is running.
+    check_target(core, principal, &input.area_id, input.parent_id.as_deref())?;
+    let zip = take_zip(core, principal, input.zip, uploads::For::Importing)?;
+    running::start(core, principal, move |core, principal, following| {
+        let bundle = markdown::read(open_taken(core, zip)?)?;
+        let step = |step| following.step(step);
+        Ok(write_bundle(core, principal, &input.area_id, input.parent_id.as_deref(), bundle, following.import_id(), &step)?.imported)
+    })
+}
+
+pub fn get_import_progress(core: &Core, principal: &Principal, input: running::OfImport) -> OpResult<running::ImportProgress> {
+    running::progress(core, principal, &input.import_id)
 }
 
 /// What an importer read from its source, in a form that is the same
 /// whatever the source: the Pages and Folders to create, in tree order.
 pub(super) struct Bundle {
+    /// What is imported, as a phrase: "a ZIP of Markdown files".
+    pub source: String,
     pub entries: Vec<Incoming>,
     /// What the importer could not read, to report alongside what the
     /// writing could not bring across.
     pub problems: Vec<Problem>,
+    /// The ZIP that was read, which still holds the Attachments' files.
+    pub archive: Archive,
 }
 
 /// A Page or Folder to create, with what is beneath it.
@@ -115,11 +349,12 @@ pub(super) struct IncomingAttachment {
     /// What the source calls it, unique in the bundle, as for an Incoming.
     pub key: String,
     pub name: String,
-    pub content: Vec<u8>,
+    /// Its file's name in the Bundle's ZIP, where it stays until attached.
+    pub path: String,
 }
 
 /// What a link in imported content points to.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Target {
     /// The Page with this key, which becomes a Page link.
     Entry(String),
@@ -127,25 +362,71 @@ pub(super) enum Target {
     Attachment(String),
 }
 
-/// Creates what the bundle holds beneath `parent_id`, or at the top of the Area.
+/// How far writing a bundle has got, as it goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Step {
+    /// `done` of `total` Pages and Folders are created.
+    Creating { done: u32, total: u32 },
+    /// The content of `done` of `total` Pages is written.
+    Writing { done: u32, total: u32 },
+}
+
+/// Is told each step of writing a bundle.
+pub(super) type Progress<'a> = &'a (dyn Fn(Step) + 'a);
+
+/// Creates what the bundle holds beneath `parent_id`, or at the top of the
+/// Area, telling `progress` how far it has got.
 pub(super) fn write_bundle(
     core: &Core,
     principal: &Principal,
     area_id: &str,
     parent_id: Option<&str>,
     bundle: Bundle,
-) -> OpResult<Imported> {
+    import_id: &str,
+    progress: Progress,
+) -> Result<Written, OpError> {
     // Checked even with nothing to create, so an empty import is refused like any other.
     check_target(core, principal, area_id, parent_id)?;
+    record::begin(core, principal, import_id, area_id, &bundle.source)?;
     // Content is written once everything is created, so a link can point
     // to a Page that comes later in the tree.
-    let mut created = Created { problems: bundle.problems, ..Created::default() };
-    let entries = create_all(core, principal, area_id, parent_id, bundle.entries, &mut created)?;
-    for (page_id, mut content, links) in std::mem::take(&mut created.content) {
+    let mut created = Created { import_id: import_id.to_string(), problems: bundle.problems, ..Created::default() };
+    let to_create = count(&bundle.entries);
+    progress(Step::Creating { done: 0, total: to_create });
+    let mut creating = Creating { progress, done: 0, total: to_create, archive: bundle.archive };
+    let entries = create_all(core, principal, area_id, parent_id, bundle.entries, &mut created, &mut creating)?;
+    // Every Attachment is read by now: an uploaded ZIP is removed here.
+    drop(creating);
+    let contents = std::mem::take(&mut created.content);
+    let to_write = contents.len() as u32;
+    progress(Step::Writing { done: 0, total: to_write });
+    for (written, (page_id, mut content, links)) in contents.into_iter().enumerate() {
         point_links(&mut content, &links, &created);
         super::content::write_content(core, principal, &page_id, content)?;
+        // Saved and out of memory again, however many Pages there are. A
+        // Page that cannot be let go of stays open, to be saved with every
+        // other open Page; the import goes on.
+        if let Err(error) = core.let_go_of_page(&page_id) {
+            eprintln!("letting go of imported Page {page_id} failed: {error:#}");
+        }
+        progress(Step::Writing { done: written as u32 + 1, total: to_write });
     }
-    Ok(Imported { entries, problems: created.problems }.into())
+    let imported = Imported { import_id: import_id.to_string(), entries, problems: created.problems, report_page_id: None };
+    Ok(Written { imported, pages: created.pages })
+}
+
+/// How many Pages and Folders there are, with everything beneath them.
+fn count(entries: &[Incoming]) -> u32 {
+    entries.iter().map(|entry| 1 + count(&entry.children)).sum()
+}
+
+/// How many Pages and Folders are created so far, whom to tell, and the
+/// ZIP their Attachments' files are read from.
+struct Creating<'a> {
+    progress: Progress<'a>,
+    done: u32,
+    total: u32,
+    archive: Archive,
 }
 
 /// Fails unless the principal may add Pages and Folders where the import goes.
@@ -158,6 +439,8 @@ fn check_target(core: &Core, principal: &Principal, area_id: &str, parent_id: Op
 /// What has been created so far, and what is left to write once all is.
 #[derive(Default)]
 struct Created {
+    /// The import, to record what it creates.
+    import_id: String,
     /// The ID each imported Page got, by its key.
     pages: HashMap<String, String>,
     /// The address each imported Attachment got, by its key.
@@ -170,30 +453,37 @@ struct Created {
 
 /// Points the links and images in the content that refer to what was
 /// imported at it: a Page as a Page link, an Attachment by its address.
+/// What refers to something that did not come across, such as a file too
+/// large to attach or a Folder, keeps its text without the address, and an
+/// image says which file is missing, so nothing points nowhere.
 fn point_links(content: &mut [Block], links: &HashMap<String, Target>, created: &Created) {
     super::export::for_each_inline(content, &mut |inline| match inline {
         Inline::Image { src, .. } => {
             if let Some(Target::Attachment(key)) = links.get(src.as_str()) {
-                if let Some(url) = created.attachments.get(key) {
-                    *src = url.clone();
+                match created.attachments.get(key) {
+                    Some(url) => *src = url.clone(),
+                    None => *inline = not_imported(key),
                 }
             }
         }
-        Inline::Text { marks: Marks { link: Some(href), .. }, .. } => match links.get(href.as_str()) {
-            Some(Target::Entry(key)) => {
-                if let Some(page_id) = created.pages.get(key) {
-                    *inline = Inline::PageLink { page_id: page_id.clone() };
-                }
+        Inline::Text { marks, .. } => {
+            let Some(target) = marks.link.as_deref().and_then(|href| links.get(href)) else { return };
+            match target {
+                Target::Entry(key) => match created.pages.get(key) {
+                    Some(page_id) => *inline = Inline::PageLink { page_id: page_id.clone() },
+                    None => marks.link = None,
+                },
+                Target::Attachment(key) => marks.link = created.attachments.get(key).cloned(),
             }
-            Some(Target::Attachment(key)) => {
-                if let Some(url) = created.attachments.get(key) {
-                    *href = url.clone();
-                }
-            }
-            None => {}
-        },
+        }
         _ => {}
     });
+}
+
+/// What stands where an image was whose file did not come across.
+fn not_imported(key: &str) -> Inline {
+    let name = key.rsplit('/').next().unwrap_or(key);
+    Inline::Text { text: format!("Not imported: {name}"), marks: Marks { italic: true, ..Marks::default() } }
 }
 
 fn create_all(
@@ -203,13 +493,35 @@ fn create_all(
     parent_id: Option<&str>,
     incoming: Vec<Incoming>,
     created_so_far: &mut Created,
+    creating: &mut Creating,
 ) -> Result<Vec<Entry>, OpError> {
     let mut entries = Vec::new();
     for incoming in incoming {
         let entry = NewEntry { area_id: area_id.into(), parent_id: parent_id.map(Into::into), title: incoming.title };
         let mut created = tree::create_with_id(core, principal, entry, incoming.kind, incoming.id.as_deref())?.output;
-        for attachment in incoming.attachments {
-            match super::attachments::attach(core, principal, created.id.clone(), &attachment.name, attachment.content) {
+        record::created(core, &created_so_far.import_id, &created.id)?;
+        // A Folder holds neither Attachments nor Tags, which a source such
+        // as Confluence may give one: they are told, and the rest comes in.
+        let (attachments, tags) = if incoming.kind == Kind::Folder {
+            for attachment in incoming.attachments {
+                created_so_far.problems.push(Problem::new(attachment.key, "It belongs to a Folder, which holds no Attachments, so it was left out."));
+            }
+            for tag in incoming.tags {
+                created_so_far.problems.push(Problem::new(incoming.key.clone(), format!("Its Tag \"{tag}\" was left out: a Folder has no Tags.")));
+            }
+            (Vec::new(), Vec::new())
+        } else {
+            (incoming.attachments, incoming.tags)
+        };
+        for attachment in attachments {
+            let content = match read_to_attach(core, &mut creating.archive, &attachment.path) {
+                Ok(content) => content,
+                Err(message) => {
+                    created_so_far.problems.push(Problem::new(attachment.key, message));
+                    continue;
+                }
+            };
+            match super::attachments::attach(core, principal, created.id.clone(), &attachment.name, content) {
                 Ok(attached) => {
                     created_so_far.attachments.insert(attachment.key, attached.output.url);
                 }
@@ -220,15 +532,25 @@ fn create_all(
             }
         }
         if incoming.kind == Kind::Page {
-            created_so_far.pages.insert(incoming.key, created.id.clone());
+            created_so_far.pages.insert(incoming.key.clone(), created.id.clone());
             if !incoming.content.is_empty() {
                 created_so_far.content.push((created.id.clone(), incoming.content, incoming.links));
             }
         }
-        for tag in incoming.tags {
-            super::tags::add_tag(core, principal, super::tags::PageTag { page_id: created.id.clone(), tag })?;
+        for tag in tags {
+            match super::tags::add_tag(core, principal, super::tags::PageTag { page_id: created.id.clone(), tag: tag.clone() }) {
+                Ok(_) => {}
+                // A Tag that is not one, such as a Confluence label too long
+                // for a Tag, is told, and the Page keeps the rest.
+                Err(OpError::InvalidInput(message)) => created_so_far
+                    .problems
+                    .push(Problem::new(incoming.key.clone(), format!("Its Tag \"{tag}\" was left out: {message}"))),
+                Err(error) => return Err(error),
+            }
         }
-        created.children = create_all(core, principal, area_id, Some(&created.id), incoming.children, created_so_far)?;
+        creating.done += 1;
+        (creating.progress)(Step::Creating { done: creating.done, total: creating.total });
+        created.children = create_all(core, principal, area_id, Some(&created.id), incoming.children, created_so_far, creating)?;
         entries.push(created);
     }
     Ok(entries)
@@ -265,7 +587,7 @@ mod tests {
     }
 
     fn import_into(core: &Core, writer: &Principal, area_id: &str, files: &[(&str, &str)]) -> Imported {
-        import(core, writer, ToImport { area_id: area_id.into(), parent_id: None, content: zip_of(files) }).unwrap().output
+        import(core, writer, ToImport { area_id: area_id.into(), parent_id: None, zip: ZipGiven::sent(zip_of(files)) }).unwrap().output
     }
 
     /// The tree of an Area as (title, kind) pairs, indented by depth.
@@ -499,7 +821,7 @@ mod tests {
         let area_id = area(&core, &grace, "Engineering");
         let content = zip_of_bytes(&[("Guides/Broken.md", b"caf\xe9 au lait"), ("Runbook.md", b"Restart it.")]);
 
-        let imported = import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, content }).unwrap().output;
+        let imported = import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content) }).unwrap().output;
 
         assert_eq!(outline(&core, &grace, &area_id), ["Runbook"]);
         let problems: Vec<_> = imported.problems.iter().map(|problem| problem.file.as_str()).collect();
@@ -516,7 +838,7 @@ mod tests {
         let archive = tree::create_folder(&core, &grace, folder).unwrap().output.id;
 
         let content = zip_of(&[("Runbook.md", ""), ("Runbook/Deploy.md", "")]);
-        import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: Some(archive), content }).unwrap();
+        import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: Some(archive), zip: ZipGiven::sent(content) }).unwrap();
 
         assert_eq!(outline(&core, &grace, &area_id), ["Archive (folder)", "  Runbook", "    Deploy"]);
     }
@@ -530,10 +852,10 @@ mod tests {
         crate::ops::testing::give_role(&core, &area_id, &ken, crate::ops::permissions::Role::Read);
 
         let content = zip_of(&[("Runbook.md", "")]);
-        let refused = import(&core, &ken, ToImport { area_id: area_id.clone(), parent_id: None, content: content.clone() }).unwrap_err();
-        let hidden = import(&core, &ken, ToImport { area_id: "made-up".into(), parent_id: None, content }).unwrap_err();
+        let refused = import(&core, &ken, ToImport { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content.clone()) }).unwrap_err();
+        let hidden = import(&core, &ken, ToImport { area_id: "made-up".into(), parent_id: None, zip: ZipGiven::sent(content) }).unwrap_err();
 
-        let empty = import(&core, &ken, ToImport { area_id: area_id.clone(), parent_id: None, content: zip_of(&[]) }).unwrap_err();
+        let empty = import(&core, &ken, ToImport { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(zip_of(&[])) }).unwrap_err();
 
         assert_eq!(refused.kind(), "not_permitted");
         assert_eq!(empty.kind(), "not_permitted");
@@ -569,7 +891,7 @@ mod tests {
         let exported = |area_id: &str| export(&core, &grace, ToExport { area_id: area_id.into(), entry_id: None }).unwrap().output.content;
         let copy = area(&core, &grace, "Copy");
 
-        let imported = import(&core, &grace, ToImport { area_id: copy.clone(), parent_id: None, content: exported(&original) }).unwrap().output;
+        let imported = import(&core, &grace, ToImport { area_id: copy.clone(), parent_id: None, zip: ZipGiven::sent(exported(&original)) }).unwrap().output;
 
         assert!(imported.problems.is_empty());
         assert_eq!(outline(&core, &grace, &copy), outline(&core, &grace, &original));
@@ -605,7 +927,7 @@ mod tests {
         let area_id = area(&core, &grace, "Engineering");
         let content = zip_of_bytes(&[("Runbook.md", b"Hi"), ("__MACOSX/._Runbook.md", b"\x00\x05\x16\x07\xff"), (".DS_Store", b"\x00\xff")]);
 
-        let imported = import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, content }).unwrap().output;
+        let imported = import(&core, &grace, ToImport { area_id: area_id.clone(), parent_id: None, zip: ZipGiven::sent(content) }).unwrap().output;
 
         assert_eq!(outline(&core, &grace, &area_id), ["Runbook"]);
         assert!(imported.problems.is_empty());
@@ -629,6 +951,37 @@ mod tests {
         }
     }
 
+    /// An Attachment whose file lies in the Bundle's ZIP under its key.
+    fn attachment(key: &str, name: &str) -> IncomingAttachment {
+        IncomingAttachment { key: key.into(), name: name.into(), path: key.into() }
+    }
+
+    /// A Bundle of these entries, read from a ZIP holding these files.
+    fn bundle(entries: Vec<Incoming>, files: &[(&str, &[u8])]) -> Bundle {
+        let archive = open_zip(&fresh(), &Principal::Anonymous, ZipGiven::sent(zip_of_bytes(files)), uploads::For::Importing).unwrap();
+        Bundle { source: "a test".into(), entries, problems: Vec::new(), archive }
+    }
+
+    #[test]
+    fn an_import_leaves_no_page_it_wrote_in_memory_but_one_someone_has_open() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let open = crate::ops::tree::create_page(&core, &grace, NewEntry { area_id: area_id.clone(), parent_id: None, title: "Open".into() }.into()).unwrap().output.id;
+        let held = core.live().open(&open).unwrap();
+
+        let imported = import_into(&core, &grace, &area_id, &[("Runbook.md", "Restart it.\n"), ("Guide.md", "Read [the runbook](Runbook.md).\n")]);
+
+        // Only the Page someone holds open is still in memory.
+        assert_eq!(core.live().open_count(), 1);
+        drop(held);
+        // What was written is saved, so it reads the same once opened again.
+        let guide = imported.entries.iter().find(|entry| entry.title == "Guide").unwrap();
+        let runbook = imported.entries.iter().find(|entry| entry.title == "Runbook").unwrap();
+        assert_eq!(markdown_of(&core, &grace, &guide.id), format!("Read [Runbook](turtle:{}).\n", runbook.id));
+        assert_eq!(markdown_of(&core, &grace, &runbook.id), "Restart it.\n");
+    }
+
     #[test]
     fn a_bundle_links_by_the_keys_its_source_gives_even_to_what_comes_later() {
         let core = fresh();
@@ -639,14 +992,60 @@ mod tests {
             ("chart.png", Target::Attachment("attachment:9".into())),
         ]);
         let mut later = page("page:2", "Later", "", &[]);
-        later.attachments.push(IncomingAttachment { key: "attachment:9".into(), name: "chart.png".into(), content: b"a chart".to_vec() });
+        later.attachments.push(attachment("attachment:9", "chart.png"));
         home.children.push(later);
 
-        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![home], problems: Vec::new() }).unwrap().output;
+        let imported = write_bundle(&core, &grace, &area_id, None, bundle(vec![home], &[("attachment:9", b"a chart")]), "test-import", &|_| {}).unwrap().imported;
 
         let later = &imported.entries[0].children[0].id;
         let chart = &attachments_of(&core, &grace, later)[0].2;
         assert_eq!(markdown_of(&core, &grace, &imported.entries[0].id), format!("See [Later](turtle:{later}) and ![chart](<{chart}>).\n"));
+    }
+
+    #[test]
+    fn a_folder_holds_no_attachments_or_tags_so_they_are_told_and_the_rest_comes_in() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let mut guides = page("Guides", "Guides", "", &[]);
+        guides.kind = Kind::Folder;
+        guides.tags.push("handbook".into());
+        guides.attachments.push(attachment("Guides/logo.png", "logo.png"));
+        guides.children.push(page("page:2", "Set up", "Install it.", &[]));
+
+        let imported = write_bundle(&core, &grace, &area_id, None, bundle(vec![guides], &[("Guides/logo.png", b"a logo")]), "test-import", &|_| {}).unwrap().imported;
+
+        assert_eq!(outline(&core, &grace, &area_id), ["Guides (folder)", "  Set up"]);
+        let problems: Vec<_> = imported.problems.iter().map(|problem| (problem.file.as_str(), problem.message.as_str())).collect();
+        assert_eq!(
+            problems,
+            [
+                ("Guides/logo.png", "It belongs to a Folder, which holds no Attachments, so it was left out."),
+                ("Guides", "Its Tag \"handbook\" was left out: a Folder has no Tags."),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_links_to_something_that_did_not_come_across_keeps_its_text_but_not_the_address() {
+        let mut core = fresh();
+        core.core.set_attachment_limit(4);
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let mut runbook = page("page:1", "Runbook", "![Flow](flow.png) See [the log](log.bin) and [Guides](folder:2).", &[
+            ("flow.png", Target::Attachment("Runbook/flow.png".into())),
+            ("log.bin", Target::Attachment("Runbook/log.bin".into())),
+            ("folder:2", Target::Entry("folder:2".into())),
+        ]);
+        for name in ["flow.png", "log.bin"] {
+            runbook.attachments.push(attachment(&format!("Runbook/{name}"), name));
+        }
+        let mut guides = page("folder:2", "Guides", "", &[]);
+        guides.kind = Kind::Folder;
+
+        let imported = write_bundle(&core, &grace, &area_id, None, bundle(vec![runbook, guides], &[("Runbook/flow.png", b"too large"), ("Runbook/log.bin", b"too large")]), "test-import", &|_| {}).unwrap().imported;
+
+        assert_eq!(markdown_of(&core, &grace, &imported.entries[0].id), "*Not imported: flow.png* See the log and Guides.\n");
     }
 
     #[test]
@@ -656,10 +1055,10 @@ mod tests {
         let grace = member(&core, "Grace", false);
         let area_id = area(&core, &grace, "Engineering");
         let mut runbook = page("Runbook.md", "Runbook", "Restart it.", &[]);
-        runbook.attachments.push(IncomingAttachment { key: "Runbook/_attachments/big.bin".into(), name: "big.bin".into(), content: b"too large".to_vec() });
-        runbook.attachments.push(IncomingAttachment { key: "Runbook/_attachments/ok.txt".into(), name: "ok.txt".into(), content: b"ok".to_vec() });
+        runbook.attachments.push(attachment("Runbook/_attachments/big.bin", "big.bin"));
+        runbook.attachments.push(attachment("Runbook/_attachments/ok.txt", "ok.txt"));
 
-        let imported = write_bundle(&core, &grace, &area_id, None, Bundle { entries: vec![runbook], problems: Vec::new() }).unwrap().output;
+        let imported = write_bundle(&core, &grace, &area_id, None, bundle(vec![runbook], &[("Runbook/_attachments/big.bin", b"too large"), ("Runbook/_attachments/ok.txt", b"ok")]), "test-import", &|_| {}).unwrap().imported;
 
         let runbook = &imported.entries[0].id;
         assert_eq!(markdown_of(&core, &grace, runbook), "Restart it.\n");
@@ -667,6 +1066,50 @@ mod tests {
         assert_eq!(names, ["ok.txt"]);
         assert_eq!(imported.problems.len(), 1);
         assert_eq!(imported.problems[0].file, "Runbook/_attachments/big.bin");
-        assert!(imported.problems[0].message.starts_with("This file is larger than"), "{}", imported.problems[0].message);
+        assert_eq!(
+            imported.problems[0].message,
+            "It is 9 bytes, larger than 4 bytes, the most this Turtle accepts for one file, so it was left out. Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB."
+        );
+    }
+
+    #[test]
+    fn a_file_too_large_to_attach_is_told_by_its_size_rounded_up_and_the_setting_that_raises_the_limit() {
+        let mut core = fresh();
+        core.core.set_attachment_limit(25 * 1024 * 1024);
+
+        let message = too_large_to_attach(&core, 25 * 1024 * 1024 + 1).unwrap();
+
+        assert!(message.starts_with("It is 25.1 MB, larger than 25 MB,"), "{message}");
+        assert!(message.ends_with("raise that limit with TURTLE_MAX_ATTACHMENT_MB."), "{message}");
+        assert_eq!(too_large_to_attach(&core, 25 * 1024 * 1024), None);
+    }
+
+    #[test]
+    fn writing_a_bundle_tells_how_many_pages_and_folders_are_created_and_then_how_many_contents_are_written() {
+        let core = fresh();
+        let grace = member(&core, "Grace", false);
+        let area_id = area(&core, &grace, "Engineering");
+        let mut runbook = page("Runbook.md", "Runbook", "Restart it.", &[]);
+        runbook.children.push(page("Runbook/Deploy.md", "Deploy", "Ship it.", &[]));
+        let steps = std::cell::RefCell::new(Vec::new());
+
+        write_bundle(&core, &grace, &area_id, None, bundle(vec![runbook, page("Empty.md", "Empty", "", &[])], &[]), "test-import", &|step| {
+            steps.borrow_mut().push(step)
+        })
+        .unwrap();
+
+        assert_eq!(
+            steps.into_inner(),
+            [
+                Step::Creating { done: 0, total: 3 },
+                Step::Creating { done: 1, total: 3 },
+                Step::Creating { done: 2, total: 3 },
+                Step::Creating { done: 3, total: 3 },
+                // The empty Page has no content to write.
+                Step::Writing { done: 0, total: 2 },
+                Step::Writing { done: 1, total: 2 },
+                Step::Writing { done: 2, total: 2 },
+            ]
+        );
     }
 }

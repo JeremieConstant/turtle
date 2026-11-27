@@ -10,7 +10,8 @@ export function fileSize(bytes: number): string {
   const KB = 1024
   const MB = KB * 1024
   if (bytes < KB) return bytes === 1 ? '1 byte' : `${bytes} bytes`
-  const [amount, unit] = bytes < MB ? [bytes / KB, 'KB'] : [bytes / MB, 'MB']
+  const GB = MB * 1024
+  const [amount, unit] = bytes < MB ? [bytes / KB, 'KB'] : bytes < GB ? [bytes / MB, 'MB'] : [bytes / GB, 'GB']
   return `${Number(amount.toFixed(1))} ${unit}`
 }
 

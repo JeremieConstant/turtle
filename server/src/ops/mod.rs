@@ -42,7 +42,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 use crate::public_url::PublicUrl;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Tells the time in seconds since the Unix epoch.
@@ -66,6 +66,8 @@ pub struct Core {
     /// content. Apart from the Attachments, whose clean-up would remove them.
     fonts: std::path::PathBuf,
     profile_pictures: std::path::PathBuf,
+    /// Where a ZIP uploaded for an import lies until it is imported.
+    uploads_dir: std::path::PathBuf,
     /// The largest file, in bytes, that can be attached.
     attachment_limit: u64,
     import_limit: u64,
@@ -89,6 +91,13 @@ pub struct Core {
     demo_warning: std::sync::Once,
     /// Recent failed attempts at signing in and at using single-use links.
     attempts: attempts::Attempts,
+    /// The imports running, and those that ended a short while ago.
+    imports: import::Imports,
+    /// The ZIPs uploaded for an import and not imported yet.
+    uploads: Arc<import::Uploads>,
+    /// The core itself, once it is shared, for work that goes on after an
+    /// operation has answered.
+    me: OnceLock<Weak<Core>>,
 }
 
 impl Core {
@@ -105,6 +114,9 @@ impl Core {
     }
 
     fn open_with_clock(db_path: &Path, clock: Clock) -> anyhow::Result<Core> {
+        // An upload does not outlast Turtle stopping.
+        let uploads_dir = db_path.with_file_name("uploads");
+        import::remove_uploads_left_behind(&uploads_dir);
         // The open Pages get a connection of their own, so live editing does
         // not wait behind operations.
         Ok(Core {
@@ -115,6 +127,7 @@ impl Core {
             pdf_logos: db_path.with_file_name("pdf-logos"),
             fonts: db_path.with_file_name("fonts"),
             profile_pictures: db_path.with_file_name("profile-pictures"),
+            uploads_dir,
             attachment_limit: attachments::DEFAULT_ATTACHMENT_LIMIT,
             import_limit: import::DEFAULT_IMPORT_LIMIT,
             public_url: None,
@@ -124,6 +137,9 @@ impl Core {
             demo: None,
             demo_warning: std::sync::Once::new(),
             attempts: attempts::Attempts::default(),
+            imports: import::Imports::default(),
+            uploads: Arc::default(),
+            me: OnceLock::new(),
             clock,
             access: tokio::sync::watch::Sender::new(0),
         })
@@ -245,6 +261,16 @@ impl Core {
         self.search.page_changed(page_id);
     }
 
+    /// Saves a Page that was just written and lets go of it, unless someone
+    /// has it open: what writes many Pages at once, as an import does, would
+    /// otherwise leave every one of them in memory.
+    pub(crate) fn let_go_of_page(&self, page_id: &str) -> anyhow::Result<()> {
+        if self.live.let_go(page_id)? {
+            self.page_changed(page_id);
+        }
+        Ok(())
+    }
+
     /// The Pages open in memory.
     pub fn live(&self) -> &crate::live::Pages {
         &self.live
@@ -296,6 +322,56 @@ impl Core {
     pub fn now(&self) -> i64 {
         (self.clock)()
     }
+
+    /// The core as Turtle runs it, shared by everything that serves
+    /// requests, which lets operations leave work to go on after they answer.
+    pub fn shared(self) -> Arc<Core> {
+        let core = Arc::new(self);
+        let _ = core.me.set(Arc::downgrade(&core));
+        core
+    }
+
+    /// Does `work` on a thread of its own, after the operation calling this
+    /// has answered. A core that is not shared, as in most tests, does it at
+    /// once instead, so the operation answers once it is done.
+    pub(crate) fn in_background(&self, work: impl FnOnce(&Core) + Send + 'static) {
+        match self.me.get().and_then(Weak::upgrade) {
+            Some(core) => {
+                std::thread::spawn(move || work(&core));
+            }
+            None => work(self),
+        }
+    }
+
+    /// The imports running, and those that ended a short while ago.
+    pub(crate) fn imports(&self) -> &import::Imports {
+        &self.imports
+    }
+
+    /// Where a ZIP uploaded for an import lies until it is imported.
+    pub(crate) fn uploads_dir(&self) -> &Path {
+        &self.uploads_dir
+    }
+
+    /// The ZIPs uploaded for an import and not imported yet.
+    pub(crate) fn uploads(&self) -> &import::Uploads {
+        &self.uploads
+    }
+
+    /// The same, for an upload to hold while it arrives.
+    pub(crate) fn uploads_shared(&self) -> Arc<import::Uploads> {
+        self.uploads.clone()
+    }
+}
+
+/// Fails for someone acting through a read-only Token: the one rule for
+/// every operation that changes something, and for what changes something
+/// without being an operation, such as an upload.
+pub(crate) fn may_change(principal: &Principal) -> Result<(), OpError> {
+    if principal.token().is_some_and(|token| token.read_only) {
+        return Err(OpError::NotPermitted("This Token is read-only, so it cannot change anything.".into()));
+    }
+    Ok(())
 }
 
 /// Who is acting.
@@ -505,19 +581,15 @@ impl Catalogue {
             .iter()
             .find(|operation| operation.name == name)
             .ok_or_else(|| OpError::NotFound(format!("There is no operation named {name}.")))?;
-        if let Some(token) = principal.token() {
-            // Browser-only operations include managing Tokens, so a Token can
-            // never make another that reaches further.
-            if operation.browser_only {
-                return Err(OpError::NotPermitted(
-                    "This can only be done signed in to Turtle in a browser, not with a Token.".into(),
-                ));
-            }
-            if token.read_only && operation.changes {
-                return Err(OpError::NotPermitted(
-                    "This Token is read-only, so it cannot change anything.".into(),
-                ));
-            }
+        // Browser-only operations include managing Tokens, so a Token can
+        // never make another that reaches further.
+        if operation.browser_only && principal.token().is_some() {
+            return Err(OpError::NotPermitted(
+                "This can only be done signed in to Turtle in a browser, not with a Token.".into(),
+            ));
+        }
+        if operation.changes {
+            may_change(principal)?;
         }
         (operation.run)(core, principal, client, input)
     }
@@ -623,6 +695,26 @@ pub(crate) mod testing {
     }
 
     impl std::ops::Deref for TestCore {
+        type Target = Core;
+        fn deref(&self) -> &Core {
+            &self.core
+        }
+    }
+
+    /// A test core shared as Turtle shares it, so work an operation leaves
+    /// to go on after it answers runs on a thread of its own.
+    pub struct SharedTestCore {
+        pub core: Arc<Core>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl TestCore {
+        pub fn shared(self) -> SharedTestCore {
+            SharedTestCore { core: self.core.shared(), _dir: self._dir }
+        }
+    }
+
+    impl std::ops::Deref for SharedTestCore {
         type Target = Core;
         fn deref(&self) -> &Core {
             &self.core

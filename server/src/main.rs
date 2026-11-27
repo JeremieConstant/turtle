@@ -54,9 +54,16 @@ const SEARCH_INTERVAL: Duration = Duration::from_secs(1);
 /// How often what has been in the Trash for too long is removed.
 const TRASH_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// How often uploads no import has read are looked for, to remove those
+/// kept long enough.
+const UPLOADS_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
 /// Where the data directory is when `TURTLE_DATA` does not say: beside
 /// wherever Turtle was started.
 const DEFAULT_DATA_DIR: &str = "turtle-data";
+
+/// The port Turtle listens on when `TURTLE_PORT` does not say.
+const DEFAULT_PORT: u16 = 4100;
 
 struct App {
     /// Decides who may open which Page, and holds the open Pages.
@@ -92,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|_| std::env::var("PORT"))
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(4100);
+        .unwrap_or(DEFAULT_PORT);
     // Loopback unless the operator says otherwise: a container has to listen
     // on every address to be reached from outside it.
     let host: IpAddr = match std::env::var("TURTLE_HOST") {
@@ -105,9 +112,8 @@ async fn main() -> anyhow::Result<()> {
         _ => Ipv4Addr::LOCALHOST.into(),
     };
 
-    // The largest file that can be attached, and the largest ZIP that can be imported.
+    // The largest file that can be attached.
     let attachment_limit = megabytes("TURTLE_MAX_ATTACHMENT_MB", ops::attachments::DEFAULT_ATTACHMENT_LIMIT)?;
-    let import_limit = megabytes("TURTLE_MAX_IMPORT_MB", ops::import::DEFAULT_IMPORT_LIMIT)?;
 
     // Where people and AI clients reach this Turtle from outside, if it is
     // known; only then is OAuth offered (ADR-0010).
@@ -129,6 +135,12 @@ async fn main() -> anyhow::Result<()> {
     let demo_reset_hours = std::env::var("TURTLE_DEMO_RESET_HOURS").ok();
     let demo = demo::from_settings(demo_email.as_deref(), demo_password.as_deref(), demo_reset_hours.as_deref())?;
 
+    // The largest ZIP that can be imported. Anyone can sign in to a Demo and
+    // upload one that large to its disk, so a Demo takes less unless its
+    // operator says otherwise.
+    let default_import_limit = if demo.is_some() { ops::import::DEMO_IMPORT_LIMIT } else { ops::import::DEFAULT_IMPORT_LIMIT };
+    let import_limit = megabytes("TURTLE_MAX_IMPORT_MB", default_import_limit)?;
+
     // Behind a reverse proxy every request comes from the proxy, so failed
     // attempts are counted by the client address the proxy passes on in
     // this header. Without it the header is not trusted, as anyone can send it.
@@ -147,7 +159,7 @@ async fn main() -> anyhow::Result<()> {
     core.set_public_url(public_url);
     core.set_mailer(mailer.map(|smtp| Arc::new(smtp) as Arc<dyn mail::Mailer>));
     core.set_demo(demo);
-    let core = Arc::new(core);
+    let core = core.shared();
     // Whether Turtle looks reachable only from its intranet may take a name
     // lookup; it is found out now, off the async workers, so the Connect AI
     // page need not wait for it.
@@ -212,6 +224,19 @@ async fn main() -> anyhow::Result<()> {
                 Ok(Ok(_)) => {}
                 Ok(Err(error)) => eprintln!("emptying the Trash failed: {error:#}"),
                 Err(error) => eprintln!("emptying the Trash panicked: {error}"),
+            }
+        }
+    });
+
+    // An upload no import has read goes after an hour.
+    let uploads = core.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(UPLOADS_INTERVAL);
+        loop {
+            tick.tick().await;
+            let core = uploads.clone();
+            if let Err(error) = tokio::task::spawn_blocking(move || ops::import::forget_old_uploads(&core)).await {
+                eprintln!("removing old uploads panicked: {error}");
             }
         }
     });
@@ -726,6 +751,39 @@ fn megabytes(name: &str, default: u64) -> anyhow::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Default column of the README's table of settings, by setting.
+    fn defaults_in_the_readme() -> std::collections::HashMap<String, String> {
+        let readme = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../README.md")).unwrap();
+        readme
+            .lines()
+            .filter_map(|line| {
+                let mut cells = line.strip_prefix("| `")?.splitn(3, " | ");
+                let setting = cells.next()?.strip_suffix('`')?;
+                Some((setting.to_string(), cells.next()?.to_string()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_readme_tells_the_defaults_turtle_starts_with() {
+        let mb = |bytes: u64| bytes / (1024 * 1024);
+        let expected = [
+            ("TURTLE_DATA", format!("`{DEFAULT_DATA_DIR}` in the directory Turtle is started from")),
+            ("TURTLE_HOST", format!("`{}`", Ipv4Addr::LOCALHOST)),
+            ("TURTLE_PORT", format!("`{DEFAULT_PORT}`")),
+            ("TURTLE_MAX_ATTACHMENT_MB", format!("`{}`", mb(ops::attachments::DEFAULT_ATTACHMENT_LIMIT))),
+            (
+                "TURTLE_MAX_IMPORT_MB",
+                format!("`{}`, `{}` for a demo", mb(ops::import::DEFAULT_IMPORT_LIMIT), mb(ops::import::DEMO_IMPORT_LIMIT)),
+            ),
+        ];
+        let told = defaults_in_the_readme();
+
+        for (setting, default) in expected {
+            assert_eq!(told.get(setting), Some(&default), "the README's default for {setting}");
+        }
+    }
 
     #[test]
     fn an_editor_that_drops_the_connection_has_gone_away_but_a_bad_update_has_not() {

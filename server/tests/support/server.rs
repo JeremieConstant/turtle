@@ -115,6 +115,11 @@ impl TestServer {
         TestServer::start_with(None, Settings { demo, ..Settings::default() }).await
     }
 
+    /// Starts a server with these demo settings and `TURTLE_MAX_IMPORT_MB`.
+    pub async fn start_as_demo_with_import_limit(demo: DemoEnv, import_mb: u32) -> TestServer {
+        TestServer::start_with(None, Settings { demo, import_limit_mb: Some(import_mb), ..Settings::default() }).await
+    }
+
     /// Starts a server with these demo settings, expecting it to refuse to
     /// start, and returns what it wrote to its standard error.
     pub async fn refuses_to_start_as_demo(demo: DemoEnv) -> String {
@@ -449,6 +454,14 @@ impl Member {
             &input.to_string(),
         )
         .await;
+        (response.status, response.body)
+    }
+
+    /// Uploads a file ahead of an import, saying it is of `kind`, and
+    /// returns the HTTP status and the body.
+    pub async fn upload(&self, kind: &str, file: &[u8]) -> (u16, String) {
+        let headers = [("Content-Type", kind), ("Cookie", self.cookie.as_str())];
+        let response = http::request_with_bytes(self.addr, "POST", "/api/uploads", &headers, file).await;
         (response.status, response.body)
     }
 

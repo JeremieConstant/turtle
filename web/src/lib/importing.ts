@@ -1,12 +1,27 @@
 /*
- * Importing a ZIP of Markdown files, such as an Export, into an Area or
- * beneath an Entry. The file is sent in base64, and what did not come
- * across is told in a toast, file by file.
+ * Importing a ZIP of Markdown files, such as an Export, or a Confluence
+ * space exported as CSV or XML, into an Area or beneath an Entry. A ZIP larger
+ * than this Turtle imports is refused before it is sent. Otherwise it is
+ * uploaded as the file it is, and the import of it started, which then runs
+ * on the server while a toast tells how far the upload and then the import
+ * have got; at the end,
+ * the toast tells what did not come across, and for Confluence leads to the
+ * report Page.
  */
 import { toast } from 'svelte-sonner'
-import { base64Of } from './attachments'
-import { call, type Input } from './ops'
-import { reportFailure } from './toasts'
+import { fileSize } from './attachments'
+import type { Coverage, ImportProgress, Imported } from './operations.gen'
+import { call, OperationError, upload, type Input } from './ops'
+import { router } from './router.svelte'
+import { REPORT_LABEL } from './imports'
+import { pageAddress } from './routes'
+import { session } from './session.svelte'
+
+/** How long to wait between asking how far an import has got, in milliseconds. */
+export const ASKED_EVERY = 1000
+
+/** Where an import goes: the Area, and the Page or Folder to import beneath, if any. */
+type Where = Pick<Input<'start_import'>, 'area_id' | 'parent_id'>
 
 /** Lets the person choose a ZIP; null if they close the picker without one. */
 export function chooseZip(): Promise<File | null> {
@@ -24,24 +39,145 @@ export function chooseZip(): Promise<File | null> {
  * Imports a ZIP where `input` says, `into` naming that place for the toast.
  * Returns whether anything was imported, so the tree is loaded again.
  */
-export async function importFromFile(input: Omit<Input<'import'>, 'content'>, file: File, into: string): Promise<boolean> {
-  let problems
-  try {
-    const content = base64Of(new Uint8Array(await file.arrayBuffer()))
-    ;({ problems } = await call('import', { ...input, content }))
-  } catch (caught) {
-    reportFailure(caught, `${file.name} could not be imported. Try again.`)
-    return false
-  }
+export async function importFromFile(input: Where, file: File, into: string): Promise<boolean> {
+  const ended = await run(file, upload_id => call('start_import', { ...input, upload_id }))
+  if (!ended) return false
+  const { problems } = ended.imported
   if (problems.length === 0) {
-    toast(`Imported ${file.name}`, { description: `Into ${into}` })
+    toast.success(`Imported ${file.name}`, { id: ended.toast, description: `Into ${into}` })
   } else {
-    const files = problems.length === 1 ? 'One file' : `${problems.length} files`
-    toast(`Imported ${file.name}, but ${files} did not come across`, {
+    const files = problems.length === 1 ? 'one file' : `${problems.length} files`
+    toast.warning(`Imported ${file.name}, but ${files} did not come across`, {
+      id: ended.toast,
       description: problems.map(problem => `${problem.file}: ${problem.message}`).join('\n'),
       // Long enough to read the list, which says what to look into.
       duration: 30_000,
     })
   }
   return true
+}
+
+/**
+ * Imports a Confluence space exported as CSV or XML where `input` says, `into`
+ * naming that place. The report on it is a Page beside the import; the
+ * toast tells how much came across and leads there.
+ * Returns whether anything was imported, so the tree is loaded again.
+ */
+export async function importConfluenceFromFile(input: Where, file: File, into: string): Promise<boolean> {
+  const ended = await run(file, upload_id => call('start_import_confluence', { ...input, upload_id }))
+  if (!ended?.coverage) return false
+  const { coverage, imported } = ended
+  const toCheck = coverage.pages - coverage.exact_pages
+  const lines = [
+    `${coverage.exact_percent} % of the content came across exactly, ${coverage.kept_percent} % at least approximately. ` +
+      (toCheck === 0 ? 'Every Page came across exactly.' : `${toCheck} of the ${coverage.pages} Pages are to check.`),
+  ]
+  const files = imported.problems.length
+  const what = toCheck === 0 ? 'them' : 'them and the Pages to check'
+  lines.push(
+    files === 0
+      ? `The report beside the import ${toCheck === 0 ? 'tells more' : 'lists them'}.`
+      : `${files === 1 ? 'One file' : `${files} files`} did not come across. The report beside the import lists ${what}.`,
+  )
+  const report = imported.report_page_id
+  toast.success(`Imported ${coverage.space} into ${into}`, {
+    id: ended.toast,
+    description: lines.join('\n'),
+    duration: 15_000,
+    action: report ? { label: 'Open report', onClick: () => router.navigate(pageAddress(report, REPORT_LABEL)) } : undefined,
+  })
+  return true
+}
+
+/** The attachments a space holds that are larger than this Turtle accepts, in one line; empty if there are none. */
+function tooLargeLine(coverage: Coverage): string {
+  if (coverage.too_large.length === 0) return ''
+  const files = coverage.too_large.map(file => `${file.file} (${fileSize(file.bytes)})`).join(', ')
+  return `Left out as larger than ${fileSize(coverage.attachment_limit_bytes)}, the most this Turtle accepts for one file: ${files}. Whoever runs Turtle can raise that limit with TURTLE_MAX_ATTACHMENT_MB.`
+}
+
+/** The name of the ZIP being uploaded right now, if one is. */
+let uploading: string | null = null
+
+/** An import that is done, with the toast that followed it, to tell the outcome in. */
+type Ended = { toast: string | number; imported: Imported; coverage: Coverage | null }
+
+/**
+ * Uploads `file`, telling what share of it is sent, starts the import of
+ * the upload with `start`, and follows it until it ends, telling how far it
+ * has got in a toast. A ZIP larger than this Turtle imports is not sent. A
+ * failure is told in the toast, and then there is nothing.
+ */
+async function run(file: File, start: (upload_id: string) => Promise<ImportProgress>): Promise<Ended | null> {
+  // Turtle takes one ZIP of a person at a time, and refusing a second one
+  // while it is being sent would show as a broken connection.
+  if (uploading) {
+    toast.error(`${uploading} is still uploading. Wait until it is done, then import ${file.name}.`)
+    return null
+  }
+  const limit = session.limits?.import_bytes
+  if (limit !== undefined && file.size > limit) {
+    toast.error(
+      `${file.name} is ${fileSize(file.size)}, larger than ${fileSize(limit)}, the most this Turtle imports at once. Import it in parts, or ask whoever runs Turtle to raise the limit with TURTLE_MAX_IMPORT_MB.`,
+    )
+    return null
+  }
+  const title = `Importing ${file.name}`
+  const id = toast.loading(title, { description: `Uploading: 0 % of ${fileSize(file.size)}` })
+  let progress: ImportProgress
+  try {
+    uploading = file.name
+    const uploaded = await upload(file, share => {
+      toast.loading(title, { id, description: `Uploading: ${Math.floor(share * 100)} % of ${fileSize(file.size)}` })
+    }).finally(() => (uploading = null))
+    toast.loading(title, { id, description: 'Reading the ZIP…' })
+    progress = await start(uploaded.upload_id)
+  } catch (caught) {
+    toast.error(caught instanceof OperationError ? caught.message : `${file.name} could not be imported. Try again.`, { id })
+    return null
+  }
+  /** Whether it got as far as creating Pages and Folders, which a failure keeps. */
+  let creating = false
+  while (progress.stage !== 'done' && progress.stage !== 'failed') {
+    creating ||= progress.stage === 'creating' || progress.stage === 'writing'
+    toast.loading(title, { id, description: stageOf(progress) })
+    await new Promise(resolve => setTimeout(resolve, ASKED_EVERY))
+    try {
+      progress = await call('get_import_progress', { import_id: progress.import_id })
+    } catch {
+      // The import goes on without anyone asking.
+      toast.error(`Turtle could not be asked how far the import of ${file.name} has got. It may still be running: look where it goes in a while.`, {
+        id,
+      })
+      return null
+    }
+  }
+  if (progress.stage === 'failed' || !progress.imported) {
+    const failed = progress.error ?? `${file.name} could not be imported. Try again.`
+    // What it created before it failed is kept, and can be undone.
+    const kept = creating ? ' What it created before is kept; to undo it, choose Imports in the menu of the Area.' : ''
+    toast.error(failed + kept, { id })
+    return null
+  }
+  return { toast: id, imported: progress.imported, coverage: progress.coverage ?? null }
+}
+
+/** How far a running import has got, as the toast tells it. */
+export function stageOf(progress: ImportProgress): string {
+  const lines = []
+  switch (progress.stage) {
+    case 'reading':
+      lines.push('Reading the ZIP…')
+      break
+    case 'creating':
+      lines.push(`Creating Pages and Folders: ${progress.done} of ${progress.total}`)
+      break
+    case 'writing':
+      lines.push(`Writing the Pages' content: ${progress.done} of ${progress.total}`)
+      break
+  }
+  // What will not come across is told as soon as it is known.
+  const tooLarge = progress.coverage ? tooLargeLine(progress.coverage) : ''
+  if (tooLarge) lines.push(tooLarge)
+  return lines.join('\n')
 }
